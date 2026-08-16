@@ -10,7 +10,7 @@ import java.util.List;
 
 public class Sprites {
 
-    // Turns the magenta (#FF00FF) chroma background into real transparency.
+    // Chroma key: now also removes SHADOWED/dark magenta (halo + foot blob fix)
     public static Bitmap chromaKey(Bitmap src) {
         Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
         int w = out.getWidth(), h = out.getHeight();
@@ -19,13 +19,13 @@ public class Sprites {
         for (int i = 0; i < px.length; i++) {
             int p = px[i];
             int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
-            if (r > 170 && b > 170 && g < 150) px[i] = 0x00000000;
+            if (r > 120 && b > 120 && g < 110 && Math.abs(r - b) < 70) px[i] = 0x00000000;
         }
         out.setPixels(px, 0, w, 0, 0, w, h);
         return out;
     }
 
-    // Cuts a sheet into frames (row-major). margin trims black separator lines.
+    // Cuts a sheet into frames (row-major). margin trims separator/border lines.
     public static List<Bitmap> cutSheet(Context ctx, String assetPath,
                                         int rows, int cols, int margin) {
         List<Bitmap> frames = new ArrayList<>();
