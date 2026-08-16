@@ -26,11 +26,10 @@ public class Enemy {
         attackT = -1; struck = false;
     }
 
-    public void turnUpdate(float dt, float px, float py) {
+    public void turnUpdate(float dt, float px, float py, boolean adjacent) {
         animT += dt;
 
         float dx = px - x, dy = py - y;
-        float dist = (float) Math.hypot(dx, dy);
 
         switch (act) {
             case 0:
@@ -56,7 +55,7 @@ public class Enemy {
                 floater.moving = false;
                 if (!acted) {
                     if (attackT < 0) {
-                        if (dist < 140) attackT = 0;
+                        if (adjacent) attackT = 0;
                         else acted = true;
                     } else {
                         attackT += dt;
