@@ -10,7 +10,6 @@ import java.util.List;
 
 public class Sprites {
 
-    // Auto-detects sheet background (green OR magenta) from the corner pixel.
     public static Bitmap chromaKey(Bitmap src) {
         Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
         int w = out.getWidth(), h = out.getHeight();
@@ -29,7 +28,8 @@ public class Sprites {
             if (greenBg) {
                 int ex = g - Math.max(r, b);
                 boolean olive = (g > 90 && b < 90 && g * 2 > r);
-                if (ex > 120) {
+                boolean darkGreen = (g > r && g > b && g > 40 && r < 90 && b < 90);
+                if (ex > 120 || darkGreen) {
                     px[i] = 0;
                 } else if (ex > 60) {
                     int a = (120 - ex) * 255 / 60;
@@ -40,7 +40,6 @@ public class Sprites {
                     px[i] = (90 << 24) | (r << 16) | (m << 8) | b;
                 }
             } else if (magBg) {
-                // tight: only true magenta dies, purple dress shading survives
                 int ex = Math.min(r, b) - g;
                 if (ex > 140) {
                     px[i] = 0;
