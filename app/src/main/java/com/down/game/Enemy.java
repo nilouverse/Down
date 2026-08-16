@@ -34,15 +34,6 @@ public class Enemy {
 
         switch (act) {
             case 0:
-                if (!planned) {
-                    planned = true;
-                    if (dist > 110) {
-                        planMove = true;
-                        float step = Math.min(dist - 90, 300);
-                        tx = x + dx / dist * step;
-                        ty = y + dy / dist * step;
-                    }
-                }
                 if (planMove) {
                     float d = (float) Math.hypot(tx - x, ty - y);
                     if (d > 6) {
@@ -56,7 +47,7 @@ public class Enemy {
                         planMove = false;
                         floater.moving = false;
                     }
-                } else {
+                } else if (planned) {
                     floater.moving = false;
                     if (floater.state == 0) act = 1;
                 }
@@ -65,7 +56,7 @@ public class Enemy {
                 floater.moving = false;
                 if (!acted) {
                     if (attackT < 0) {
-                        if (dist < 130) attackT = 0;
+                        if (dist < 140) attackT = 0;
                         else acted = true;
                     } else {
                         attackT += dt;
