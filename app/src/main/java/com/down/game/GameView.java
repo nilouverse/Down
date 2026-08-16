@@ -89,6 +89,20 @@ public class GameView extends SurfaceView implements Runnable {
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) { W = w; H = h; }
 
+    @Override
+    public void run() {
+        long last = System.nanoTime();
+        while (running) {
+            long now = System.nanoTime();
+            float dt = (now - last) / 1e9f;
+            last = now;
+            if (dt > 0.1f) dt = 0.1f;
+            update(dt);
+            draw();
+            try { Thread.sleep(8); } catch (Exception e) {}
+        }
+    }
+
     // ---------- hex math (pointy-top, squashed for iso look) ----------
     private static float[] hexToWorld(int q, int r) {
         float x = HEX * (float) Math.sqrt(3) * (q + r / 2f);
