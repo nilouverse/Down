@@ -7,7 +7,9 @@ import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RadialGradient;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -40,7 +42,6 @@ public class GameView extends SurfaceView implements Runnable {
     private final ArrayList<Bitmap> roadVar = new ArrayList<>();
     private final ArrayList<Bitmap> grassVar = new ArrayList<>();
 
-    // cached baked ground chunks (static art never redrawn per-tile)
     private final Map<Long, Bitmap> chunks = Collections.synchronizedMap(
             new LinkedHashMap<Long, Bitmap>(16, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<Long, Bitmap> e) {
@@ -53,6 +54,12 @@ public class GameView extends SurfaceView implements Runnable {
     private static class Puff { float x, y, t; }
     private final ArrayList<Puff> puffs = new ArrayList<>();
     private float puffTimer;
+
+    // atmosphere (precomputed, no per-frame allocs)
+    private RadialGradient vig;
+    private final Paint vigPaint = new Paint();
+    private static class Ember { float x, y, s; }
+    private final ArrayList<Ember> embers = new ArrayList<>();
 
     private boolean hexesShown = false;
     private int moveLeft = 3;
@@ -76,7 +83,6 @@ public class GameView extends SurfaceView implements Runnable {
     private static class Dmg { float x, y, t; int val; }
     private final ArrayList<Dmg> dmgs = new ArrayList<>();
 
-    // y-sorted drawables = the 3D overlap illusion
     private static class D { float y; int kind; Enemy en; Bitmap pr; float ax, ay; }
     private final ArrayList<D> drawList = new ArrayList<>();
     private static final Comparator<D> BY_Y = new Comparator<D>() {
@@ -141,7 +147,20 @@ public class GameView extends SurfaceView implements Runnable {
     public void start() { running = true; loop = new Thread(this); loop.start(); }
     public void stop()  { running = false; try { loop.join(); } catch (Exception e) {} }
 
-    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { W = w; H = h; }
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+        W = w; H = h;
+        vig = new RadialGradient(W / 2f, H / 2f, Math.max(W, H) * 0.75f,
+                0x00000000, 0xB4000000, Shader.TileMode.CLAMP);
+        if (embers.isEmpty()) {
+            for (int i = 0; i < 40; i++) {
+                Ember em = new Ember();
+                em.x = (float) (Math.random() * W);
+                em.y = (float) (Math.random() * H);
+                em.s = 20 + (float) (Math.random() * 60);
+                embers.add(em);
+            }
+        }
+    }
 
     @Override
     public void run() {
@@ -258,7 +277,6 @@ public class GameView extends SurfaceView implements Runnable {
                     c.drawRect(x, y, x + TILE + 1, y + TILE + 1, chunkPaint);
                 }
 
-                // baked ambient occlusion bevel = depth
                 chunkPaint.setColor(0xFF000000);
                 chunkPaint.setAlpha(26);
                 c.drawRect(x, y, x + TILE + 1, y + 10, chunkPaint);
@@ -366,6 +384,12 @@ public class GameView extends SurfaceView implements Runnable {
         camX += (player.x - camX) * k;
         camY += ((player.y - H * 0.28f) - camY) * k;
         runeT += dt;
+
+        for (Ember em : embers) {
+            em.y -= em.s * dt;
+            em.x += (float) Math.sin(em.y * 0.02f) * 12 * dt;
+            if (em.y < -10) { em.y = H + 10; em.x = (float) (Math.random() * W); }
+        }
 
         if (strikeTarget != null && player.isAttacking() && attackType == 1
                 && !playerHitDone && player.attackTime > 0.4f) {
@@ -501,6 +525,19 @@ public class GameView extends SurfaceView implements Runnable {
 
         drawBolts(cv);
         drawDmgs(cv);
+
+        // atmosphere: embers + precomputed vignette
+        paint.setColor(0xFFff7a30);
+        for (Ember em : embers) {
+            paint.setAlpha((int) (40 + em.s));
+            cv.drawCircle(em.x, em.y, 1.5f + em.s / 40f, paint);
+        }
+        paint.setAlpha(255);
+        if (vig != null) {
+            vigPaint.setShader(vig);
+            cv.drawRect(0, 0, W, H, vigPaint);
+        }
+
         drawUI(cv);
 
         if (hurtT > 0) {
@@ -548,7 +585,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // tall props + units, sorted by Y = the 3D overlap illusion
     private void drawSorted(Canvas cv) {
         drawList.clear();
 
