@@ -9,6 +9,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class GameView extends SurfaceView implements Runnable {
@@ -19,28 +20,32 @@ public class GameView extends SurfaceView implements Runnable {
     private final Player player = new Player();
     private float camX, camY;
 
-    private List<Bitmap> idle;    // 2x2 sheet -> 4 frames
-    private List<Bitmap> attack;  // 4x2 sheet -> 8 frames
+    private List<Bitmap> idle;
+    private List<Bitmap> attack;
 
-    private int stickId = -1;
-    private float stickSX, stickSY, stickX, stickY;
-    private float moveX, moveY;
+    // tap-to-move
+    private int movePointer = -1;
+    private float runeX, runeY, runeT = 99;
+
+    // glide mist
+    private static class Puff { float x, y, t; }
+    private final ArrayList<Puff> puffs = new ArrayList<>();
+    private float puffTimer;
 
     private final Paint paint = new Paint();
     private int W, H;
 
     public GameView(Context ctx) {
         super(ctx);
-        idle   = Sprites.cutSheet(ctx, "sprites/idle.png",   2, 2, 6);
-        attack = Sprites.cutSheet(ctx, "sprites/attack.png", 4, 2, 6);
+        idle   = Sprites.cutSheet(ctx, "sprites/idle.png",   2, 2, 14);
+        attack = Sprites.cutSheet(ctx, "sprites/attack.png", 4, 2, 14);
         paint.setFilterBitmap(true);
     }
 
     public void start() { running = true; loop = new Thread(this); loop.start(); }
     public void stop()  { running = false; try { loop.join(); } catch (Exception e) {} }
 
-    @Override
-    protected void onSizeChanged(int w, int h, int ow, int oh) { W = w; H = h; }
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { W = w; H = h; }
 
     @Override
     public void run() {
@@ -57,9 +62,26 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void update(float dt) {
-        player.update(dt, moveX, moveY);
+        player.update(dt);
         camX += (player.x - camX) * Math.min(1, dt * 6);
         camY += (player.y - camY) * Math.min(1, dt * 6);
+        runeT += dt;
+
+        if (player.isMoving() && !player.isAttacking()) {
+            puffTimer += dt;
+            if (puffTimer > 0.09f) {
+                puffTimer = 0;
+                Puff p = new Puff();
+                p.x = player.x + (float) (Math.random() * 36 - 18);
+                p.y = player.y + (float) (Math.random() * 10 - 5);
+                p.t = 0;
+                puffs.add(p);
+            }
+        }
+        for (int i = puffs.size() - 1; i >= 0; i--) {
+            puffs.get(i).t += dt;
+            if (puffs.get(i).t > 0.5f) puffs.remove(i);
+        }
     }
 
     private void draw() {
@@ -72,20 +94,23 @@ public class GameView extends SurfaceView implements Runnable {
         cv.drawColor(0xFF120a18);
 
         drawWorld(cv);
+        drawRune(cv);
+        drawPuffs(cv);
         drawPlayer(cv);
         drawUI(cv);
 
         h.unlockCanvasAndPost(cv);
     }
 
-    // THE "MASSIVE WORLD": infinite procedural tiles, only visible ones drawn
+    private float sx(float wx) { return wx - camX + W / 2f; }
+    private float sy(float wy) { return wy - camY + H / 2f; }
+
     private void drawWorld(Canvas cv) {
         final int TILE = 96;
         int x0 = (int) Math.floor((camX - W / 2f) / TILE) - 1;
         int x1 = (int) Math.ceil ((camX + W / 2f) / TILE) + 1;
         int y0 = (int) Math.floor((camY - H / 2f) / TILE) - 1;
         int y1 = (int) Math.ceil ((camY + H / 2f) / TILE) + 1;
-
         for (int ty = y0; ty <= y1; ty++) {
             for (int tx = x0; tx <= x1; tx++) {
                 int hash = (tx * 73856093 ^ ty * 19349663) & 3;
@@ -97,36 +122,55 @@ public class GameView extends SurfaceView implements Runnable {
                     default: c = 0xFF281d31; break;
                 }
                 paint.setColor(c);
-                float sx = tx * TILE - camX + W / 2f;
-                float sy = ty * TILE - camY + H / 2f;
-                cv.drawRect(sx, sy, sx + TILE + 1, sy + TILE + 1, paint);
+                float x = sx(tx * TILE), y = sy(ty * TILE);
+                cv.drawRect(x, y, x + TILE + 1, y + TILE + 1, paint);
             }
         }
     }
 
+    private void drawRune(Canvas cv) {
+        if (runeT > 0.6f) return;
+        float k = runeT / 0.6f;
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(4);
+        paint.setColor(0xFFff2bd6);
+        paint.setAlpha((int) (255 * (1 - k)));
+        float r = 20 + k * 50;
+        cv.drawOval(new RectF(sx(runeX) - r, sy(runeY) - r / 2f,
+                              sx(runeX) + r, sy(runeY) + r / 2f), paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+    }
+
+    private void drawPuffs(Canvas cv) {
+        for (Puff p : puffs) {
+            float k = p.t / 0.5f;
+            paint.setColor(0xFF6a2f8f);
+            paint.setAlpha((int) (110 * (1 - k)));
+            cv.drawCircle(sx(p.x), sy(p.y) - k * 26, 12 + k * 46, paint);
+        }
+        paint.setAlpha(255);
+    }
+
     private void drawPlayer(Canvas cv) {
         paint.setColor(0x88000000);
-        cv.drawOval(new RectF(W / 2f - 60, H / 2f + 150, W / 2f + 60, H / 2f + 185), paint);
+        cv.drawOval(new RectF(sx(player.x) - 60, sy(player.y) - 20,
+                              sx(player.x) + 60, sy(player.y) + 15), paint);
 
         Bitmap frame = pickFrame();
-
         cv.save();
-        cv.translate(W / 2f, H / 2f + 170);              // feet anchor
+        cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
-        boolean moving = (moveX != 0 || moveY != 0);
+        boolean moving = player.isMoving() && !player.isAttacking();
         float bob = moving ? (float) Math.sin(player.bobTime * 10) * 6
                            : (float) Math.sin(player.bobTime * 2.5f) * 3;
         cv.translate(0, bob);
-
         if (frame != null) {
             float drawH = H * 0.62f;
             float s = drawH / frame.getHeight();
             cv.drawBitmap(frame, null, new RectF(
                     -frame.getWidth() * s / 2f, -frame.getHeight() * s,
                      frame.getWidth() * s / 2f, 0), paint);
-        } else {
-            paint.setColor(0xFFff00ff);                  // placeholder until sheets uploaded
-            cv.drawOval(new RectF(-40, -220, 40, 0), paint);
         }
         cv.restore();
     }
@@ -151,17 +195,13 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setTextAlign(Paint.Align.CENTER);
         cv.drawText("ATK", W - 110, H - 96, paint);
 
-        if (stickId != -1) {
-            paint.setColor(0x44ffffff);
-            cv.drawCircle(stickSX, stickSY, 70, paint);
-            paint.setColor(0x88ffffff);
-            cv.drawCircle(stickX, stickY, 34, paint);
-        }
-
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setColor(0xFFffffff);
         paint.setTextSize(28);
         cv.drawText("D O W N", 24, 48, paint);
+        paint.setTextSize(22);
+        paint.setColor(0x88ffffff);
+        cv.drawText("tap ground to glide", 24, 80, paint);
     }
 
     @Override
@@ -175,26 +215,28 @@ public class GameView extends SurfaceView implements Runnable {
             case MotionEvent.ACTION_POINTER_DOWN:
                 if (x > W - 190 && y > H - 190) {
                     player.startAttack();
-                } else if (stickId == -1) {
-                    stickId = pid; stickSX = x; stickSY = y; stickX = x; stickY = y;
+                } else if (movePointer == -1) {
+                    movePointer = pid;
+                    tap(x, y);
                 }
                 break;
             case MotionEvent.ACTION_MOVE:
-                for (int i = 0; i < e.getPointerCount(); i++) {
-                    if (e.getPointerId(i) == stickId) {
-                        float dx = e.getX(i) - stickSX, dy = e.getY(i) - stickSY;
-                        float len = (float) Math.hypot(dx, dy);
-                        if (len > 70) { dx = dx / len * 70; dy = dy / len * 70; }
-                        moveX = dx / 70; moveY = dy / 70;
-                    }
-                }
+                for (int i = 0; i < e.getPointerCount(); i++)
+                    if (e.getPointerId(i) == movePointer) tap(e.getX(i), e.getY(i));
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP:
             case MotionEvent.ACTION_CANCEL:
-                if (pid == stickId) { stickId = -1; moveX = 0; moveY = 0; }
+                if (pid == movePointer) movePointer = -1;
                 break;
         }
         return true;
+    }
+
+    private void tap(float x, float y) {
+        runeX = camX + x - W / 2f;
+        runeY = camY + y - H / 2f;
+        runeT = 0;
+        player.setTarget(runeX, runeY);
     }
 }
