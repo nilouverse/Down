@@ -40,7 +40,7 @@ public class GameView extends SurfaceView implements Runnable {
     private final ArrayList<Bitmap> roadVar = new ArrayList<>();
     private final ArrayList<Bitmap> grassVar = new ArrayList<>();
 
-    // cached baked ground chunks (the D&D trick: static art never redrawn per-tile)
+    // cached baked ground chunks (static art never redrawn per-tile)
     private final Map<Long, Bitmap> chunks = Collections.synchronizedMap(
             new LinkedHashMap<Long, Bitmap>(16, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<Long, Bitmap> e) {
@@ -708,6 +708,18 @@ public class GameView extends SurfaceView implements Runnable {
         }
         if (!glide.isEmpty()) {
             return glide.get(player.floater.frame(player.bobTime));
+        }
+        return null;
+    }
+
+    private Bitmap pickEnemyFrame(Enemy en) {
+        if (en.attacking() && !eAttack.isEmpty()) {
+            int i = (int) (en.attackT / 0.9f * eAttack.size());
+            if (i >= eAttack.size()) i = eAttack.size() - 1;
+            return eAttack.get(i);
+        }
+        if (!eGlide.isEmpty()) {
+            return eGlide.get(en.floater.frame(en.animT));
         }
         return null;
     }
