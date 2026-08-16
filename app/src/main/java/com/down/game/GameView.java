@@ -20,6 +20,7 @@ public class GameView extends SurfaceView implements Runnable {
     private static final int PH_PLAYER = 0, PH_ENEMY = 1;
     private static final float HEX = 96f, SQUASH = 0.5f;
     private static final int MOVE_HEX = 3;
+    private static final float TILE = 192f;
     private static final float PLAYER_H = 260f, ENEMY_H = 200f;
 
     private Thread loop;
@@ -28,8 +29,10 @@ public class GameView extends SurfaceView implements Runnable {
     private final Player player = new Player();
     private float camX, camY;
 
-    private List<Bitmap> idleF, glide, attack, eGlide, eAttack, props;
-    private final ArrayList<Bitmap> tileVar = new ArrayList<>();   // 4 tiles + mirrors
+    private List<Bitmap> idleF, glide, attack, eGlide, eAttack, props, props2;
+    private final ArrayList<Bitmap> tileVar = new ArrayList<>();
+    private final ArrayList<Bitmap> roadVar = new ArrayList<>();
+    private final ArrayList<Bitmap> grassVar = new ArrayList<>();
 
     private float runeX, runeY, runeT = 99;
 
@@ -45,7 +48,9 @@ public class GameView extends SurfaceView implements Runnable {
     private Enemy targetEnemy = null;
     private Enemy strikeTarget = null;
     private Enemy pendingBolt = null;
-    private static class Bolt { float x, y; Enemy tgt; }
+    private static class Bolt {
+        float x, y, x0, y0, tx, ty, t; Enemy tgt;
+    }
     private final ArrayList<Bolt> bolts = new ArrayList<>();
 
     // turns
@@ -75,14 +80,15 @@ public class GameView extends SurfaceView implements Runnable {
         eGlide  = Sprites.cutSheet(ctx, "sprites/enemy_glide.png",  2, 4, 4);
         eAttack = Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 4, 4);
         props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
+        props2  = Sprites.cutSheet(ctx, "sprites/props2.png",       2, 4, 4);
 
-        List<Bitmap> tiles = Sprites.cutSheet(ctx, "sprites/tiles.png", 2, 2, 10);
-        for (Bitmap t : tiles) {
-            tileVar.add(t);
-            Matrix m = new Matrix();
-            m.preScale(-1, 1);
-            m.postTranslate(t.getWidth(), 0);
-            tileVar.add(Bitmap.createBitmap(t, 0, 0, t.getWidth(), t.getHeight(), m, false));
+        addMirrored(tileVar, Sprites.cutSheet(ctx, "sprites/tiles.png",  2, 2, 10));
+        List<Bitmap> t2 = Sprites.cutSheet(ctx, "sprites/tiles2.png", 2, 2, 10);
+        if (t2.size() >= 4) {
+            List<Bitmap> road = new ArrayList<>(); road.add(t2.get(0)); road.add(t2.get(1));
+            List<Bitmap> grass = new ArrayList<>(); grass.add(t2.get(2)); grass.add(t2.get(3));
+            addMirrored(roadVar, road);
+            addMirrored(grassVar, grass);
         }
 
         paint.setFilterBitmap(true);
@@ -100,6 +106,16 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
+    }
+
+    private void addMirrored(ArrayList<Bitmap> dest, List<Bitmap> src) {
+        for (Bitmap t : src) {
+            dest.add(t);
+            Matrix m = new Matrix();
+            m.preScale(-1, 1);
+            m.postTranslate(t.getWidth(), 0);
+            dest.add(Bitmap.createBitmap(t, 0, 0, t.getWidth(), t.getHeight(), m, false));
+        }
     }
 
     public void start() { running = true; loop = new Thread(this); loop.start(); }
@@ -145,6 +161,42 @@ public class GameView extends SurfaceView implements Runnable {
         return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
     }
 
+    // ---------- terrain ----------
+    private static int terrainAt(int tx, int ty) {   // 0 basalt, 1 road, 2 grass
+        float roadC = 2.2f * (float) Math.sin(tx * 0.12f)
+                    + 1.5f * (float) Math.sin(tx * 0.05f + 1.7f);
+        if (Math.abs(ty - roadC) < 0.9f) return 1;
+        int gh = ((tx >> 1) * 331) ^ ((ty >> 1) * 757);
+        if (((gh >>> 5) % 6) == 0) return 2;
+        return 0;
+    }
+
+    private static boolean isLargeCell(int tx, int ty) {
+        if (terrainAt(tx, ty) == 1) return false;
+        return ((tx * 12347 ^ ty * 98765) & 15) == 0;
+    }
+
+    private static float[] largeAnchor(int tx, int ty) {
+        int h = (tx * 12347 ^ ty * 98765);
+        float ox = ((h >>> 6) & 63) - 32;
+        return new float[] { tx * TILE + TILE / 2f + ox, (ty + 1) * TILE };
+    }
+
+    // tall props block the hex at their base + the hex above
+    private boolean hexBlocked(int q, int r) {
+        float[] w = hexToWorld(q, r);
+        int tx0 = (int) Math.floor(w[0] / TILE), ty0 = (int) Math.floor(w[1] / TILE);
+        for (int ty = ty0 - 1; ty <= ty0 + 1; ty++)
+            for (int tx = tx0 - 1; tx <= tx0 + 1; tx++) {
+                if (!isLargeCell(tx, ty)) continue;
+                float[] a = largeAnchor(tx, ty);
+                int[] h1 = worldToHex(a[0], a[1] - 30);
+                int[] h2 = worldToHex(a[0], a[1] - 30 - HEX);
+                if ((h1[0] == q && h1[1] == r) || (h2[0] == q && h2[1] == r)) return true;
+            }
+        return false;
+    }
+
     private boolean hexOccupied(int q, int r, Enemy self) {
         int[] ph = worldToHex(player.x, player.y);
         if (ph[0] == q && ph[1] == r) return true;
@@ -156,15 +208,19 @@ public class GameView extends SurfaceView implements Runnable {
         return false;
     }
 
+    private boolean hexFree(int q, int r, Enemy self) {
+        return !hexOccupied(q, r, self) && !hexBlocked(q, r);
+    }
+
     // ---------- turns ----------
     private void spawnEnemy() {
-        for (int tries = 0; tries < 8; tries++) {
+        for (int tries = 0; tries < 12; tries++) {
             float a = (float) (Math.random() * Math.PI * 2);
             float x = player.x + (float) Math.cos(a) * HEX * 7;
             float y = player.y + (float) Math.sin(a) * HEX * 7 * SQUASH * 2;
             int[] h = worldToHex(x, y);
+            if (!hexFree(h[0], h[1], null)) continue;
             float[] c = hexToWorld(h[0], h[1]);
-            if (hexOccupied(h[0], h[1], null)) continue;
             Enemy e = new Enemy();
             e.x = c[0]; e.y = c[1];
             enemies.add(e);
@@ -208,7 +264,7 @@ public class GameView extends SurfaceView implements Runnable {
         float[] steps = { HEX * 3.2f, HEX * 1.6f };
         for (float st : steps) {
             int[] th = worldToHex(en.x + dx / d * st, en.y + dy / d * st);
-            if (!hexOccupied(th[0], th[1], en)) {
+            if (hexFree(th[0], th[1], en)) {
                 float[] c = hexToWorld(th[0], th[1]);
                 en.tx = c[0]; en.ty = c[1];
                 en.planMove = true;
@@ -250,11 +306,15 @@ public class GameView extends SurfaceView implements Runnable {
         }
         if (!player.isAttacking()) playerHitDone = false;
 
+        // ranged: deterministic bolt, fixed flight, arc, damage on arrival
         if (pendingBolt != null && player.isAttacking() && attackType == 2
                 && player.attackTime > 0.4f) {
             Bolt b = new Bolt();
-            b.x = player.x + player.facing * 40;
-            b.y = player.y - PLAYER_H * 0.75f;
+            b.x0 = player.x + player.facing * 40;
+            b.y0 = player.y - PLAYER_H * 0.75f;
+            b.tx = pendingBolt.x;
+            b.ty = pendingBolt.y - ENEMY_H * 0.5f;
+            b.x = b.x0; b.y = b.y0; b.t = 0;
             b.tgt = pendingBolt;
             bolts.add(b);
             pendingBolt = null;
@@ -262,19 +322,20 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int i = bolts.size() - 1; i >= 0; i--) {
             Bolt b = bolts.get(i);
-            if (b.tgt.dead) { bolts.remove(i); continue; }
-            float dx = b.tgt.x - b.x, dy = (b.tgt.y - ENEMY_H * 0.5f) - b.y;
-            float d = (float) Math.hypot(dx, dy);
-            if (d < 30) {
-                Enemy en = b.tgt;
-                en.hp -= 12;
-                en.hitFlash = 0.25f;
-                addDmg(en.x, en.y - ENEMY_H - 20, 12);
-                if (en.hp <= 0) en.dead = true;
+            b.t += dt;
+            float kk = b.t / 0.28f;
+            if (kk >= 1f) {
+                if (!b.tgt.dead) {
+                    Enemy en = b.tgt;
+                    en.hp -= 12;
+                    en.hitFlash = 0.25f;
+                    addDmg(en.x, en.y - ENEMY_H - 20, 12);
+                    if (en.hp <= 0) en.dead = true;
+                }
                 bolts.remove(i);
             } else {
-                b.x += dx / d * 900 * dt;
-                b.y += dy / d * 900 * dt;
+                b.x = b.x0 + (b.tx - b.x0) * kk;
+                b.y = b.y0 + (b.ty - b.y0) * kk - (float) Math.sin(kk * Math.PI) * 40;
             }
         }
 
@@ -402,9 +463,7 @@ public class GameView extends SurfaceView implements Runnable {
     private float sx(float wx) { return wx - camX + W / 2f; }
     private float sy(float wy) { return wy - camY + H / 2f; }
 
-    // Layer 1 + 2: base tiles (hashed variant + mirror) and scattered props
     private void drawWorld(Canvas cv) {
-        final int TILE = 96;
         int x0 = (int) Math.floor((camX - W / 2f) / TILE) - 1;
         int x1 = (int) Math.ceil ((camX + W / 2f) / TILE) + 1;
         int y0 = (int) Math.floor((camY - H / 2f) / TILE) - 1;
@@ -414,31 +473,49 @@ public class GameView extends SurfaceView implements Runnable {
                 int hash = (tx * 73856093 ^ ty * 19349663);
                 float x = sx(tx * TILE), y = sy(ty * TILE);
 
-                if (!tileVar.isEmpty()) {
-                    Bitmap t = tileVar.get(((hash & 3) << 1) | ((hash & 4) != 0 ? 1 : 0));
-                    cv.drawBitmap(t, null, new RectF(x, y, x + TILE + 1, y + TILE + 1), paint);
+                int t = terrainAt(tx, ty);
+                List<Bitmap> src = (t == 1) ? roadVar : (t == 2) ? grassVar : tileVar;
+                if (src.isEmpty()) src = tileVar;
+
+                if (!src.isEmpty()) {
+                    Bitmap tile = src.get(((hash & 1) << 1) | (((hash >>> 2) & 1)));
+                    if (tile != null)
+                        cv.drawBitmap(tile, null, new RectF(x, y, x + TILE + 1, y + TILE + 1), paint);
                 } else {
-                    int c;
-                    switch (hash & 3) {
-                        case 0:  c = 0xFF241a2e; break;
-                        case 1:  c = 0xFF2b2036; break;
-                        case 2:  c = 0xFF1d1526; break;
-                        default: c = 0xFF281d31; break;
-                    }
-                    paint.setColor(c);
+                    paint.setColor(0xFF241a2e);
                     cv.drawRect(x, y, x + TILE + 1, y + TILE + 1, paint);
                 }
 
+                // subtle per-cell shade = depth
+                int shade = (hash >>> 8) & 3;
+                if (shade > 0) {
+                    paint.setColor(0xFF000000);
+                    paint.setAlpha(shade * 7);
+                    cv.drawRect(x, y, x + TILE + 1, y + TILE + 1, paint);
+                    paint.setAlpha(255);
+                }
+
+                // small props: basalt only, rare
                 int ph2 = (tx * 92821 ^ ty * 68927);
-                if ((ph2 & 7) == 0 && !props.isEmpty()) {
+                if (t == 0 && !isLargeCell(tx, ty) && ((ph2 >>> 2) & 15) == 0 && !props.isEmpty()) {
                     Bitmap pr = props.get((ph2 >>> 3) % props.size());
-                    float ox = ((ph2 >>> 6) & 63) - 32;
-                    float oy = ((ph2 >>> 12) & 31) - 16;
-                    float s = (TILE * 0.9f) / pr.getHeight();
+                    float ox = ((ph2 >>> 6) & 127) - 64;
+                    float oy = ((ph2 >>> 12) & 63) - 32;
+                    float s = (TILE * 0.45f) / pr.getHeight();
                     float px = x + TILE / 2f + ox, py = y + TILE + oy;
                     cv.drawBitmap(pr, null, new RectF(
                             px - pr.getWidth() * s / 2f, py - pr.getHeight() * s,
                             px + pr.getWidth() * s / 2f, py), paint);
+                }
+
+                // tall props: block hexes
+                if (isLargeCell(tx, ty) && !props2.isEmpty()) {
+                    Bitmap pr = props2.get(((tx * 12347 ^ ty * 98765) >>> 4) % props2.size());
+                    float[] a = largeAnchor(tx, ty);
+                    float s = (TILE * 1.5f) / pr.getHeight();
+                    cv.drawBitmap(pr, null, new RectF(
+                            sx(a[0]) - pr.getWidth() * s / 2f, sy(a[1]) - pr.getHeight() * s,
+                            sx(a[0]) + pr.getWidth() * s / 2f, sy(a[1])), paint);
                 }
             }
         }
@@ -470,7 +547,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // green filled = affordable, empty red outline = spent/blocked
     private void drawMoveFan(Canvas cv) {
         int[] ph = worldToHex(player.x, player.y);
         for (int r = -MOVE_HEX; r <= MOVE_HEX; r++) {
@@ -478,7 +554,7 @@ public class GameView extends SurfaceView implements Runnable {
                 int d = hexDist(ph[0], ph[1], ph[0] + q, ph[1] + r);
                 if (d < 1 || d > MOVE_HEX) continue;
                 float[] c = hexToWorld(ph[0] + q, ph[1] + r);
-                boolean ok = d <= moveLeft && !hexOccupied(ph[0] + q, ph[1] + r, null);
+                boolean ok = d <= moveLeft && hexFree(ph[0] + q, ph[1] + r, null);
                 if (ok) drawHex(cv, sx(c[0]), sy(c[1]), 0x7722cc44, true);
                 else    drawHex(cv, sx(c[0]), sy(c[1]), 0xCCcc2233, false);
             }
@@ -619,7 +695,7 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void drawBolts(Canvas cv) {
         for (Bolt b : bolts) {
-            float dx = b.tgt.x - b.x, dy = (b.tgt.y - ENEMY_H * 0.5f) - b.y;
+            float dx = b.tx - b.x0, dy = b.ty - b.y0;
             float d = (float) Math.hypot(dx, dy);
             if (d < 1) d = 1;
             for (int t = 3; t >= 1; t--) {
@@ -749,11 +825,11 @@ public class GameView extends SurfaceView implements Runnable {
         }
 
         if (hexesShown && moveLeft > 0 && dTap >= 1 && dTap <= moveLeft
-                && !hexOccupied(th[0], th[1], null)) {
+                && hexFree(th[0], th[1], null)) {
             float[] c = hexToWorld(th[0], th[1]);
             player.setTarget(c[0], c[1]);
             moveLeft -= dTap;
-            hexesShown = false;          // fan closes; reopen on her hex
+            hexesShown = false;
             runeX = c[0]; runeY = c[1]; runeT = 0;
         }
         return true;
