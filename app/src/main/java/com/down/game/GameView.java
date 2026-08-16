@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -27,7 +28,8 @@ public class GameView extends SurfaceView implements Runnable {
     private final Player player = new Player();
     private float camX, camY;
 
-    private List<Bitmap> idleF, glide, attack, eGlide, eAttack;
+    private List<Bitmap> idleF, glide, attack, eGlide, eAttack, props;
+    private final ArrayList<Bitmap> tileVar = new ArrayList<>();   // 4 tiles + mirrors
 
     private float runeX, runeY, runeT = 99;
 
@@ -38,11 +40,11 @@ public class GameView extends SurfaceView implements Runnable {
     // hex interaction
     private boolean hexesShown = false;
     private int moveLeft = 3;
-    private int attackRangeShown = 0;      // 0 none, 1 melee, 2 ranged
+    private int attackRangeShown = 0;
     private int attackType = 1;
     private Enemy targetEnemy = null;
-    private Enemy strikeTarget = null;     // melee, hits mid-swing
-    private Enemy pendingBolt = null;      // ranged, ball flies
+    private Enemy strikeTarget = null;
+    private Enemy pendingBolt = null;
     private static class Bolt { float x, y; Enemy tgt; }
     private final ArrayList<Bolt> bolts = new ArrayList<>();
 
@@ -72,6 +74,17 @@ public class GameView extends SurfaceView implements Runnable {
         attack  = Sprites.cutSheet(ctx, "sprites/attack.png",       2, 4, 4);
         eGlide  = Sprites.cutSheet(ctx, "sprites/enemy_glide.png",  2, 4, 4);
         eAttack = Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 4, 4);
+        props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
+
+        List<Bitmap> tiles = Sprites.cutSheet(ctx, "sprites/tiles.png", 2, 2, 10);
+        for (Bitmap t : tiles) {
+            tileVar.add(t);
+            Matrix m = new Matrix();
+            m.preScale(-1, 1);
+            m.postTranslate(t.getWidth(), 0);
+            tileVar.add(Bitmap.createBitmap(t, 0, 0, t.getWidth(), t.getHeight(), m, false));
+        }
+
         paint.setFilterBitmap(true);
         tintPaint.setFilterBitmap(true);
         tintPaint.setColorFilter(new ColorMatrixColorFilter(new float[] {
@@ -224,7 +237,6 @@ public class GameView extends SurfaceView implements Runnable {
         camY += ((player.y - H * 0.28f) - camY) * k;
         runeT += dt;
 
-        // melee: connects mid-swing, no ball
         if (strikeTarget != null && player.isAttacking() && attackType == 1
                 && !playerHitDone && player.attackTime > 0.4f) {
             playerHitDone = true;
@@ -238,7 +250,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
         if (!player.isAttacking()) playerHitDone = false;
 
-        // ranged: ball launches mid-swing
         if (pendingBolt != null && player.isAttacking() && attackType == 2
                 && player.attackTime > 0.4f) {
             Bolt b = new Bolt();
@@ -347,7 +358,7 @@ public class GameView extends SurfaceView implements Runnable {
         if (targetEnemy != null && !targetEnemy.dead) {
             int[] th = worldToHex(targetEnemy.x, targetEnemy.y);
             float[] c = hexToWorld(th[0], th[1]);
-            drawHex(cv, sx(c[0]), sy(c[1]), 0xAAcc2233);
+            drawHex(cv, sx(c[0]), sy(c[1]), 0xAAcc2233, true);
         }
         drawRune(cv);
         drawPuffs(cv);
@@ -391,6 +402,7 @@ public class GameView extends SurfaceView implements Runnable {
     private float sx(float wx) { return wx - camX + W / 2f; }
     private float sy(float wy) { return wy - camY + H / 2f; }
 
+    // Layer 1 + 2: base tiles (hashed variant + mirror) and scattered props
     private void drawWorld(Canvas cv) {
         final int TILE = 96;
         int x0 = (int) Math.floor((camX - W / 2f) / TILE) - 1;
@@ -399,22 +411,40 @@ public class GameView extends SurfaceView implements Runnable {
         int y1 = (int) Math.ceil ((camY + H / 2f) / TILE) + 1;
         for (int ty = y0; ty <= y1; ty++) {
             for (int tx = x0; tx <= x1; tx++) {
-                int hash = (tx * 73856093 ^ ty * 19349663) & 3;
-                int c;
-                switch (hash) {
-                    case 0:  c = 0xFF241a2e; break;
-                    case 1:  c = 0xFF2b2036; break;
-                    case 2:  c = 0xFF1d1526; break;
-                    default: c = 0xFF281d31; break;
-                }
-                paint.setColor(c);
+                int hash = (tx * 73856093 ^ ty * 19349663);
                 float x = sx(tx * TILE), y = sy(ty * TILE);
-                cv.drawRect(x, y, x + TILE + 1, y + TILE + 1, paint);
+
+                if (!tileVar.isEmpty()) {
+                    Bitmap t = tileVar.get(((hash & 3) << 1) | ((hash & 4) != 0 ? 1 : 0));
+                    cv.drawBitmap(t, null, new RectF(x, y, x + TILE + 1, y + TILE + 1), paint);
+                } else {
+                    int c;
+                    switch (hash & 3) {
+                        case 0:  c = 0xFF241a2e; break;
+                        case 1:  c = 0xFF2b2036; break;
+                        case 2:  c = 0xFF1d1526; break;
+                        default: c = 0xFF281d31; break;
+                    }
+                    paint.setColor(c);
+                    cv.drawRect(x, y, x + TILE + 1, y + TILE + 1, paint);
+                }
+
+                int ph2 = (tx * 92821 ^ ty * 68927);
+                if ((ph2 & 7) == 0 && !props.isEmpty()) {
+                    Bitmap pr = props.get((ph2 >>> 3) % props.size());
+                    float ox = ((ph2 >>> 6) & 63) - 32;
+                    float oy = ((ph2 >>> 12) & 31) - 16;
+                    float s = (TILE * 0.9f) / pr.getHeight();
+                    float px = x + TILE / 2f + ox, py = y + TILE + oy;
+                    cv.drawBitmap(pr, null, new RectF(
+                            px - pr.getWidth() * s / 2f, py - pr.getHeight() * s,
+                            px + pr.getWidth() * s / 2f, py), paint);
+                }
             }
         }
     }
 
-    private void drawHex(Canvas cv, float cx, float cy, int color) {
+    private void drawHex(Canvas cv, float cx, float cy, int color, boolean filled) {
         hexPath.reset();
         for (int i = 0; i < 6; i++) {
             float a = (float) Math.toRadians(60 * i - 30);
@@ -423,16 +453,24 @@ public class GameView extends SurfaceView implements Runnable {
             if (i == 0) hexPath.moveTo(x, y); else hexPath.lineTo(x, y);
         }
         hexPath.close();
-        paint.setColor(color);
-        cv.drawPath(hexPath, paint);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(2);
-        paint.setColor(0x66ffffff);
-        cv.drawPath(hexPath, paint);
-        paint.setStyle(Paint.Style.FILL);
+        if (filled) {
+            paint.setColor(color);
+            cv.drawPath(hexPath, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2);
+            paint.setColor(0x66ffffff);
+            cv.drawPath(hexPath, paint);
+            paint.setStyle(Paint.Style.FILL);
+        } else {
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(3);
+            paint.setColor(color);
+            cv.drawPath(hexPath, paint);
+            paint.setStyle(Paint.Style.FILL);
+        }
     }
 
-    // green = still reachable with remaining points, red = spent/blocked
+    // green filled = affordable, empty red outline = spent/blocked
     private void drawMoveFan(Canvas cv) {
         int[] ph = worldToHex(player.x, player.y);
         for (int r = -MOVE_HEX; r <= MOVE_HEX; r++) {
@@ -441,7 +479,8 @@ public class GameView extends SurfaceView implements Runnable {
                 if (d < 1 || d > MOVE_HEX) continue;
                 float[] c = hexToWorld(ph[0] + q, ph[1] + r);
                 boolean ok = d <= moveLeft && !hexOccupied(ph[0] + q, ph[1] + r, null);
-                drawHex(cv, sx(c[0]), sy(c[1]), ok ? 0x7722cc44 : 0x99cc2233);
+                if (ok) drawHex(cv, sx(c[0]), sy(c[1]), 0x7722cc44, true);
+                else    drawHex(cv, sx(c[0]), sy(c[1]), 0xCCcc2233, false);
             }
         }
     }
@@ -454,7 +493,7 @@ public class GameView extends SurfaceView implements Runnable {
                 int d = hexDist(ph[0], ph[1], ph[0] + q, ph[1] + r);
                 if (d < 1 || d > range) continue;
                 float[] c = hexToWorld(ph[0] + q, ph[1] + r);
-                drawHex(cv, sx(c[0]), sy(c[1]), 0x66ff2233);
+                drawHex(cv, sx(c[0]), sy(c[1]), 0x66ff2233, true);
             }
         }
     }
@@ -502,7 +541,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
         cv.restore();
 
-        // overhead HP bar, same style as enemies
         float top = sy(player.y) - PLAYER_H - 26;
         paint.setColor(0xFF330000);
         cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 12, paint);
@@ -515,7 +553,6 @@ public class GameView extends SurfaceView implements Runnable {
         if (player.isAttacking() && !attack.isEmpty()) {
             float prog = player.attackTime / player.attackDuration;
             if (attackType == 2 && attack.size() >= 8) {
-                // ranged: frames 1-4 then 7-8 (skip 5 & 6)
                 int[] seq = { 0, 1, 2, 3, 6, 7 };
                 int i = (int) (prog * seq.length);
                 if (i >= seq.length) i = seq.length - 1;
@@ -619,7 +656,6 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setColor(0xFFff3344);
         cv.drawRect(W / 2f - 160, 26, W / 2f - 160 + 320f * playerHp / 100, 44, paint);
 
-        // END (left)
         paint.setColor(0x663355ff);
         cv.drawCircle(110, H - 110, 70, paint);
         paint.setColor(0xFFffffff);
@@ -627,13 +663,11 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setTextAlign(Paint.Align.CENTER);
         cv.drawText("END", 110, H - 98, paint);
 
-        // A1 melee (range 1)
         paint.setColor(0x66ff3355);
         cv.drawCircle(W - 110, H - 110, 70, paint);
         paint.setColor(0xFFffffff);
         cv.drawText("A1", W - 110, H - 98, paint);
 
-        // A2 ranged (range 3)
         paint.setColor(0x66ff8833);
         cv.drawCircle(W - 260, H - 110, 70, paint);
         paint.setColor(0xFFffffff);
@@ -656,18 +690,18 @@ public class GameView extends SurfaceView implements Runnable {
         int idx = e.getActionIndex();
         float x = e.getX(idx), y = e.getY(idx);
 
-        if (x < 190 && y > H - 190) {                 // END
+        if (x < 190 && y > H - 190) {
             endPlayerTurn();
             return true;
         }
-        if (x > W - 190 && y > H - 190) {             // A1 melee
+        if (x > W - 190 && y > H - 190) {
             if (!hasAttacked) {
                 attackRangeShown = (attackRangeShown == 1) ? 0 : 1;
                 hexesShown = false; targetEnemy = null;
             }
             return true;
         }
-        if (x > W - 340 && x < W - 190 && y > H - 190) {  // A2 ranged
+        if (x > W - 340 && x < W - 190 && y > H - 190) {
             if (!hasAttacked) {
                 attackRangeShown = (attackRangeShown == 2) ? 0 : 2;
                 hexesShown = false; targetEnemy = null;
@@ -681,7 +715,6 @@ public class GameView extends SurfaceView implements Runnable {
         int[] ph = worldToHex(player.x, player.y);
         int dTap = hexDist(ph[0], ph[1], th[0], th[1]);
 
-        // enemy hex tapped?
         Enemy tapped = null;
         for (Enemy en : enemies) {
             if (en.dead) continue;
@@ -693,8 +726,8 @@ public class GameView extends SurfaceView implements Runnable {
             int range = (attackRangeShown == 1) ? 1 : (attackRangeShown == 2) ? 3 : 0;
             if (!hasAttacked && range > 0 && dTap <= range) {
                 if (targetEnemy != tapped) {
-                    targetEnemy = tapped;            // 1st tap: lock (hex floods red)
-                } else {                             // 2nd tap: execute
+                    targetEnemy = tapped;
+                } else {
                     hasAttacked = true;
                     attackType = attackRangeShown;
                     player.facing = tapped.x >= player.x ? 1 : -1;
@@ -709,19 +742,18 @@ public class GameView extends SurfaceView implements Runnable {
             return true;
         }
 
-        // own hex: toggle move fan
         if (dTap == 0) {
             hexesShown = !hexesShown;
             attackRangeShown = 0;
             return true;
         }
 
-        // green hex: spend move points
         if (hexesShown && moveLeft > 0 && dTap >= 1 && dTap <= moveLeft
                 && !hexOccupied(th[0], th[1], null)) {
             float[] c = hexToWorld(th[0], th[1]);
             player.setTarget(c[0], c[1]);
             moveLeft -= dTap;
+            hexesShown = false;          // fan closes; reopen on her hex
             runeX = c[0]; runeY = c[1]; runeT = 0;
         }
         return true;
