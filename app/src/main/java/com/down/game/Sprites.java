@@ -10,30 +10,46 @@ import java.util.List;
 
 public class Sprites {
 
-    // GREEN chroma key (#00FF00):
-    //  - hard cut: pure/shadowed green
-    //  - soft cut: anti-aliased green fringe (de-spilled)
-    //  - olive cut: red x green blend halo around FX
+    // Auto-detects the sheet background (green OR magenta) from the corner pixel
+    // and applies the matching chroma key with soft edges + de-spill.
     public static Bitmap chromaKey(Bitmap src) {
         Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
         int w = out.getWidth(), h = out.getHeight();
+
+        int corner = src.getPixel(2, 2);
+        int kr = (corner >> 16) & 255, kg = (corner >> 8) & 255, kb = corner & 255;
+        boolean greenBg = (kg > 150 && kg - Math.max(kr, kb) > 60);
+        boolean magBg   = (kr > 150 && kb > 150 && Math.min(kr, kb) - kg > 60);
+
         int[] px = new int[w * h];
         out.getPixels(px, 0, w, 0, 0, w, h);
         for (int i = 0; i < px.length; i++) {
             int p = px[i];
             int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
-            int ex = g - Math.max(r, b);
-            boolean olive = (g > 90 && b < 90 && g * 2 > r);
 
-            if (ex > 120) {
-                px[i] = 0;
-            } else if (ex > 60) {
-                int a = (120 - ex) * 255 / 60;
-                int m = Math.max(r, b);
-                px[i] = (a << 24) | (r << 16) | (m << 8) | b;
-            } else if (olive) {
-                int m = Math.max(r, b);
-                px[i] = (90 << 24) | (r << 16) | (m << 8) | b;
+            if (greenBg) {
+                int ex = g - Math.max(r, b);
+                boolean olive = (g > 90 && b < 90 && g * 2 > r);
+                if (ex > 120) {
+                    px[i] = 0;
+                } else if (ex > 60) {
+                    int a = (120 - ex) * 255 / 60;
+                    int m = Math.max(r, b);
+                    px[i] = (a << 24) | (r << 16) | (m << 8) | b;
+                } else if (olive) {
+                    int m = Math.max(r, b);
+                    px[i] = (90 << 24) | (r << 16) | (m << 8) | b;
+                }
+            } else if (magBg) {
+                int ex = Math.min(r, b) - g;
+                if (ex > 100) {
+                    px[i] = 0;
+                } else if (ex > 40) {
+                    int a = (100 - ex) * 255 / 60;
+                    px[i] = (a << 24) | (r << 16) | (g << 8) | b;
+                } else if (r > 100 && b > 100 && g < 80 && Math.abs(r - b) < 60) {
+                    px[i] = 0;   // shadowed magenta
+                }
             }
         }
         out.setPixels(px, 0, w, 0, 0, w, h);
