@@ -17,8 +17,9 @@ import java.util.List;
 public class GameView extends SurfaceView implements Runnable {
 
     private static final int PH_PLAYER = 0, PH_ENEMY = 1;
-    private static final float HEX = 64f, SQUASH = 0.55f;
+    private static final float HEX = 96f, SQUASH = 0.5f;
     private static final int MOVE_HEX = 3;
+    private static final float PLAYER_H = 260f, ENEMY_H = 200f;
 
     private Thread loop;
     private volatile boolean running;
@@ -74,7 +75,6 @@ public class GameView extends SurfaceView implements Runnable {
                 0, 0, 0.6f, 0, 0,
                 0, 0, 0, 1, 0 }));
 
-        // snap start position to a hex center
         int[] h0 = worldToHex(640, 640);
         float[] c0 = hexToWorld(h0[0], h0[1]);
         player.x = c0[0]; player.y = c0[1];
@@ -103,7 +103,7 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // ---------- hex math (pointy-top, squashed for iso look) ----------
+    // ---------- hex math ----------
     private static float[] hexToWorld(int q, int r) {
         float x = HEX * (float) Math.sqrt(3) * (q + r / 2f);
         float y = HEX * 1.5f * r * SQUASH;
@@ -180,9 +180,11 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void planEnemy(Enemy en) {
         en.planned = true;
+        int[] ph = worldToHex(player.x, player.y);
+        int[] eh = worldToHex(en.x, en.y);
+        if (hexDist(ph[0], ph[1], eh[0], eh[1]) <= 1) return;   // adjacent: claw
         float dx = player.x - en.x, dy = player.y - en.y;
         float d = (float) Math.hypot(dx, dy);
-        if (d < 140) return;                       // adjacent: stay and claw
         float[] steps = { HEX * 3.2f, HEX * 1.6f };
         for (float st : steps) {
             int[] th = worldToHex(en.x + dx / d * st, en.y + dy / d * st);
@@ -215,27 +217,25 @@ public class GameView extends SurfaceView implements Runnable {
         camY += ((player.y - H * 0.28f) - camY) * k;
         runeT += dt;
 
-        // bolt launches mid-swing
         if (pendingBolt != null && player.isAttacking() && player.attackTime > 0.4f) {
             Bolt b = new Bolt();
             b.x = player.x + player.facing * 40;
-            b.y = player.y - 220;
+            b.y = player.y - PLAYER_H * 0.75f;
             b.tgt = pendingBolt;
             bolts.add(b);
             pendingBolt = null;
         }
 
-        // bolts fly and hit
         for (int i = bolts.size() - 1; i >= 0; i--) {
             Bolt b = bolts.get(i);
             if (b.tgt.dead) { bolts.remove(i); continue; }
-            float dx = b.tgt.x - b.x, dy = (b.tgt.y - 120) - b.y;
+            float dx = b.tgt.x - b.x, dy = (b.tgt.y - ENEMY_H * 0.5f) - b.y;
             float d = (float) Math.hypot(dx, dy);
             if (d < 30) {
                 Enemy en = b.tgt;
                 en.hp -= 12;
                 en.hitFlash = 0.25f;
-                addDmg(en.x, en.y - 260, 12);
+                addDmg(en.x, en.y - ENEMY_H - 20, 12);
                 if (en.hp <= 0) en.dead = true;
                 bolts.remove(i);
             } else {
@@ -244,7 +244,6 @@ public class GameView extends SurfaceView implements Runnable {
             }
         }
 
-        // dead enemies fade anytime
         for (int i = enemies.size() - 1; i >= 0; i--) {
             Enemy en = enemies.get(i);
             if (en.hitFlash > 0) en.hitFlash -= dt;
@@ -268,13 +267,16 @@ public class GameView extends SurfaceView implements Runnable {
                     ei++;
                 } else {
                     if (!en.planned) planEnemy(en);
-                    en.turnUpdate(dt, player.x, player.y);
+                    int[] ph = worldToHex(player.x, player.y);
+                    int[] eh = worldToHex(en.x, en.y);
+                    boolean adj = hexDist(ph[0], ph[1], eh[0], eh[1]) == 1;
+                    en.turnUpdate(dt, player.x, player.y, adj);
                     if (en.attacking() && !en.struck && en.attackT > 0.45f) {
                         en.struck = true;
-                        if (Math.hypot(en.x - player.x, en.y - player.y) < 140) {
+                        if (adj) {
                             playerHp -= 10;
                             hurtT = 0.3f;
-                            addDmg(player.x, player.y - 300, -10);
+                            addDmg(player.x, player.y - PLAYER_H - 20, -10);
                             if (playerHp <= 0) { playerHp = 0; deadT = 2f; }
                         }
                     }
@@ -285,7 +287,6 @@ public class GameView extends SurfaceView implements Runnable {
             }
         }
 
-        // glide mist
         if (player.floater.floating() && player.isMoving()) {
             puffTimer += dt;
             if (puffTimer > 0.09f) {
@@ -446,7 +447,7 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
-        float sw = fl ? 45 : 60;
+        float sw = fl ? 45 : 55;
         paint.setColor(0x88000000);
         cv.drawOval(new RectF(sx(player.x) - sw, sy(player.y) - sw / 3f,
                               sx(player.x) + sw, sy(player.y) + sw / 4f), paint);
@@ -456,8 +457,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
         if (frame != null) {
-            float drawH = H * 0.58f;
-            float s = drawH / frame.getHeight();
+            float s = PLAYER_H / frame.getHeight();
             cv.drawBitmap(frame, null, new RectF(
                     -frame.getWidth() * s / 2f, -frame.getHeight() * s,
                      frame.getWidth() * s / 2f, 0), paint);
@@ -483,7 +483,7 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawEnemy(Canvas cv, Enemy en) {
         float x = sx(en.x), y = sy(en.y);
         boolean fl = en.floater.floating();
-        float sw = fl ? 38 : 50;
+        float sw = fl ? 35 : 45;
         paint.setColor(0x88000000);
         cv.drawOval(new RectF(x - sw, y - sw / 3f, x + sw, y + sw / 4f), paint);
 
@@ -494,20 +494,19 @@ public class GameView extends SurfaceView implements Runnable {
         if (en.facing < 0) cv.scale(-1, 1);
         if (en.dead) p.setAlpha((int) (255 * (1 - en.deathT / 0.7f)));
         if (frame != null) {
-            float drawH = H * 0.42f;
-            float s = drawH / frame.getHeight();
+            float s = ENEMY_H / frame.getHeight();
             cv.drawBitmap(frame, null, new RectF(
                     -frame.getWidth() * s / 2f, -frame.getHeight() * s,
                      frame.getWidth() * s / 2f, 0), p);
         } else {
             p.setColor(0xFFaa2233);
-            cv.drawOval(new RectF(-35, -160, 35, 0), p);
+            cv.drawOval(new RectF(-30, -ENEMY_H * 0.8f, 30, 0), p);
         }
         p.setAlpha(255);
         cv.restore();
 
         if (!en.dead && en.hp < en.maxHp) {
-            float top = y - H * 0.42f - 40;
+            float top = y - ENEMY_H - 26;
             paint.setColor(0xFF330000);
             cv.drawRect(x - 45, top, x + 45, top + 12, paint);
             paint.setColor(0xFFff3344);
@@ -529,7 +528,7 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void drawBolts(Canvas cv) {
         for (Bolt b : bolts) {
-            float dx = b.tgt.x - b.x, dy = (b.tgt.y - 120) - b.y;
+            float dx = b.tgt.x - b.x, dy = (b.tgt.y - ENEMY_H * 0.5f) - b.y;
             float d = (float) Math.hypot(dx, dy);
             if (d < 1) d = 1;
             for (int t = 3; t >= 1; t--) {
@@ -578,10 +577,10 @@ public class GameView extends SurfaceView implements Runnable {
         cv.drawText("D O W N", 24, 48, paint);
         paint.setTextSize(22);
         paint.setColor(0x88ffffff);
-        cv.drawText("tap her: hexes - tap foe twice: bolt", 24, 80, paint);
+        cv.drawText("tap her hex: fan - tap foe hex twice: bolt", 24, 80, paint);
     }
 
-    // ---------- input ----------
+    // ---------- input (everything is hex-based now) ----------
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (deadT > 0 || phase != PH_PLAYER) return true;
@@ -595,22 +594,24 @@ public class GameView extends SurfaceView implements Runnable {
             return true;
         }
 
-        // tapped an enemy?
+        float wx = camX + x - W / 2f;
+        float wy = camY + y - H / 2f;
+        int[] th = worldToHex(wx, wy);
+
+        // tapped the hex an enemy stands on?
         Enemy tapped = null;
-        float best = 110;
         for (Enemy en : enemies) {
             if (en.dead) continue;
-            float d = (float) Math.hypot(x - sx(en.x), y - (sy(en.y) - H * 0.21f));
-            if (d < best) { best = d; tapped = en; }
+            int[] eh = worldToHex(en.x, en.y);
+            if (eh[0] == th[0] && eh[1] == th[1]) { tapped = en; break; }
         }
 
         if (tapped != null) {
             int[] ph = worldToHex(player.x, player.y);
-            int[] eh = worldToHex(tapped.x, tapped.y);
-            if (!hasAttacked && hexDist(ph[0], ph[1], eh[0], eh[1]) == 1) {
+            if (!hasAttacked && hexDist(ph[0], ph[1], th[0], th[1]) == 1) {
                 if (targetEnemy != tapped) {
-                    targetEnemy = tapped;          // 1st tap: lock target
-                } else {                           // 2nd tap: confirm bolt
+                    targetEnemy = tapped;          // 1st tap: lock
+                } else {                           // 2nd tap: bolt
                     hasAttacked = true;
                     player.startAttack();
                     pendingBolt = tapped;
@@ -621,18 +622,15 @@ public class GameView extends SurfaceView implements Runnable {
             return true;
         }
 
-        // tapped NilouZila? toggle hexes
-        if (Math.hypot(x - sx(player.x), y - (sy(player.y) - H * 0.25f)) < 100) {
+        // tapped your own hex? toggle the fan
+        int[] ph = worldToHex(player.x, player.y);
+        if (th[0] == ph[0] && th[1] == ph[1]) {
             hexesShown = !hexesShown;
             return true;
         }
 
-        // tapped a green hex?
+        // tapped a green hex? move
         if (hexesShown && !hasMoved) {
-            float wx = camX + x - W / 2f;
-            float wy = camY + y - H / 2f;
-            int[] ph = worldToHex(player.x, player.y);
-            int[] th = worldToHex(wx, wy);
             int d = hexDist(ph[0], ph[1], th[0], th[1]);
             if (d >= 1 && d <= MOVE_HEX && !hexOccupied(th[0], th[1], null)) {
                 float[] c = hexToWorld(th[0], th[1]);
