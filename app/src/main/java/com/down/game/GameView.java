@@ -15,6 +15,9 @@ import java.util.List;
 
 public class GameView extends SurfaceView implements Runnable {
 
+    private static final int PH_PLAYER = 0, PH_ENEMY = 1;
+    private static final float MOVE_RANGE = 340f;
+
     private Thread loop;
     private volatile boolean running;
 
@@ -30,10 +33,17 @@ public class GameView extends SurfaceView implements Runnable {
     private final ArrayList<Puff> puffs = new ArrayList<>();
     private float puffTimer;
 
+    // turns
+    private int phase = PH_PLAYER;
+    private float phaseT = 0;
+    private int ei = 0;
+    private float turnX, turnY;
+    private boolean hasMoved = false, hasAttacked = false;
+
     // combat
     private final ArrayList<Enemy> enemies = new ArrayList<>();
     private int playerHp = 100;
-    private float hurtT = 0, deadT = 0, spawnT = 0;
+    private float hurtT = 0, deadT = 0;
     private boolean playerHitDone = false;
     private static class Dmg { float x, y, t; int val; }
     private final ArrayList<Dmg> dmgs = new ArrayList<>();
@@ -55,7 +65,8 @@ public class GameView extends SurfaceView implements Runnable {
                 0, 0.6f, 0, 0, 0,
                 0, 0, 0.6f, 0, 0,
                 0, 0, 0, 1, 0 }));
-        spawnWave();
+        for (int i = 0; i < 3; i++) spawnEnemy();
+        startPlayerTurn();
     }
 
     public void start() { running = true; loop = new Thread(this); loop.start(); }
@@ -77,15 +88,34 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // ---------- combat helpers ----------
-    private void spawnWave() { for (int i = 0; i < 3; i++) spawnEnemy(); }
-
+    // ---------- turns ----------
     private void spawnEnemy() {
         Enemy e = new Enemy();
         float a = (float) (Math.random() * Math.PI * 2);
         e.x = player.x + (float) Math.cos(a) * 700;
         e.y = player.y + (float) Math.sin(a) * 500;
         enemies.add(e);
+    }
+
+    private void startPlayerTurn() {
+        phase = PH_PLAYER; phaseT = 0;
+        hasMoved = false; hasAttacked = false;
+        turnX = player.x; turnY = player.y;
+        ei = 0;
+        if (enemies.size() < 5) spawnEnemy();
+    }
+
+    private void endPlayerTurn() {
+        phase = PH_ENEMY; phaseT = 0; ei = 0;
+        for (Enemy en : enemies) en.resetTurn();
+    }
+
+    private void resetFight() {
+        playerHp = 100;
+        enemies.clear();
+        dmgs.clear();
+        for (int i = 0; i < 3; i++) spawnEnemy();
+        startPlayerTurn();
     }
 
     private void addDmg(float x, float y, int val) {
@@ -96,13 +126,6 @@ public class GameView extends SurfaceView implements Runnable {
         return (float) Math.hypot(ax - bx, ay - by);
     }
 
-    private void resetFight() {
-        playerHp = 100;
-        enemies.clear();
-        dmgs.clear();
-        spawnWave();
-    }
-
     // ---------- update ----------
     private void update(float dt) {
         if (deadT > 0) {
@@ -110,15 +133,28 @@ public class GameView extends SurfaceView implements Runnable {
             if (deadT <= 0) resetFight();
             return;
         }
-
+        phaseT += dt;
+        if (hurtT > 0) hurtT -= dt;
         player.update(dt);
+
         float k = Math.min(1, dt * 6);
         camX += (player.x - camX) * k;
         camY += ((player.y - H * 0.28f) - camY) * k;
         runeT += dt;
-        if (hurtT > 0) hurtT -= dt;
 
-        // player swing hits once, mid-swing
+        // dead enemies fade anytime
+        for (int i = enemies.size() - 1; i >= 0; i--) {
+            Enemy en = enemies.get(i);
+            if (en.hitFlash > 0) en.hitFlash -= dt;
+            if (en.dead) {
+                en.deathT += dt;
+                en.floater.moving = false;
+                en.floater.update(dt);
+                if (en.deathT > 0.7f) enemies.remove(i);
+            }
+        }
+
+        // player swing connects mid-swing
         if (player.isAttacking()) {
             if (!playerHitDone && player.attackTime > 0.4f) {
                 playerHitDone = true;
@@ -139,28 +175,37 @@ public class GameView extends SurfaceView implements Runnable {
             playerHitDone = false;
         }
 
-        // enemies
-        for (int i = enemies.size() - 1; i >= 0; i--) {
-            Enemy en = enemies.get(i);
-            en.update(dt, player.x, player.y);
-            if (en.attacking() && !en.struck && en.attackT > 0.45f) {
-                en.struck = true;
-                if (dist(en.x, en.y, player.x, player.y) < 130) {
-                    playerHp -= 10;
-                    hurtT = 0.3f;
-                    addDmg(player.x, player.y - 300, -10);
-                    if (playerHp <= 0) { playerHp = 0; deadT = 2f; }
-                }
+        if (phase == PH_PLAYER) {
+            // auto end when both actions spent and she is standing again
+            if (hasMoved && hasAttacked && !player.isMoving()
+                    && !player.isAttacking() && player.floater.state == 0) {
+                endPlayerTurn();
             }
-            if (en.dead && en.deathT > 0.7f) enemies.remove(i);
+        } else {
+            if (ei < enemies.size()) {
+                Enemy en = enemies.get(ei);
+                if (en.dead) {
+                    ei++;
+                } else {
+                    en.turnUpdate(dt, player.x, player.y);
+                    if (en.attacking() && !en.struck && en.attackT > 0.45f) {
+                        en.struck = true;
+                        if (dist(en.x, en.y, player.x, player.y) < 140) {
+                            playerHp -= 10;
+                            hurtT = 0.3f;
+                            addDmg(player.x, player.y - 300, -10);
+                            if (playerHp <= 0) { playerHp = 0; deadT = 2f; }
+                        }
+                    }
+                    if (en.act == 3) ei++;
+                }
+            } else {
+                startPlayerTurn();
+            }
         }
 
-        // endless pressure
-        spawnT += dt;
-        if (spawnT > 4f) { spawnT = 0; if (enemies.size() < 5) spawnEnemy(); }
-
         // glide mist
-        if (player.isMoving() && !player.isAttacking()) {
+        if (player.floater.floating() && player.isMoving()) {
             puffTimer += dt;
             if (puffTimer > 0.09f) {
                 puffTimer = 0;
@@ -192,6 +237,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.drawColor(0xFF120a18);
 
         drawWorld(cv);
+        drawRange(cv);
         drawRune(cv);
         drawPuffs(cv);
 
@@ -207,6 +253,17 @@ public class GameView extends SurfaceView implements Runnable {
             paint.setAlpha((int) (hurtT / 0.3f * 100));
             cv.drawRect(0, 0, W, H, paint);
             paint.setAlpha(255);
+        }
+        if (phaseT < 1.2f) {
+            int a = phaseT < 0.9f ? 220 : (int) ((1.2f - phaseT) / 0.3f * 220);
+            paint.setAlpha(a);
+            paint.setTextSize(64);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setColor(phase == PH_PLAYER ? 0xFFff2bd6 : 0xFFff2233);
+            cv.drawText(phase == PH_PLAYER ? "YOUR TURN" : "ENEMY TURN",
+                    W / 2f, H * 0.3f, paint);
+            paint.setAlpha(255);
+            paint.setTextAlign(Paint.Align.LEFT);
         }
         if (deadT > 0) {
             paint.setColor(0xFFff2233);
@@ -245,6 +302,16 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
+    private void drawRange(Canvas cv) {
+        if (phase != PH_PLAYER || hasMoved) return;
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(3);
+        paint.setColor(0x55ff2bd6);
+        cv.drawOval(new RectF(sx(turnX) - MOVE_RANGE, sy(turnY) - MOVE_RANGE / 2f,
+                              sx(turnX) + MOVE_RANGE, sy(turnY) + MOVE_RANGE / 2f), paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
     private void drawRune(Canvas cv) {
         if (runeT > 0.6f) return;
         float k = runeT / 0.6f;
@@ -270,16 +337,16 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawPlayer(Canvas cv) {
+        boolean fl = player.floater.floating();
+        float sw = fl ? 45 : 60;
         paint.setColor(0x88000000);
-        cv.drawOval(new RectF(sx(player.x) - 60, sy(player.y) - 20,
-                              sx(player.x) + 60, sy(player.y) + 15), paint);
+        cv.drawOval(new RectF(sx(player.x) - sw, sy(player.y) - sw / 3f,
+                              sx(player.x) + sw, sy(player.y) + sw / 4f), paint);
+
         Bitmap frame = pickFrame();
         cv.save();
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
-        boolean moving = player.isMoving() && !player.isAttacking();
-        float bob = moving ? (float) Math.sin(player.bobTime * 10) * 4 : 0;
-        cv.translate(0, bob);
         if (frame != null) {
             float drawH = H * 0.58f;
             float s = drawH / frame.getHeight();
@@ -297,16 +364,17 @@ public class GameView extends SurfaceView implements Runnable {
             return attack.get(i);
         }
         if (!glide.isEmpty()) {
-            float fps = player.isMoving() ? 9f : 2.5f;
-            return glide.get(((int) (player.bobTime * fps)) % glide.size());
+            return glide.get(player.floater.frame(player.bobTime));
         }
         return null;
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
         float x = sx(en.x), y = sy(en.y);
+        boolean fl = en.floater.floating();
+        float sw = fl ? 38 : 50;
         paint.setColor(0x88000000);
-        cv.drawOval(new RectF(x - 50, y - 16, x + 50, y + 12), paint);
+        cv.drawOval(new RectF(x - sw, y - sw / 3f, x + sw, y + sw / 4f), paint);
 
         Bitmap frame = pickEnemyFrame(en);
         Paint p = (en.hitFlash > 0) ? tintPaint : paint;
@@ -338,13 +406,12 @@ public class GameView extends SurfaceView implements Runnable {
 
     private Bitmap pickEnemyFrame(Enemy en) {
         if (en.attacking() && !eAttack.isEmpty()) {
-            int i = (int) (en.attackT / 0.8f * eAttack.size());
+            int i = (int) (en.attackT / 0.9f * eAttack.size());
             if (i >= eAttack.size()) i = eAttack.size() - 1;
             return eAttack.get(i);
         }
         if (!eGlide.isEmpty()) {
-            float fps = en.dead ? 2f : 6f;
-            return eGlide.get(((int) (en.animT * fps)) % eGlide.size());
+            return eGlide.get(en.floater.frame(en.animT));
         }
         return null;
     }
@@ -363,7 +430,6 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawUI(Canvas cv) {
-        // player HP bar
         paint.setColor(0xFF330000);
         cv.drawRect(W / 2f - 160, 26, W / 2f + 160, 44, paint);
         paint.setColor(0xFFff3344);
@@ -376,12 +442,18 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setTextAlign(Paint.Align.CENTER);
         cv.drawText("ATK", W - 110, H - 96, paint);
 
+        paint.setColor(0x663355ff);
+        cv.drawCircle(110, H - 110, 70, paint);
+        paint.setColor(0xFFffffff);
+        paint.setTextSize(34);
+        cv.drawText("END", 110, H - 98, paint);
+
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setTextSize(28);
         cv.drawText("D O W N", 24, 48, paint);
         paint.setTextSize(22);
         paint.setColor(0x88ffffff);
-        cv.drawText("tap ground to glide", 24, 80, paint);
+        cv.drawText("tap inside the ring to move", 24, 80, paint);
     }
 
     // ---------- input ----------
@@ -395,10 +467,17 @@ public class GameView extends SurfaceView implements Runnable {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_POINTER_DOWN:
+                if (phase != PH_PLAYER) break;
                 if (x > W - 190 && y > H - 190) {
-                    player.startAttack();
-                } else if (movePointer == -1) {
+                    if (!hasAttacked && !player.isAttacking()) {
+                        player.startAttack();
+                        hasAttacked = true;
+                    }
+                } else if (x < 190 && y > H - 190) {
+                    endPlayerTurn();
+                } else if (!hasMoved && !player.isMoving() && player.floater.state == 0) {
                     movePointer = pid;
+                    hasMoved = true;
                     tap(x, y);
                 }
                 break;
@@ -416,9 +495,15 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void tap(float x, float y) {
-        runeX = camX + x - W / 2f;
-        runeY = camY + y - H / 2f;
-        runeT = 0;
-        player.setTarget(runeX, runeY);
+        float wx = camX + x - W / 2f;
+        float wy = camY + y - H / 2f;
+        float dx = wx - turnX, dy = wy - turnY;
+        float d = (float) Math.hypot(dx, dy);
+        if (d > MOVE_RANGE) {
+            wx = turnX + dx / d * MOVE_RANGE;
+            wy = turnY + dy / d * MOVE_RANGE;
+        }
+        runeX = wx; runeY = wy; runeT = 0;
+        player.setTarget(wx, wy);
     }
 }
