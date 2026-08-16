@@ -4,39 +4,81 @@ public class Enemy {
 
     public float x, y;
     public int hp = 30, maxHp = 30;
-    public float speed = 150;
+    public float speed = 220;
     public int facing = 1;
     public float animT = (float) (Math.random() * 10);
     public float hitFlash = 0;
     public boolean dead = false;
     public float deathT = 0;
     public float attackT = -1;
-    public float cooldown = 1 + (float) Math.random();
     public boolean struck = false;
+    public final Floater floater = new Floater();
+
+    // turn action: 0 = move, 1 = attack, 2 = settle, 3 = done
+    public int act = 0;
+    public boolean planned = false, planMove = false, acted = false;
+    public float tx, ty;
 
     public boolean attacking() { return attackT >= 0; }
 
-    public void update(float dt, float px, float py) {
+    public void resetTurn() {
+        act = 0; planned = false; planMove = false; acted = false;
+        attackT = -1; struck = false;
+    }
+
+    public void turnUpdate(float dt, float px, float py) {
         animT += dt;
-        if (hitFlash > 0) hitFlash -= dt;
-        if (dead) { deathT += dt; return; }
 
         float dx = px - x, dy = py - y;
         float dist = (float) Math.hypot(dx, dy);
 
-        if (attacking()) {
-            attackT += dt;
-            if (attackT > 0.8f) { attackT = -1; cooldown = 1.2f; struck = false; }
-        } else {
-            cooldown -= dt;
-            if (dist > 100) {
-                x += dx / dist * speed * dt;
-                y += dy / dist * speed * dt;
-                if (dx < -0.05f) facing = -1;
-                if (dx >  0.05f) facing =  1;
-            } else if (cooldown <= 0) {
-                attackT = 0;
-            }
+        switch (act) {
+            case 0:
+                if (!planned) {
+                    planned = true;
+                    if (dist > 110) {
+                        planMove = true;
+                        float step = Math.min(dist - 90, 300);
+                        tx = x + dx / dist * step;
+                        ty = y + dy / dist * step;
+                    }
+                }
+                if (planMove) {
+                    float d = (float) Math.hypot(tx - x, ty - y);
+                    if (d > 6) {
+                        floater.moving = true;
+                        float step = Math.min(d, speed * dt);
+                        x += (tx - x) / d * step;
+                        y += (ty - y) / d * step;
+                        if (tx - x < -0.05f) facing = -1;
+                        if (tx - x >  0.05f) facing =  1;
+                    } else {
+                        planMove = false;
+                        floater.moving = false;
+                    }
+                } else {
+                    floater.moving = false;
+                    if (floater.state == 0) act = 1;
+                }
+                break;
+            case 1:
+                floater.moving = false;
+                if (!acted) {
+                    if (attackT < 0) {
+                        if (dist < 130) attackT = 0;
+                        else acted = true;
+                    } else {
+                        attackT += dt;
+                        if (attackT > 0.9f) { attackT = -1; acted = true; }
+                    }
+                } else {
+                    act = 2;
+                }
+                break;
+            case 2:
+                if (floater.state == 0) act = 3;
+                break;
         }
+        floater.update(dt);
     }
 }
