@@ -10,8 +10,10 @@ import java.util.List;
 
 public class Sprites {
 
-    // GREEN chroma key (#00FF00), retuned for green-spill on skin:
-    // hard cut only strong green, soft anti-aliased edge on the fringe, de-spilled.
+    // GREEN chroma key (#00FF00):
+    //  - hard cut: pure/shadowed green
+    //  - soft cut: anti-aliased green fringe (de-spilled)
+    //  - olive cut: red x green blend halo around FX
     public static Bitmap chromaKey(Bitmap src) {
         Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
         int w = out.getWidth(), h = out.getHeight();
@@ -21,12 +23,17 @@ public class Sprites {
             int p = px[i];
             int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
             int ex = g - Math.max(r, b);
+            boolean olive = (g > 90 && b < 90 && g * 2 > r);
+
             if (ex > 120) {
-                px[i] = 0;                              // pure/shadowed green
+                px[i] = 0;
             } else if (ex > 60) {
-                int a = (120 - ex) * 255 / 60;          // soft edge
+                int a = (120 - ex) * 255 / 60;
                 int m = Math.max(r, b);
                 px[i] = (a << 24) | (r << 16) | (m << 8) | b;
+            } else if (olive) {
+                int m = Math.max(r, b);
+                px[i] = (90 << 24) | (r << 16) | (m << 8) | b;
             }
         }
         out.setPixels(px, 0, w, 0, 0, w, h);
