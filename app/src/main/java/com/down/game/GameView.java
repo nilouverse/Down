@@ -1040,11 +1040,21 @@ public class GameView extends SurfaceView implements Runnable {
             frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
             rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
         } else if (f.cCenter) {
+            // RIGHT-EDGE ANCHOR — DO NOT "FIX" THIS. The left side (cape,
+            // hair) animates while the front stays put; pinning the crop to
+            // the content's RIGHT edge (rgt) with the shared width (ww)
+            // keeps the body stable. Centering re-introduces jitter.
             int wl = Math.max(0, f.rgt - f.ww);
             int wr = f.rgt;
-            frameSrc.set(wl, f.top, wr, f.top + f.ch);
-            float right = f.ww * s / 2f;
-            rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
+            if (wl >= wr || f.top + f.ch > f.bmp.getHeight()) {
+                frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
+                rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
+                        f.bmp.getWidth() * s / 2f, 0);
+            } else {
+                frameSrc.set(wl, f.top, wr, f.top + f.ch);
+                float right = f.ww * s / 2f;
+                rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
+            }
         } else {
             frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
             rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
@@ -1055,11 +1065,29 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setAlpha(255);
     }
 
+    private void drawAura(Canvas cv, float x, float y, int color, float t) {
+        float pulse = 0.5f + 0.5f * (float) Math.sin(t * 2.4f);
+        float r = (55 + 12 * pulse) * zoom;
+        cv.save();
+        cv.translate(x, y);
+        cv.scale(1f, SQUASH);
+        paint.setShader(new RadialGradient(0, 0, r, color, 0x00000000, Shader.TileMode.CLAMP));
+        paint.setAlpha((int) (60 + 55 * pulse));
+        cv.drawCircle(0, 0, r, paint);
+        paint.setShader(null);
+        paint.setAlpha(255);
+        cv.restore();
+    }
+
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
         boolean idle = player.floater.state == 0 && !player.isAttacking();
-        float br = idle ? (float) Math.sin(player.bobTime * 1.3f) : 0f;
-        float sw = (fl ? 45 : 55) * zoom * (1f - 0.06f * br);
+        // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
+        float br = idle ? (float) Math.sin(player.bobTime * 1.7f) : 0f;
+
+        drawAura(cv, sx(player.x), sy(player.y), 0xFFff2233, player.bobTime);
+
+        float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
         paint.setAlpha(fl ? 150 : 220);
         rf.set(sx(player.x) - sw, sy(player.y) - sw * 0.36f,
                sx(player.x) + sw, sy(player.y) + sw * 0.36f);
@@ -1070,17 +1098,22 @@ public class GameView extends SurfaceView implements Runnable {
         cv.save();
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.028f * br, 1f + 0.045f * br);
+        if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
         if (frameA != null) drawFrame(cv, frameA, 255);
         if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
         cv.restore();
 
-        float top = sy(player.y) - PLAYER_H * zoom - 26;
+        float top = sy(player.y) - PLAYER_H * zoom - 34;
         paint.setColor(0xFF330000);
-        cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 12, paint);
+        cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 10, paint);
         paint.setColor(0xFFff2bd6);
         cv.drawRect(sx(player.x) - 45, top,
-                sx(player.x) - 45 + 90f * playerHp / 100, top + 12, paint);
+                sx(player.x) - 45 + 90f * playerHp / 100, top + 10, paint);
+        paint.setColor(0xFF001133);
+        cv.drawRect(sx(player.x) - 45, top + 13, sx(player.x) + 45, top + 21, paint);
+        paint.setColor(0xFF3399ff);
+        cv.drawRect(sx(player.x) - 45, top + 13,
+                sx(player.x) - 45 + 90f * mana / 100, top + 21, paint);
     }
 
     private Frame pickEnemyFrame(Enemy en) {
@@ -1116,8 +1149,11 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawEnemy(Canvas cv, Enemy en) {
         float x = sx(en.x), y = sy(en.y) + ENEMY_SINK * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
-        float br = idle ? (float) Math.sin(en.animT * 1.3f) : 0f;
-        float sw = 45 * zoom * (1f - 0.06f * br);
+        // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
+        float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
+        // Magenta aura matches the sheet key color and hides the fringe at the feet.
+        if (!en.dead) drawAura(cv, x, y, 0xFFff00ff, en.animT);
+        float sw = 45 * zoom * (1f - 0.045f * br);
         paint.setAlpha(220);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadowBmp, null, rf, paint);
@@ -1128,7 +1164,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.save();
         cv.translate(x, y);
         if (en.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.028f * br, 1f + 0.045f * br);
+        if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
         if (en.dead) p.setAlpha((int) (255 * (1 - en.deathT / 0.7f)));
         if (fr != null) {
             float s = ENEMY_H * zoom / fr.ref;
@@ -1155,12 +1191,12 @@ public class GameView extends SurfaceView implements Runnable {
         p.setAlpha(255);
         cv.restore();
 
-        if (!en.dead && en.hp < en.maxHp) {
-            float top = y - ENEMY_H * zoom - 26;
+        if (!en.dead) {
+            float top = y - ENEMY_H * zoom - 24;
             paint.setColor(0xFF330000);
-            cv.drawRect(x - 45, top, x + 45, top + 12, paint);
+            cv.drawRect(x - 45, top, x + 45, top + 10, paint);
             paint.setColor(0xFFff3344);
-            cv.drawRect(x - 45, top, x - 45 + 90f * en.hp / en.maxHp, top + 12, paint);
+            cv.drawRect(x - 45, top, x - 45 + 90f * en.hp / en.maxHp, top + 10, paint);
         }
     }
 
@@ -1255,14 +1291,7 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawUI(Canvas cv) {
-        paint.setColor(0xFF330000);
-        cv.drawRect(W / 2f - 160, 26, W / 2f + 160, 44, paint);
-        paint.setColor(0xFFff3344);
-        cv.drawRect(W / 2f - 160, 26, W / 2f - 160 + 320f * playerHp / 100, 44, paint);
-        paint.setColor(0xFF001133);
-        cv.drawRect(W / 2f - 160, 50, W / 2f + 160, 64, paint);
-        paint.setColor(0xFF3399ff);
-        cv.drawRect(W / 2f - 160, 50, W / 2f - 160 + 320f * mana / 100, 64, paint);
+        // (top HUD bars removed — HP/MP now float overhead per character)
 
         paint.setColor(0x663355ff);
         cv.drawCircle(110, H - 110, 70, paint);
