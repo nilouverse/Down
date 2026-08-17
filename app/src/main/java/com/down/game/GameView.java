@@ -35,7 +35,7 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float TILE = 192f;
     private static final float TH = TILE * SQUASH;
     private static final int MOVE_HEX = 3;
-    private static final float PLAYER_H = 260f, ENEMY_H = 200f;
+    private static final float PLAYER_H = 220f, ENEMY_H = 200f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF221829;
@@ -175,8 +175,8 @@ public class GameView extends SurfaceView implements Runnable {
         eGlideFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glide.png", 2, 2, 2), true, false));
         eGlowFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glow.png", 2, 2, 2), true, false));
         eAtkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), true, false));
-        props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
-        props2  = Sprites.cutSheet(ctx, "sprites/props2.png",       2, 4, 4);
+        props   = trimBottom(Sprites.cutSheet(ctx, "sprites/props.png",  2, 4, 4), 0.9f);
+        props2  = trimBottom(Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
 
         paint.setFilterBitmap(true);
         tintPaint.setFilterBitmap(true);
@@ -203,17 +203,17 @@ public class GameView extends SurfaceView implements Runnable {
             int w = b.getWidth(), h = b.getHeight();
             int[] px = new int[w * h];
             b.getPixels(px, 0, w, 0, 0, w, h);
-            int top = -1, bottom = -1, left = -1, right = -1;
+            boolean[] rowHas = new boolean[h];
+            boolean[] colHas = new boolean[w];
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
-                    if ((px[y * w + x] >>> 24) > 16) {
-                        if (top < 0) top = y;
-                        bottom = y;
-                        if (left < 0 || x < left) left = x;
-                        if (right < 0 || x > right) right = x;
-                    }
+                    if ((px[y * w + x] >>> 24) > 16) { rowHas[y] = true; colHas[x] = true; }
                 }
             }
+            int top = runStart(rowHas, h / 2, 10);
+            int bottom = runEnd(rowHas, h / 2, 10);
+            int left = runStart(colHas, w / 2, 10);
+            int right = runEnd(colHas, w / 2, 10);
             if (top < 0) { top = 0; bottom = h - 1; left = 0; right = w - 1; }
             Frame f = new Frame();
             f.bmp = b;
@@ -232,6 +232,36 @@ public class GameView extends SurfaceView implements Runnable {
         return out;
     }
 
+    private static int nearestTrue(boolean[] has, int c) {
+        for (int d = 0; d < has.length; d++) {
+            if (c - d >= 0 && has[c - d]) return c - d;
+            if (c + d < has.length && has[c + d]) return c + d;
+        }
+        return -1;
+    }
+
+    private static int runStart(boolean[] has, int center, int gap) {
+        int c = has[center] ? center : nearestTrue(has, center);
+        if (c < 0) return -1;
+        int s = c, g = 0;
+        for (int i = c - 1; i >= 0; i--) {
+            if (has[i]) { s = i; g = 0; }
+            else if (++g > gap) break;
+        }
+        return s;
+    }
+
+    private static int runEnd(boolean[] has, int center, int gap) {
+        int c = has[center] ? center : nearestTrue(has, center);
+        if (c < 0) return -1;
+        int e = c, g = 0;
+        for (int i = c + 1; i < has.length; i++) {
+            if (has[i]) { e = i; g = 0; }
+            else if (++g > gap) break;
+        }
+        return e;
+    }
+
     private void addMirrored(ArrayList<Bitmap> dest, List<Bitmap> src) {
         for (Bitmap t : src) {
             dest.add(t);
@@ -240,6 +270,14 @@ public class GameView extends SurfaceView implements Runnable {
             m.postTranslate(t.getWidth(), 0);
             dest.add(Bitmap.createBitmap(t, 0, 0, t.getWidth(), t.getHeight(), m, false));
         }
+    }
+
+    private static List<Bitmap> trimBottom(List<Bitmap> src, float keep) {
+        List<Bitmap> out = new ArrayList<>();
+        for (Bitmap b : src) {
+            out.add(Bitmap.createBitmap(b, 0, 0, b.getWidth(), (int) (b.getHeight() * keep)));
+        }
+        return out;
     }
 
     public void start() {
@@ -347,34 +385,31 @@ public class GameView extends SurfaceView implements Runnable {
         return 2.2f * (float) Math.sin(tx * 0.12f) + 1.5f * (float) Math.sin(tx * 0.05f + 1.7f);
     }
 
-    private static int terrainAt(int tx, int ty) {
-        if (Math.abs(ty - roadCenterF(tx)) < 0.9f) return 1;
-        int gh = ((tx >> 1) * 331) ^ ((ty >> 1) * 757);
-        if (((gh >>> 5) % 6) == 0) return 2;
-        return 0;
-    }
-
-    private boolean treeAt(int tx, int ty) {
-        if (props2.isEmpty() || terrainAt(tx, ty) != 2) return false;
-        int h = (tx * 40503) ^ (ty * 66827);
-        return ((h >>> 3) % 100) < 30;
-    }
-
-    private static void treeAnchor(int tx, int ty, float[] out) {
-        int h = (tx * 40503) ^ (ty * 66827);
-        out[0] = tx * TILE + TILE * (0.3f + ((h >>> 9) & 127) / 127f * 0.4f);
-        out[1] = (ty + 1) * TH - TH * 0.10f;
-    }
-
     private boolean hexBlocked(int q, int r) {
         hexToWorld(q, r, HO_F);
         int tx0 = (int) Math.floor(HO_F[0] / TILE), ty0 = (int) Math.floor(HO_F[1] / TH);
         for (int ty = ty0 - 1; ty <= ty0 + 1; ty++) {
             for (int tx = tx0 - 1; tx <= tx0 + 1; tx++) {
-                if (!treeAt(tx, ty)) continue;
-                treeAnchor(tx, ty, HO_LA);
-                worldToHex(HO_LA[0], HO_LA[1], HO_A);
-                if (HO_A[0] == q && (HO_A[1] == r || HO_A[1] - 1 == r)) return true;
+                int h = (tx * 40503) ^ (ty * 66827);
+                int roll = (h >>> 3) % 100;
+                boolean large = roll < 8 && !props2.isEmpty();
+                boolean small = !large && roll < 22 && !props.isEmpty();
+                if (!large && !small) continue;
+                Bitmap pr = large ? props2.get((h >>> 5) % props2.size())
+                                  : props.get((h >>> 5) % props.size());
+                float var = large ? (0.85f + ((h >>> 13) & 31) / 31f * 0.45f)
+                                  : (0.8f + ((h >>> 15) & 31) / 31f * 0.5f);
+                float s = ((large ? TH * 2.43f : TH * 0.45f) / pr.getHeight()) * var;
+                float ax = large ? tx * TILE + TILE * (0.3f + ((h >>> 9) & 127) / 127f * 0.4f)
+                                 : tx * TILE + TILE * (0.25f + ((h >>> 9) & 127) / 127f * 0.5f);
+                float ay = large ? (ty + 1) * TH - TH * 0.10f
+                                 : (ty + 1) * TH - TH * (0.15f + ((h >>> 11) & 31) / 31f * 0.25f);
+                float halfW = pr.getWidth() * s * 0.5f;
+                float hgt = pr.getHeight() * s;
+                if (HO_F[0] >= ax - halfW && HO_F[0] <= ax + halfW
+                        && HO_F[1] >= ay - hgt && HO_F[1] <= ay + TH * 0.25f) {
+                    return true;
+                }
             }
         }
         return false;
@@ -572,6 +607,7 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int i = enemies.size() - 1; i >= 0; i--) {
             Enemy en = enemies.get(i);
+            en.animT += dt;
             if (en.hitFlash > 0) en.hitFlash -= dt;
             if (en.dead) {
                 en.deathT += dt;
@@ -882,7 +918,7 @@ public class GameView extends SurfaceView implements Runnable {
                     d.pr = props2.get((h >>> 5) % props2.size());
                     d.ax = tx * TILE + TILE * (0.3f + ((h >>> 9) & 127) / 127f * 0.4f);
                     d.ay = (ty + 1) * TH - TH * 0.10f;
-                    d.s = (TH * 2.7f / d.pr.getHeight())
+                    d.s = (TH * 2.43f / d.pr.getHeight())
                             * (0.85f + ((h >>> 13) & 31) / 31f * 0.45f);
                     d.y = d.ay;
                     drawList.add(d);
@@ -892,7 +928,7 @@ public class GameView extends SurfaceView implements Runnable {
                     d.pr = props.get((h >>> 5) % props.size());
                     d.ax = tx * TILE + TILE * (0.25f + ((h >>> 9) & 127) / 127f * 0.5f);
                     d.ay = (ty + 1) * TH - TH * (0.15f + ((h >>> 11) & 31) / 31f * 0.25f);
-                    d.s = (TH * 0.5f / d.pr.getHeight())
+                    d.s = (TH * 0.45f / d.pr.getHeight())
                             * (0.8f + ((h >>> 15) & 31) / 31f * 0.5f);
                     d.y = d.ay;
                     drawList.add(d);
@@ -1445,10 +1481,22 @@ public class GameView extends SurfaceView implements Runnable {
         }
 
         Enemy tapped = null;
+        float bestY = -1f;
         for (Enemy en : enemies) {
             if (en.dead) continue;
-            worldToHex(en.x, en.y, TW_C);
-            if (TW_C[0] == TW_A[0] && TW_C[1] == TW_A[1]) { tapped = en; break; }
+            float ex = sx(en.x), ey = sy(en.y);
+            float hw = ENEMY_H * 0.4f * zoom;
+            if (x >= ex - hw && x <= ex + hw
+                    && y >= ey - ENEMY_H * zoom - 20 && y <= ey + 10) {
+                if (en.y > bestY) { bestY = en.y; tapped = en; }
+            }
+        }
+        if (tapped == null) {
+            for (Enemy en : enemies) {
+                if (en.dead) continue;
+                worldToHex(en.x, en.y, TW_C);
+                if (TW_C[0] == TW_A[0] && TW_C[1] == TW_A[1]) { tapped = en; break; }
+            }
         }
 
         if (tapped != null) {
