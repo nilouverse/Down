@@ -264,7 +264,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // ---------- hex math ----------
     private static void hexToWorld(int q, int r, float[] out) {
         out[0] = HEX * (float) Math.sqrt(3) * (q + r / 2f);
         out[1] = HEX * 1.5f * r * SQUASH;
@@ -291,7 +290,6 @@ public class GameView extends SurfaceView implements Runnable {
         return ((long) q << 32) | (r & 0xFFFFFFFFL);
     }
 
-    // ---------- terrain ----------
     private static float roadCenterF(float tx) {
         return 2.2f * (float) Math.sin(tx * 0.12f) + 1.5f * (float) Math.sin(tx * 0.05f + 1.7f);
     }
@@ -346,7 +344,6 @@ public class GameView extends SurfaceView implements Runnable {
         return !hexOccupied(q, r, self) && !hexBlocked(q, r);
     }
 
-    // ---------- turns ----------
     private void spawnEnemy() {
         for (int tries = 0; tries < 12; tries++) {
             float a = (float) (Math.random() * Math.PI * 2);
@@ -473,12 +470,11 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void startStory() {
-        story = new Story(this);
+        story = new Story(getContext());
         story.load("section1");
         state = STATE_STORY;
     }
 
-    // ---------- update ----------
     private void updateEmbers(float dt) {
         for (Ember em : embers) {
             em.y -= em.s * dt;
@@ -663,7 +659,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // ---------- draw ----------
     private void draw() {
         SurfaceHolder h = getHolder();
         if (!h.getSurface().isValid()) return;
@@ -755,7 +750,6 @@ public class GameView extends SurfaceView implements Runnable {
         return true;
     }
 
-    // ---------- ground ----------
     private void drawGround(Canvas cv) {
         float halfW = W / (2f * zoom), halfH = H / (2f * zoom);
         float wx0 = camX - halfW, wx1 = camX + halfW;
@@ -825,7 +819,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // ---------- sorted entities ----------
     private D obtainD() {
         return dPool.isEmpty() ? new D() : dPool.remove(dPool.size() - 1);
     }
@@ -999,7 +992,6 @@ public class GameView extends SurfaceView implements Runnable {
         }
     }
 
-    // ---------- player frames ----------
     private static float blendCurve(float frac) {
         float k = (frac - 0.65f) / 0.35f;
         return k < 0 ? 0 : (k > 1 ? 1 : k);
@@ -1309,7 +1301,6 @@ public class GameView extends SurfaceView implements Runnable {
         return (float) Math.hypot(dx, dy);
     }
 
-    // ---------- input ----------
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (state == STATE_MENU) return onMenuTouch(e);
