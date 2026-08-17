@@ -1106,7 +1106,7 @@ public class GameView extends SurfaceView implements Runnable {
         if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
         cv.restore();
 
-        float x = sx(en.x), y = sy(en.y) + FOOT_DROP * zoom;
+        float top = by - PLAYER_H * zoom - 34;
         paint.setColor(0xFF330000);
         cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 10, paint);
         paint.setColor(0xFFff2bd6);
@@ -1150,7 +1150,7 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
-        float x = sx(en.x), y = sy(en.y) + ENEMY_SINK * zoom;
+        float x = sx(en.x), y = sy(en.y) + FOOT_DROP * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
         // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
@@ -1452,7 +1452,7 @@ public class GameView extends SurfaceView implements Runnable {
         float bestY = -1f;
         for (Enemy en : enemies) {
             if (en.dead) continue;
-            float ex = sx(en.x), ey = sy(en.y) + ENEMY_SINK * zoom;
+            float ex = sx(en.x), ey = sy(en.y) + FOOT_DROP * zoom;
             float hw = ENEMY_H * 0.4f * zoom;
             if (x >= ex - hw && x <= ex + hw
                     && y >= ey - ENEMY_H * zoom - 20 && y <= ey + 10) {
