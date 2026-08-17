@@ -63,7 +63,14 @@ public class GameView extends SurfaceView implements Runnable {
     private float downX = -9999, downY, lastPX, lastPY;
     private boolean moved, panning;
 
-    private List<Bitmap> idleF, glide, attack, eGlide, eAttack, props, props2;
+    private static class Frame { Bitmap bmp; int top, ch; float ref; }
+    private final ArrayList<Frame> idleFr = new ArrayList<>();
+    private final ArrayList<Frame> glideFr = new ArrayList<>();
+    private final ArrayList<Frame> atkFr = new ArrayList<>();
+    private Frame frameA, frameB;
+    private float frameK;
+
+    private List<Bitmap> eGlide, eAttack, props, props2;
     private final ArrayList<Bitmap> roadVar = new ArrayList<>();
     private final ArrayList<Bitmap> grassVar = new ArrayList<>();
 
@@ -123,6 +130,7 @@ public class GameView extends SurfaceView implements Runnable {
     private final Path hexPath = new Path();
     private final RectF rf = new RectF();
     private final Rect roadSrc = new Rect();
+    private final Rect frameSrc = new Rect();
     private final ColorMatrixColorFilter brightFlash = new ColorMatrixColorFilter(new float[] {
             1.16f, 0, 0, 0, 90,
             0, 0.6f, 0, 0, 0,
@@ -132,10 +140,10 @@ public class GameView extends SurfaceView implements Runnable {
 
     public GameView(Context ctx) {
         super(ctx);
-        idleF   = Sprites.cutSheet(ctx, "sprites/idle.png",         2, 2, 4);
-        glide   = Sprites.cutSheet(ctx, "sprites/glide.png",        2, 2, 2);
-        attack  = new ArrayList<>(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2));
-        attack.addAll(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2));
+        idleFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4)));
+        glideFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2)));
+        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2)));
+        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2)));
         eGlide  = Sprites.cutSheet(ctx, "sprites/enemy_glide.png",  2, 4, 4);
         eAttack = Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 4, 4);
         props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
@@ -166,6 +174,34 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
+    }
+
+    private static ArrayList<Frame> buildFrames(List<Bitmap> cells) {
+        ArrayList<Frame> out = new ArrayList<>();
+        for (Bitmap b : cells) {
+            int w = b.getWidth(), h = b.getHeight();
+            int[] px = new int[w * h];
+            b.getPixels(px, 0, w, 0, 0, w, h);
+            int top = -1, bottom = -1;
+            for (int y = 0; y < h; y++) {
+                boolean any = false;
+                for (int x = 0; x < w; x++) {
+                    if ((px[y * w + x] >>> 24) > 16) { any = true; break; }
+                }
+                if (any) { if (top < 0) top = y; bottom = y; }
+            }
+            if (top < 0) { top = 0; bottom = h - 1; }
+            Frame f = new Frame();
+            f.bmp = b;
+            f.top = top;
+            f.ch = Math.max(1, bottom - top + 1);
+            out.add(f);
+        }
+        if (!out.isEmpty()) {
+            float r = out.get(0).ch;
+            for (Frame f : out) f.ref = r;
+        }
+        return out;
     }
 
     private void addMirrored(ArrayList<Bitmap> dest, List<Bitmap> src) {
@@ -893,6 +929,62 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setAlpha(255);
     }
 
+    // ---------- player frames ----------
+    private static float blendCurve(float frac) {
+        float k = (frac - 0.65f) / 0.35f;
+        return k < 0 ? 0 : (k > 1 ? 1 : k);
+    }
+
+    private void computePlayerFrame() {
+        frameB = null; frameK = 0;
+        if (player.isAttacking() && !atkFr.isEmpty()) {
+            int[] seq = ATK_SEQ[attackType - 1];
+            float pos = (player.attackTime / player.attackDuration) * seq.length;
+            int i0 = (int) pos;
+            if (i0 >= seq.length) { i0 = seq.length - 1; pos = i0; }
+            int i1 = Math.min(i0 + 1, seq.length - 1);
+            frameA = atkFr.get(seq[i0]);
+            frameB = atkFr.get(seq[i1]);
+            frameK = blendCurve(pos - i0);
+            return;
+        }
+        if (player.floater.state == 0 && !idleFr.isEmpty()) {
+            float pos = player.bobTime * 2f;
+            int i0 = ((int) pos) % idleFr.size();
+            int i1 = (i0 + 1) % idleFr.size();
+            frameA = idleFr.get(i0);
+            frameB = idleFr.get(i1);
+            frameK = blendCurve(pos - (int) pos);
+            return;
+        }
+        if (glideFr.size() >= 4) {
+            Floater f = player.floater;
+            if (f.state == 1) {
+                frameA = glideFr.get(f.t < 0.1f ? 3 : 1);
+            } else if (f.state == 2) {
+                float pos = player.bobTime * 6f;
+                int i0 = 1 + ((int) pos) % 2;
+                int i1 = 1 + (((int) pos) + 1) % 2;
+                frameA = glideFr.get(i0);
+                frameB = glideFr.get(i1);
+                frameK = blendCurve(pos - (int) pos);
+            } else {
+                frameA = glideFr.get(f.t < 0.06f ? 2 : f.t < 0.12f ? 1 : f.t < 0.17f ? 3 : 0);
+            }
+            return;
+        }
+        frameA = null;
+    }
+
+    private void drawFrame(Canvas cv, Frame f, int alpha) {
+        float s = PLAYER_H * zoom / f.ref;
+        frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
+        rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
+        paint.setAlpha(alpha);
+        cv.drawBitmap(f.bmp, frameSrc, rf, paint);
+        paint.setAlpha(255);
+    }
+
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
         float sw = (fl ? 45 : 55) * zoom;
@@ -902,16 +994,12 @@ public class GameView extends SurfaceView implements Runnable {
         cv.drawBitmap(shadowBmp, null, rf, paint);
         paint.setAlpha(255);
 
-        Bitmap frame = pickFrame();
+        computePlayerFrame();
         cv.save();
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
-        if (frame != null) {
-            float s = PLAYER_H * zoom / frame.getHeight();
-            rf.set(-frame.getWidth() * s / 2f, -frame.getHeight() * s,
-                    frame.getWidth() * s / 2f, 0);
-            cv.drawBitmap(frame, null, rf, paint);
-        }
+        if (frameA != null) drawFrame(cv, frameA, 255);
+        if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
         cv.restore();
 
         float top = sy(player.y) - PLAYER_H * zoom - 26;
@@ -920,28 +1008,6 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setColor(0xFFff2bd6);
         cv.drawRect(sx(player.x) - 45, top,
                 sx(player.x) - 45 + 90f * playerHp / 100, top + 12, paint);
-    }
-
-    private Bitmap pickFrame() {
-        if (player.isAttacking() && !attack.isEmpty()) {
-            int[] seq = ATK_SEQ[attackType - 1];
-            float prog = player.attackTime / player.attackDuration;
-            int i = (int) (prog * seq.length);
-            if (i >= seq.length) i = seq.length - 1;
-            return attack.get(seq[i]);
-        }
-        if (player.floater.state == 0 && !idleF.isEmpty()) {
-            return idleF.get(((int) (player.bobTime * 2)) % idleF.size());
-        }
-        if (glide.size() >= 4) {
-            Floater f = player.floater;
-            int idx;
-            if (f.state == 1) idx = f.t < 0.1f ? 3 : 1;
-            else if (f.state == 2) idx = 1 + ((int) (player.bobTime * 6)) % 2;
-            else idx = f.t < 0.06f ? 2 : f.t < 0.12f ? 1 : f.t < 0.17f ? 3 : 0;
-            return glide.get(idx);
-        }
-        return null;
     }
 
     private Bitmap pickEnemyFrame(Enemy en) {
