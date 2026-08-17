@@ -441,8 +441,12 @@ public class Story {
         for (Actor a : actors) if (!a.hidden) { SD s = new SD(); s.y = a.y; s.a = a; sdList.add(s); }
         Collections.sort(sdList, BY_Y);
         for (SD s : sdList) {
-            if (s.p != null) drawProp(cv, s.p);
-            else drawActor(cv, s.a);
+            try {
+                if (s.p != null) drawProp(cv, s.p);
+                else drawActor(cv, s.a);
+            } catch (Exception e) {
+                // a bad sprite or frame must never kill the scene
+            }
         }
 
         if (flashT < 0.5f) {
@@ -541,11 +545,29 @@ public class Story {
         return shadowBmp;
     }
 
+    private void drawAura(Canvas cv, float x, float y, int color, float t) {
+        float pulse = 0.5f + 0.5f * (float) Math.sin(t * 2.4f);
+        float r = (55 + 12 * pulse) * zoom;
+        cv.save();
+        cv.translate(x, y);
+        cv.scale(1f, SQUASH);
+        paint.setShader(new RadialGradient(0, 0, r, color, 0x00000000, Shader.TileMode.CLAMP));
+        paint.setAlpha((int) (60 + 55 * pulse));
+        cv.drawCircle(0, 0, r, paint);
+        paint.setShader(null);
+        paint.setAlpha(255);
+        cv.restore();
+    }
+
     private void drawActor(Canvas cv, Actor a) {
         float x = sx(a.x), y = sy(a.y);
         boolean idle = !a.moving;
-        float br = idle ? (float) Math.sin(a.animT * 1.3f) : 0f;
-        float sw = 45 * zoom * (1f - 0.06f * br);
+        // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
+        float br = idle ? (float) Math.sin(a.animT * 1.7f) : 0f;
+
+        drawAura(cv, x, y, a.id.equals("nilou") ? 0xFFff2233 : 0xFFff00ff, a.animT);
+
+        float sw = 45 * zoom * (1f - 0.045f * br);
         paint.setAlpha(200);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadow(), null, rf, paint);
@@ -554,13 +576,15 @@ public class Story {
         cv.save();
         cv.translate(x, y);
         if (a.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.028f * br, 1f + 0.045f * br);
+        if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
         Frame fa = null, fb = null;
         float fk = 0;
         if (a.moving && a.glide != null && a.glide.size() >= 4) {
             float pos = a.animT * 6f;
             int i0 = 1 + ((int) pos) % 2;
             int i1 = 1 + (((int) pos) + 1) % 2;
+            i0 = Math.min(i0, a.glide.size() - 1);
+            i1 = Math.min(i1, a.glide.size() - 1);
             fa = a.glide.get(i0);
             fb = a.glide.get(i1);
             float fr = (pos - (int) pos);
@@ -582,11 +606,21 @@ public class Story {
             frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
             rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
         } else if (f.cCenter) {
+            // RIGHT-EDGE ANCHOR — DO NOT "FIX" THIS. The left side (cape,
+            // hair) animates while the front stays put; pinning the crop to
+            // the content's RIGHT edge (rgt) with the shared width (ww)
+            // keeps the body stable. Centering re-introduces jitter.
             int wl = Math.max(0, f.rgt - f.ww);
             int wr = f.rgt;
-            frameSrc.set(wl, f.top, wr, f.top + f.ch);
-            float right = f.ww * s / 2f;
-            rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
+            if (wl >= wr || f.top + f.ch > f.bmp.getHeight()) {
+                frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
+                rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
+                        f.bmp.getWidth() * s / 2f, 0);
+            } else {
+                frameSrc.set(wl, f.top, wr, f.top + f.ch);
+                float right = f.ww * s / 2f;
+                rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
+            }
         } else {
             frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
             rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
