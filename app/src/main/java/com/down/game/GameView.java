@@ -35,10 +35,10 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float TILE = 192f;
     private static final float TH = TILE * SQUASH;
     private static final int MOVE_HEX = 3;
-    private static final float PLAYER_H = 220f, ENEMY_H = 200f;
+    private static final float PLAYER_H = 200f, ENEMY_H = 200f;
     // Pushes every sprite down so the feet plant on the shadow. The art's
     // baked-in shadow leaves the feet high inside the crop — do not remove.
-    private static final float FOOT_DROP = 24f;
+    private static final float FOOT_DROP = 40f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF221829;
@@ -170,7 +170,7 @@ public class GameView extends SurfaceView implements Runnable {
         eIdleFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_idle.png", 2, 2, 4), false, true));
         eGlideFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glide.png", 2, 2, 2), true, false));
         eGlowFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glow.png", 2, 2, 2), true, false));
-        eAtkFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), true, false));
+        eAtkFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), false, false));
         props   = Sprites.trimBottom(Sprites.cutSheet(ctx, "sprites/props.png",  2, 4, 4), 0.9f);
         props2  = Sprites.trimBottom(Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
 
@@ -1067,20 +1067,6 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setAlpha(255);
     }
 
-    private void drawAura(Canvas cv, float x, float y, int color, float t) {
-        float pulse = 0.5f + 0.5f * (float) Math.sin(t * 2.4f);
-        float r = (55 + 12 * pulse) * zoom;
-        cv.save();
-        cv.translate(x, y);
-        cv.scale(1f, SQUASH);
-        paint.setShader(new RadialGradient(0, 0, r, color, 0x00000000, Shader.TileMode.CLAMP));
-        paint.setAlpha((int) (60 + 55 * pulse));
-        cv.drawCircle(0, 0, r, paint);
-        paint.setShader(null);
-        paint.setAlpha(255);
-        cv.restore();
-    }
-
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
         boolean idle = player.floater.state == 0 && !player.isAttacking();
@@ -1088,7 +1074,6 @@ public class GameView extends SurfaceView implements Runnable {
         float br = idle ? (float) Math.sin(player.bobTime * 1.7f) : 0f;
 
         float by = sy(player.y) + FOOT_DROP * zoom;
-        drawAura(cv, sx(player.x), by, 0xFFff2233, player.bobTime);
 
         float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
         paint.setAlpha(fl ? 150 : 220);
@@ -1154,8 +1139,6 @@ public class GameView extends SurfaceView implements Runnable {
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
         // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
-        // Magenta aura matches the sheet key color and hides the fringe at the feet.
-        if (!en.dead) drawAura(cv, x, y, 0xFFff00ff, en.animT);
         float sw = 45 * zoom * (1f - 0.045f * br);
         paint.setAlpha(220);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
