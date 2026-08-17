@@ -90,8 +90,6 @@ public class GameView extends SurfaceView implements Runnable {
     private final ArrayList<Frame> eGlowFr = new ArrayList<>();
     private final ArrayList<Frame> eAtkFr = new ArrayList<>();
     private List<Bitmap> props, props2;
-    private final ArrayList<Bitmap> roadVar = new ArrayList<>();
-    private final ArrayList<Bitmap> grassVar = new ArrayList<>();
 
     private float runeX, runeY, runeT = 99;
 
@@ -179,14 +177,6 @@ public class GameView extends SurfaceView implements Runnable {
         eAtkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), true, false));
         props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
         props2  = Sprites.cutSheet(ctx, "sprites/props2.png",       2, 4, 4);
-
-        List<Bitmap> t2 = Sprites.cutSheet(ctx, "sprites/tiles2.png", 2, 2, 10);
-        if (t2.size() >= 4) {
-            List<Bitmap> road = new ArrayList<>(); road.add(t2.get(0)); road.add(t2.get(1));
-            List<Bitmap> grass = new ArrayList<>(); grass.add(t2.get(2)); grass.add(t2.get(3));
-            addMirrored(roadVar, road);
-            addMirrored(grassVar, grass);
-        }
 
         paint.setFilterBitmap(true);
         tintPaint.setFilterBitmap(true);
@@ -802,70 +792,68 @@ public class GameView extends SurfaceView implements Runnable {
         float halfW = W / (2f * zoom), halfH = H / (2f * zoom);
         float wx0 = camX - halfW, wx1 = camX + halfW;
         float wy0 = camY - halfH, wy1 = camY + halfH;
-        int ty0 = (int) Math.floor(wy0 / TH) - 1, ty1 = (int) Math.ceil(wy1 / TH) + 1;
 
         paint.setAlpha(255);
-        paint.setColor(0x14000000);
-        for (int ty = ty0; ty <= ty1 + 1; ty++) {
-            float y = sy(ty * TH);
-            rf.set(-2, y - zoom, W + 2, y + 1.6f * zoom);
-            cv.drawRect(rf, paint);
-        }
+        paint.setColor(0xFF1c1320);
+        cv.drawRect(0, 0, W, H, paint);
 
-        if (!grassVar.isEmpty()) {
-            int gx0 = (int) Math.floor(wx0 / (TILE * 2)) - 1, gx1 = (int) Math.ceil(wx1 / (TILE * 2)) + 1;
-            int gy0 = (int) Math.floor(wy0 / (TH * 2)) - 1, gy1 = (int) Math.ceil(wy1 / (TH * 2)) + 1;
-            paint.setAlpha(255);
-            for (int gy = gy0; gy <= gy1; gy++) {
-                for (int gx = gx0; gx <= gx1; gx++) {
-                    int gh = (gx * 331) ^ (gy * 757);
-                    if (((gh >>> 5) % 6) != 0) continue;
-                    float x = gx * TILE * 2, y = gy * TH * 2;
-                    Bitmap g = grassVar.get(((gh & 1) << 1) | ((gh >>> 2) & 1));
-                    rf.set(sx(x), sy(y), sx(x) + TILE * 2 * zoom, sy(y) + TH * 2 * zoom);
-                    cv.drawBitmap(g, null, rf, paint);
-                    if (terrainAt(gx * 2, gy * 2 + 1) != 1 && terrainAt(gx * 2 + 1, gy * 2 + 1) != 1) {
-                        paint.setColor(0xFF0f0a16);
-                        float by = sy(y + TH * 2);
-                        rf.set(sx(x), by, sx(x) + TILE * 2 * zoom, by + 15 * zoom);
-                        cv.drawRect(rf, paint);
-                        paint.setAlpha(255);
-                    }
-                }
-            }
-        }
-        drawRoad(cv, wx0, wx1);
-    }
-
-    private void drawRoad(Canvas cv, float wx0, float wx1) {
-        if (roadVar.isEmpty()) return;
-        float strip = 26f;
-        float period = TILE * 4;
-        int tw = roadVar.get(0).getWidth(), th = roadVar.get(0).getHeight();
+        float strip = 30f;
         float x = ((float) Math.floor(wx0 / strip) - 1) * strip;
         for (; x < wx1 + strip; x += strip) {
             float tx = x / TILE;
             float cyw = roadCenterF(tx) * TH;
-            float half = TILE * (0.82f + 0.10f * (float) Math.sin(tx * 0.21f + 0.9f)) * SQUASH;
+            float half = TILE * (0.80f + 0.10f * (float) Math.sin(tx * 0.21f + 0.9f)) * SQUASH;
             float sxp = sx(x), w = strip * zoom + 2f;
             float top = sy(cyw - half), bot = sy(cyw + half);
 
-            paint.setColor(0x46000000);
-            rf.set(sxp - 1, top - 6 * zoom, sxp + w + 1, top + 2 * zoom);
+            paint.setColor(0xFF150d18);
+            rf.set(sxp - 1, top - 9 * zoom, sxp + w + 1, top + 2 * zoom);
             cv.drawRect(rf, paint);
-            rf.set(sxp - 1, bot - 2 * zoom, sxp + w + 1, bot + 6 * zoom);
+            rf.set(sxp - 1, bot - 2 * zoom, sxp + w + 1, bot + 9 * zoom);
             cv.drawRect(rf, paint);
 
-            float u0 = (x % period) / period; if (u0 < 0) u0 += 1f;
-            float u1 = ((x + strip) % period) / period; if (u1 < 0) u1 += 1f;
-            int s0 = (int) (u0 * tw), s1 = (int) (u1 * tw) + 1;
-            if (s1 <= s0) s1 = Math.min(tw, s0 + 2);
-            int vi = (((int) Math.floor(x / period) & 1) << 1)
-                    | ((int) Math.floor(cyw / (TH * 4)) & 1);
-            roadSrc.set(s0, 0, s1, th);
-            paint.setAlpha(255);
+            paint.setColor(0xFF2c2030);
             rf.set(sxp, top, sxp + w, bot);
-            cv.drawBitmap(roadVar.get(vi), roadSrc, rf, paint);
+            cv.drawRect(rf, paint);
+
+            paint.setColor(0xFF3a2c40);
+            rf.set(sxp, top + 2 * zoom, sxp + w, top + 5 * zoom);
+            cv.drawRect(rf, paint);
+            rf.set(sxp, bot - 5 * zoom, sxp + w, bot - 2 * zoom);
+            cv.drawRect(rf, paint);
+
+            int idx = (int) Math.floor(x / (TILE * 0.9f));
+            if ((idx & 1) == 0) {
+                paint.setColor(0x55120b16);
+                float my = sy(cyw);
+                rf.set(sxp + 3 * zoom, my - 1.5f * zoom, sxp + w - 3 * zoom, my + 1.5f * zoom);
+                cv.drawRect(rf, paint);
+            }
+        }
+
+        int px0 = (int) Math.floor(wx0 / (TILE * 2)) - 1, px1 = (int) Math.ceil(wx1 / (TILE * 2)) + 1;
+        int py0 = (int) Math.floor(wy0 / (TH * 2)) - 1, py1 = (int) Math.ceil(wy1 / (TH * 2)) + 1;
+        for (int py = py0; py <= py1; py++) {
+            for (int px = px0; px <= px1; px++) {
+                int h = (px * 40503) ^ (py * 66827);
+                if (((h >>> 4) & 7) != 0) continue;
+                float cxw = px * TILE * 2 + TILE * (0.3f + ((h >>> 7) & 127) / 127f * 1.4f);
+                float cyw = py * TH * 2 + TH * (0.3f + ((h >>> 11) & 127) / 127f * 1.4f);
+                if (Math.abs(cyw / TH - roadCenterF(cxw / TILE)) < 1.0f) continue;
+                float rw = (50 + ((h >>> 15) & 63)) * zoom;
+                float rh = rw * SQUASH * (0.6f + ((h >>> 21) & 31) / 31f * 0.5f);
+                paint.setColor(0xFF160e1c);
+                rf.set(sx(cxw) - rw, sy(cyw) - rh, sx(cxw) + rw, sy(cyw) + rh);
+                cv.drawOval(rf, paint);
+            }
+        }
+
+        int ty0 = (int) Math.floor(wy0 / TH) - 1, ty1 = (int) Math.ceil(wy1 / TH) + 1;
+        paint.setColor(0x12000000);
+        for (int ty = ty0; ty <= ty1 + 1; ty++) {
+            float y = sy(ty * TH);
+            rf.set(-2, y - zoom, W + 2, y + 1.6f * zoom);
+            cv.drawRect(rf, paint);
         }
     }
 
@@ -886,9 +874,9 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int ty = ty0; ty <= ty1; ty++) {
             for (int tx = tx0; tx <= tx1; tx++) {
-                if (terrainAt(tx, ty) != 2) continue;
                 int h = (tx * 40503) ^ (ty * 66827);
-                if (((h >>> 3) % 100) < 30) {
+                int roll = (h >>> 3) % 100;
+                if (roll < 8 && !props2.isEmpty()) {
                     D d = obtainD();
                     d.kind = 0;
                     d.pr = props2.get((h >>> 5) % props2.size());
@@ -898,7 +886,7 @@ public class GameView extends SurfaceView implements Runnable {
                             * (0.85f + ((h >>> 13) & 31) / 31f * 0.45f);
                     d.y = d.ay;
                     drawList.add(d);
-                } else if (((h >>> 7) % 100) < 40 && !props.isEmpty()) {
+                } else if (roll < 22 && !props.isEmpty()) {
                     D d = obtainD();
                     d.kind = 0;
                     d.pr = props.get((h >>> 5) % props.size());
