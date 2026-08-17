@@ -26,7 +26,7 @@ public class Story {
     private static final float TH = TILE * SQUASH;
     // Pushes every sprite down so the feet plant on the shadow. The art's
     // baked-in shadow leaves the feet high inside the crop — do not remove.
-    private static final float FOOT_DROP = 24f;
+    private static final float FOOT_DROP = 40f;
 
     private final Context ctx;
     private final Paint paint = new Paint();
@@ -238,7 +238,7 @@ public class Story {
             a.idle = new ArrayList<>(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4), false, true));
             a.glide = new ArrayList<>(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2), true, false));
             if (a.idle.size() >= 4) { a.idle.get(1).dx = -8f; a.idle.get(2).dx = -8f; }
-            a.h = 220;
+            a.h = 200;
         } else {
             List<Frame> w = Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/soldier.png", 2, 2, 12), false, true);
             a.glide = new ArrayList<>(w);
@@ -548,27 +548,11 @@ public class Story {
         return shadowBmp;
     }
 
-    private void drawAura(Canvas cv, float x, float y, int color, float t) {
-        float pulse = 0.5f + 0.5f * (float) Math.sin(t * 2.4f);
-        float r = (55 + 12 * pulse) * zoom;
-        cv.save();
-        cv.translate(x, y);
-        cv.scale(1f, SQUASH);
-        paint.setShader(new RadialGradient(0, 0, r, color, 0x00000000, Shader.TileMode.CLAMP));
-        paint.setAlpha((int) (60 + 55 * pulse));
-        cv.drawCircle(0, 0, r, paint);
-        paint.setShader(null);
-        paint.setAlpha(255);
-        cv.restore();
-    }
-
     private void drawActor(Canvas cv, Actor a) {
         float x = sx(a.x), y = sy(a.y) + FOOT_DROP * zoom;
         boolean idle = !a.moving;
         // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(a.animT * 1.7f) : 0f;
-
-        drawAura(cv, x, y, a.id.equals("nilou") ? 0xFFff2233 : 0xFFff00ff, a.animT);
 
         float sw = 45 * zoom * (1f - 0.045f * br);
         paint.setAlpha(200);
@@ -577,33 +561,39 @@ public class Story {
         paint.setAlpha(255);
 
         cv.save();
-        cv.translate(x, y);
-        if (a.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
-        Frame fa = null, fb = null;
-        float fk = 0;
-        if (a.moving && a.glide != null && a.glide.size() >= 4) {
-            float pos = a.animT * 6f;
-            int i0 = 1 + ((int) pos) % 2;
-            int i1 = 1 + (((int) pos) + 1) % 2;
-            i0 = Math.min(i0, a.glide.size() - 1);
-            i1 = Math.min(i1, a.glide.size() - 1);
-            fa = a.glide.get(i0);
-            fb = a.glide.get(i1);
-            float fr = (pos - (int) pos);
-            fk = (fr - 0.65f) / 0.35f;
-            if (fk < 0) fk = 0;
-            if (fk > 1) fk = 1;
-        } else if (a.idle != null && !a.idle.isEmpty()) {
-            fa = a.idle.get(((int) (a.animT * 3f)) % a.idle.size());
+        try {
+            cv.translate(x, y);
+            if (a.facing < 0) cv.scale(-1, 1);
+            if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
+            Frame fa = null, fb = null;
+            float fk = 0;
+            if (a.moving && a.glide != null && a.glide.size() >= 4) {
+                float pos = a.animT * 6f;
+                int i0 = 1 + ((int) pos) % 2;
+                int i1 = 1 + (((int) pos) + 1) % 2;
+                i0 = Math.min(i0, a.glide.size() - 1);
+                i1 = Math.min(i1, a.glide.size() - 1);
+                fa = a.glide.get(i0);
+                fb = a.glide.get(i1);
+                float fr = (pos - (int) pos);
+                fk = (fr - 0.65f) / 0.35f;
+                if (fk < 0) fk = 0;
+                if (fk > 1) fk = 1;
+            } else if (a.idle != null && !a.idle.isEmpty()) {
+                fa = a.idle.get(((int) (a.animT * 3f)) % a.idle.size());
+            }
+            if (fa != null) drawFrame(cv, fa, 255, a.h);
+            if (fb != null && fk > 0.02f) drawFrame(cv, fb, (int) (fk * 255), a.h);
+        } finally {
+            cv.restore();
         }
-        if (fa != null) drawFrame(cv, fa, 255, a.h);
-        if (fb != null && fk > 0.02f) drawFrame(cv, fb, (int) (fk * 255), a.h);
-        cv.restore();
     }
 
     private void drawFrame(Canvas cv, Frame f, int alpha, float hWorld) {
+        if (f == null || f.bmp == null || f.bmp.isRecycled()) return;
+        if (f.cw <= 0 || f.ch <= 0) return;
         float s = hWorld * zoom / f.ref;
+        if (s <= 0) return;
         paint.setAlpha(alpha);
         if (f.vCrop) {
             frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
@@ -615,12 +605,13 @@ public class Story {
             // keeps the body stable. Centering re-introduces jitter.
             int wl = Math.max(0, f.rgt - f.ww);
             int wr = f.rgt;
-            if (wl >= wr || f.top + f.ch > f.bmp.getHeight()) {
+            if (wl >= wr || f.top + f.ch > f.bmp.getHeight() || f.top < 0) {
                 frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
                 rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
                         f.bmp.getWidth() * s / 2f, 0);
             } else {
                 frameSrc.set(wl, f.top, wr, f.top + f.ch);
+                if (frameSrc.left >= frameSrc.right || frameSrc.top >= frameSrc.bottom) return;
                 float right = f.ww * s / 2f;
                 rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
             }
@@ -630,6 +621,7 @@ public class Story {
                     f.bmp.getWidth() * s / 2f, 0);
         }
         if (f.dx != 0) rf.offset(f.dx * zoom, 0);
+        if (rf.left >= rf.right || rf.top >= rf.bottom) return;
         cv.drawBitmap(f.bmp, frameSrc, rf, paint);
         paint.setAlpha(255);
     }
