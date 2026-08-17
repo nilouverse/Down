@@ -27,7 +27,7 @@ import java.util.List;
 
 public class GameView extends SurfaceView implements Runnable {
 
-    private static final int STATE_MENU = 0, STATE_GAME = 1;
+    private static final int STATE_MENU = 0, STATE_GAME = 1, STATE_STORY = 2;
     private static final int PH_PLAYER = 0, PH_ENEMY = 1;
 
     private static final float SQUASH = 0.6f;
@@ -57,6 +57,7 @@ public class GameView extends SurfaceView implements Runnable {
     private volatile boolean running;
 
     private int state = STATE_MENU;
+    private Story story;
     private boolean camSnap;
     private int menuPress;
     private final RectF menuBtnTest = new RectF();
@@ -74,12 +75,6 @@ public class GameView extends SurfaceView implements Runnable {
     private float velX, velY, flingX, flingY;
     private long lastMoveT;
 
-    private static class Frame {
-        Bitmap bmp;
-        int top, ch, left, cw, rgt, ww;
-        float ref, dx;
-        boolean vCrop, cCenter;
-    }
     private final ArrayList<Frame> idleFr = new ArrayList<>();
     private final ArrayList<Frame> glideFr = new ArrayList<>();
     private final ArrayList<Frame> atkFr = new ArrayList<>();
@@ -162,20 +157,20 @@ public class GameView extends SurfaceView implements Runnable {
 
     public GameView(Context ctx) {
         super(ctx);
-        idleFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4), false, true));
-        glideFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2), true, false));
-        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2), true, false));
-        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2), true, false));
+        idleFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4), false, true));
+        glideFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2), true, false));
+        atkFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2), true, false));
+        atkFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2), true, false));
         if (idleFr.size() >= 4) {
             idleFr.get(1).dx = -8f;
             idleFr.get(2).dx = -8f;
         }
-        eIdleFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_idle.png", 2, 2, 4), false, true));
-        eGlideFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glide.png", 2, 2, 2), true, false));
-        eGlowFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glow.png", 2, 2, 2), true, false));
-        eAtkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), true, false));
-        props   = trimBottom(Sprites.cutSheet(ctx, "sprites/props.png",  2, 4, 4), 0.9f);
-        props2  = trimBottom(Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
+        eIdleFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_idle.png", 2, 2, 4), false, true));
+        eGlideFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glide.png", 2, 2, 2), true, false));
+        eGlowFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glow.png", 2, 2, 2), true, false));
+        eAtkFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), true, false));
+        props   = Sprites.trimBottom(Sprites.cutSheet(ctx, "sprites/props.png",  2, 4, 4), 0.9f);
+        props2  = Sprites.trimBottom(Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
 
         paint.setFilterBitmap(true);
         tintPaint.setFilterBitmap(true);
@@ -194,83 +189,6 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
-    }
-
-    private static ArrayList<Frame> buildFrames(List<Bitmap> cells, boolean vCrop, boolean cCenter) {
-        ArrayList<Frame> out = new ArrayList<>();
-        for (Bitmap b : cells) {
-            int w = b.getWidth(), h = b.getHeight();
-            int[] px = new int[w * h];
-            b.getPixels(px, 0, w, 0, 0, w, h);
-            boolean[] rowHas = new boolean[h];
-            boolean[] colHas = new boolean[w];
-            for (int y = 0; y < h; y++) {
-                for (int x = 0; x < w; x++) {
-                    if ((px[y * w + x] >>> 24) > 16) { rowHas[y] = true; colHas[x] = true; }
-                }
-            }
-            int top = runStart(rowHas, h / 2, 10);
-            int bottom = runEnd(rowHas, h / 2, 10);
-            int left = runStart(colHas, w / 2, 10);
-            int right = runEnd(colHas, w / 2, 10);
-            if (top < 0) { top = 0; bottom = h - 1; left = 0; right = w - 1; }
-            Frame f = new Frame();
-            f.bmp = b;
-            f.top = top;
-            f.ch = Math.max(1, bottom - top + 1);
-            f.left = left;
-            f.cw = Math.max(1, right - left + 1);
-            f.rgt = left + f.cw;
-            f.vCrop = vCrop;
-            f.cCenter = cCenter;
-            out.add(f);
-        }
-        int maxW = 0;
-        for (Frame f : out) maxW = Math.max(maxW, f.cw);
-        for (Frame f : out) f.ww = maxW;
-        if (!out.isEmpty()) {
-            float r = out.get(0).ch;
-            for (Frame f : out) f.ref = r;
-        }
-        return out;
-    }
-
-    private static int nearestTrue(boolean[] has, int c) {
-        for (int d = 0; d < has.length; d++) {
-            if (c - d >= 0 && has[c - d]) return c - d;
-            if (c + d < has.length && has[c + d]) return c + d;
-        }
-        return -1;
-    }
-
-    private static int runStart(boolean[] has, int center, int gap) {
-        int c = has[center] ? center : nearestTrue(has, center);
-        if (c < 0) return -1;
-        int s = c, g = 0;
-        for (int i = c - 1; i >= 0; i--) {
-            if (has[i]) { s = i; g = 0; }
-            else if (++g > gap) break;
-        }
-        return s;
-    }
-
-    private static int runEnd(boolean[] has, int center, int gap) {
-        int c = has[center] ? center : nearestTrue(has, center);
-        if (c < 0) return -1;
-        int e = c, g = 0;
-        for (int i = c + 1; i < has.length; i++) {
-            if (has[i]) { e = i; g = 0; }
-            else if (++g > gap) break;
-        }
-        return e;
-    }
-
-    private static List<Bitmap> trimBottom(List<Bitmap> src, float keep) {
-        List<Bitmap> out = new ArrayList<>();
-        for (Bitmap b : src) {
-            out.add(Bitmap.createBitmap(b, 0, 0, b.getWidth(), (int) (b.getHeight() * keep)));
-        }
-        return out;
     }
 
     public void start() {
@@ -554,6 +472,12 @@ public class GameView extends SurfaceView implements Runnable {
         camSnap = false;
     }
 
+    private void startStory() {
+        story = new Story(this);
+        story.load("section1");
+        state = STATE_STORY;
+    }
+
     // ---------- update ----------
     private void updateEmbers(float dt) {
         for (Ember em : embers) {
@@ -566,6 +490,11 @@ public class GameView extends SurfaceView implements Runnable {
     private void update(float dt) {
         updateEmbers(dt);
         if (state == STATE_MENU) return;
+        if (state == STATE_STORY) {
+            story.update(dt);
+            if (story.quitRequested) { story = null; state = STATE_MENU; }
+            return;
+        }
 
         if (deadT > 0) {
             deadT -= dt;
@@ -744,7 +673,9 @@ public class GameView extends SurfaceView implements Runnable {
         if (cv == null) return;
 
         W = cv.getWidth(); H = cv.getHeight();
-        if (state == STATE_MENU) drawMenu(cv); else drawGame(cv);
+        if (state == STATE_MENU) drawMenu(cv);
+        else if (state == STATE_STORY) story.draw(cv);
+        else drawGame(cv);
         h.unlockCanvasAndPost(cv);
     }
 
@@ -781,18 +712,7 @@ public class GameView extends SurfaceView implements Runnable {
         menuBtnStory.set(W / 2f - bw / 2, H * 0.52f + bh + gap,
                 W / 2f + bw / 2, H * 0.52f + bh * 2 + gap);
         drawMenuButton(cv, menuBtnTest, "TEST MODE", 0xFFff2bd6, menuPress == 1, true);
-        drawMenuButton(cv, menuBtnStory, "STORY MODE", 0xFF7d78a0, menuPress == 2, false);
-
-        float bgW = Math.min(110, menuBtnStory.width() * 0.24f);
-        rf.set(menuBtnStory.right - bgW - 26,
-                menuBtnStory.centerY() - 20,
-                menuBtnStory.right - 26,
-                menuBtnStory.centerY() + 20);
-        paint.setColor(0x2effffff);
-        cv.drawRoundRect(rf, 20, 20, paint);
-        paint.setColor(0xB8ffffff);
-        paint.setTextSize(22);
-        cv.drawText("SOON", rf.centerX(), rf.centerY() + 8, paint);
+        drawMenuButton(cv, menuBtnStory, "STORY MODE", 0xFF7d78a0, menuPress == 2, true);
 
         if (overlay != null) { rf.set(0, 0, W, H); cv.drawBitmap(overlay, null, rf, paint); }
 
@@ -828,6 +748,7 @@ public class GameView extends SurfaceView implements Runnable {
         }
         if (act == MotionEvent.ACTION_UP) {
             if (menuPress == 1 && menuBtnTest.contains(e.getX(), e.getY())) startGame();
+            if (menuPress == 2 && menuBtnStory.contains(e.getX(), e.getY())) startStory();
             menuPress = 0;
             return true;
         }
@@ -1392,6 +1313,7 @@ public class GameView extends SurfaceView implements Runnable {
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (state == STATE_MENU) return onMenuTouch(e);
+        if (state == STATE_STORY) return story.touch(e);
         if (deadT > 0 || phase != PH_PLAYER) return true;
         int act = e.getActionMasked();
 
