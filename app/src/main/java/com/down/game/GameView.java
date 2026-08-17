@@ -17,9 +17,12 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 
 public class GameView extends SurfaceView implements Runnable {
@@ -35,9 +38,8 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float PLAYER_H = 260f, ENEMY_H = 200f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
+    private static final int GROUND_COL = 0xFF221829;
 
-    private static final int[] GROUND_COLS = {
-            0xFF241a30, 0xFF221829, 0xFF261c33, 0xFF211728, 0xFF1d1426, 0xFF251b2f };
     private static final int[][] ATK_SEQ = {
             { 0, 1, 2, 3, 4, 9, 5 },
             { 0, 1, 2, 9, 5 },
@@ -45,6 +47,8 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float[] ATK_DUR = { 0.95f, 0.75f, 1.25f };
     private static final float[] ATK_HIT = { 0.60f, 0.55f, 0.80f };
     private static final int[] ATK_RANGE = { 1, 3, 2 };
+    private static final int[][] NEIGH6 = {
+            { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, -1 }, { -1, 1 } };
 
     private Thread loop;
     private volatile boolean running;
@@ -63,7 +67,12 @@ public class GameView extends SurfaceView implements Runnable {
     private float downX = -9999, downY, lastPX, lastPY;
     private boolean moved, panning;
 
-    private static class Frame { Bitmap bmp; int top, ch; float ref; }
+    private static class Frame {
+        Bitmap bmp;
+        int top, ch, left, cw;
+        float ref;
+        boolean vCrop, cCenter;
+    }
     private final ArrayList<Frame> idleFr = new ArrayList<>();
     private final ArrayList<Frame> glideFr = new ArrayList<>();
     private final ArrayList<Frame> atkFr = new ArrayList<>();
@@ -100,6 +109,8 @@ public class GameView extends SurfaceView implements Runnable {
     private boolean hasAttacked = false;
 
     private final ArrayList<Enemy> enemies = new ArrayList<>();
+    private final HashMap<Long, Integer> flow = new HashMap<>();
+    private final HashSet<Long> reserved = new HashSet<>();
     private int playerHp = 100;
     private float hurtT = 0, deadT = 0;
     private boolean playerHitDone = false;
@@ -140,10 +151,10 @@ public class GameView extends SurfaceView implements Runnable {
 
     public GameView(Context ctx) {
         super(ctx);
-        idleFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4)));
-        glideFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2)));
-        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2)));
-        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2)));
+        idleFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4), false, true));
+        glideFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2), true, false));
+        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2), true, false));
+        atkFr.addAll(buildFrames(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2), true, false));
         eGlide  = Sprites.cutSheet(ctx, "sprites/enemy_glide.png",  2, 4, 4);
         eAttack = Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 4, 4);
         props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
@@ -176,25 +187,32 @@ public class GameView extends SurfaceView implements Runnable {
         startPlayerTurn();
     }
 
-    private static ArrayList<Frame> buildFrames(List<Bitmap> cells) {
+    private static ArrayList<Frame> buildFrames(List<Bitmap> cells, boolean vCrop, boolean cCenter) {
         ArrayList<Frame> out = new ArrayList<>();
         for (Bitmap b : cells) {
             int w = b.getWidth(), h = b.getHeight();
             int[] px = new int[w * h];
             b.getPixels(px, 0, w, 0, 0, w, h);
-            int top = -1, bottom = -1;
+            int top = -1, bottom = -1, left = -1, right = -1;
             for (int y = 0; y < h; y++) {
-                boolean any = false;
                 for (int x = 0; x < w; x++) {
-                    if ((px[y * w + x] >>> 24) > 16) { any = true; break; }
+                    if ((px[y * w + x] >>> 24) > 16) {
+                        if (top < 0) top = y;
+                        bottom = y;
+                        if (left < 0 || x < left) left = x;
+                        if (right < 0 || x > right) right = x;
+                    }
                 }
-                if (any) { if (top < 0) top = y; bottom = y; }
             }
-            if (top < 0) { top = 0; bottom = h - 1; }
+            if (top < 0) { top = 0; bottom = h - 1; left = 0; right = w - 1; }
             Frame f = new Frame();
             f.bmp = b;
             f.top = top;
             f.ch = Math.max(1, bottom - top + 1);
+            f.left = left;
+            f.cw = Math.max(1, right - left + 1);
+            f.vCrop = vCrop;
+            f.cCenter = cCenter;
             out.add(f);
         }
         if (!out.isEmpty()) {
@@ -310,6 +328,10 @@ public class GameView extends SurfaceView implements Runnable {
         return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
     }
 
+    private static long hexKey(int q, int r) {
+        return ((long) q << 32) | (r & 0xFFFFFFFFL);
+    }
+
     // ---------- terrain ----------
     private static float roadCenterF(float tx) {
         return 2.2f * (float) Math.sin(tx * 0.12f) + 1.5f * (float) Math.sin(tx * 0.05f + 1.7f);
@@ -394,6 +416,28 @@ public class GameView extends SurfaceView implements Runnable {
         phase = PH_ENEMY; phaseT = 0; ei = 0;
         hexesShown = false; targetEnemy = null; attackRangeShown = 0;
         for (Enemy en : enemies) en.resetTurn();
+        reserved.clear();
+        buildFlow();
+    }
+
+    private void buildFlow() {
+        flow.clear();
+        worldToHex(player.x, player.y, IH_A);
+        ArrayDeque<int[]> q = new ArrayDeque<>();
+        q.addLast(new int[] { IH_A[0], IH_A[1] });
+        flow.put(hexKey(IH_A[0], IH_A[1]), 0);
+        while (!q.isEmpty()) {
+            int[] c = q.pollFirst();
+            int d = flow.get(hexKey(c[0], c[1]));
+            if (d >= 12) continue;
+            for (int[] n : NEIGH6) {
+                int nq = c[0] + n[0], nr = c[1] + n[1];
+                long k = hexKey(nq, nr);
+                if (flow.containsKey(k) || hexBlocked(nq, nr)) continue;
+                flow.put(k, d + 1);
+                q.addLast(new int[] { nq, nr });
+            }
+        }
     }
 
     private void resetFight() {
@@ -410,17 +454,22 @@ public class GameView extends SurfaceView implements Runnable {
         worldToHex(player.x, player.y, IH_A);
         worldToHex(en.x, en.y, IH_B);
         if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= 1) return;
-        float dx = player.x - en.x, dy = player.y - en.y;
-        float d = (float) Math.hypot(dx, dy);
-        float[] steps = { HEX * 3.2f, HEX * 1.6f };
-        for (float st : steps) {
-            worldToHex(en.x + dx / d * st, en.y + dy / d * st, IH_C);
-            if (hexFree(IH_C[0], IH_C[1], en)) {
-                hexToWorld(IH_C[0], IH_C[1], FW_A);
-                en.tx = FW_A[0]; en.ty = FW_A[1];
-                en.planMove = true;
-                return;
-            }
+        Integer cur = flow.get(hexKey(IH_B[0], IH_B[1]));
+        if (cur == null) return;
+        int bd = cur, bq = IH_B[0], br = IH_B[1];
+        for (int[] n : NEIGH6) {
+            int nq = IH_B[0] + n[0], nr = IH_B[1] + n[1];
+            Integer nd = flow.get(hexKey(nq, nr));
+            if (nd == null || nd >= bd) continue;
+            if (reserved.contains(hexKey(nq, nr))) continue;
+            if (!hexFree(nq, nr, en)) continue;
+            bd = nd; bq = nq; br = nr;
+        }
+        if (bq != IH_B[0] || br != IH_B[1]) {
+            hexToWorld(bq, br, FW_A);
+            en.tx = FW_A[0]; en.ty = FW_A[1];
+            en.planMove = true;
+            reserved.add(hexKey(bq, br));
         }
     }
 
@@ -695,32 +744,13 @@ public class GameView extends SurfaceView implements Runnable {
         float halfW = W / (2f * zoom), halfH = H / (2f * zoom);
         float wx0 = camX - halfW, wx1 = camX + halfW;
         float wy0 = camY - halfH, wy1 = camY + halfH;
-        int tx0 = (int) Math.floor(wx0 / TILE) - 1, tx1 = (int) Math.ceil(wx1 / TILE) + 1;
         int ty0 = (int) Math.floor(wy0 / TH) - 1, ty1 = (int) Math.ceil(wy1 / TH) + 1;
 
         paint.setAlpha(255);
-        float cw = TILE * zoom + 1f, ch = TH * zoom + 1f;
-        for (int ty = ty0; ty <= ty1; ty++) {
-            float yt = sy(ty * TH);
-            for (int tx = tx0; tx <= tx1; tx++) {
-                int h = ((tx * 40503) ^ (ty * 66827)) >>> 4;
-                paint.setColor(GROUND_COLS[h % GROUND_COLS.length]);
-                rf.set(sx(tx * TILE), yt, sx(tx * TILE) + cw, yt + ch);
-                cv.drawRect(rf, paint);
-            }
-        }
-
-        float lx0 = sx(wx0) - 2, lx1 = sx(wx1) + 2;
-        paint.setColor(0x1E000000);
+        paint.setColor(0x14000000);
         for (int ty = ty0; ty <= ty1 + 1; ty++) {
             float y = sy(ty * TH);
-            rf.set(lx0, y - zoom, lx1, y + 1.6f * zoom);
-            cv.drawRect(rf, paint);
-        }
-        paint.setColor(0x10000000);
-        for (int tx = tx0; tx <= tx1 + 1; tx++) {
-            float x = sx(tx * TILE);
-            rf.set(x - 0.8f * zoom, sy(wy0) - 2, x + 0.8f * zoom, sy(wy1) + 2);
+            rf.set(-2, y - zoom, W + 2, y + 1.6f * zoom);
             cv.drawRect(rf, paint);
         }
 
@@ -949,12 +979,7 @@ public class GameView extends SurfaceView implements Runnable {
             return;
         }
         if (player.floater.state == 0 && !idleFr.isEmpty()) {
-            float pos = player.bobTime * 2f;
-            int i0 = ((int) pos) % idleFr.size();
-            int i1 = (i0 + 1) % idleFr.size();
-            frameA = idleFr.get(i0);
-            frameB = idleFr.get(i1);
-            frameK = blendCurve(pos - (int) pos);
+            frameA = idleFr.get(((int) (player.bobTime * 3f)) % idleFr.size());
             return;
         }
         if (glideFr.size() >= 4) {
@@ -978,9 +1003,18 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void drawFrame(Canvas cv, Frame f, int alpha) {
         float s = PLAYER_H * zoom / f.ref;
-        frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
-        rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
         paint.setAlpha(alpha);
+        if (f.vCrop) {
+            frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
+            rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
+        } else if (f.cCenter) {
+            frameSrc.set(f.left, 0, f.left + f.cw, f.bmp.getHeight());
+            rf.set(-f.cw * s / 2f, -f.bmp.getHeight() * s, f.cw * s / 2f, 0);
+        } else {
+            frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
+            rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
+                    f.bmp.getWidth() * s / 2f, 0);
+        }
         cv.drawBitmap(f.bmp, frameSrc, rf, paint);
         paint.setAlpha(255);
     }
@@ -1093,7 +1127,7 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawGame(Canvas cv) {
-        cv.drawColor(0xFF120a18);
+        cv.drawColor(GROUND_COL);
 
         drawGround(cv);
         if (hexesShown) drawMoveFan(cv);
