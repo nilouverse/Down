@@ -30,8 +30,6 @@ public class Enemy {
     }
 
     public void turnUpdate(float dt, float px, float py, boolean adjacent) {
-        animT += dt;
-
         switch (act) {
             case 0:
                 if (planMove) {
@@ -56,8 +54,11 @@ public class Enemy {
                 floater.moving = false;
                 if (!acted) {
                     if (attackT < 0 && !glowing) {
-                        if (adjacent) { glowing = true; attackT = 0; }
-                        else acted = true;
+                        if (adjacent) {
+                            glowing = true;
+                            attackT = 0;
+                            facing = px >= x ? 1 : -1;
+                        } else acted = true;
                     } else if (glowing) {
                         attackT += dt;
                         if (attackT > GLOW_DUR) { glowing = false; attackT = 0; }
