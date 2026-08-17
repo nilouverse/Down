@@ -14,22 +14,23 @@ public class Enemy {
     public boolean struck = false;
     public final Floater floater = new Floater();
 
-    // turn action: 0 = move, 1 = attack, 2 = settle, 3 = done
     public int act = 0;
     public boolean planned = false, planMove = false, acted = false;
     public float tx, ty;
+    public boolean glowing = false;
 
-    public boolean attacking() { return attackT >= 0; }
+    public static final float GLOW_DUR = 0.5f;
+    public static final float ATK_DUR = 0.9f;
+
+    public boolean attacking() { return attackT >= 0 || glowing; }
 
     public void resetTurn() {
         act = 0; planned = false; planMove = false; acted = false;
-        attackT = -1; struck = false;
+        attackT = -1; struck = false; glowing = false;
     }
 
     public void turnUpdate(float dt, float px, float py, boolean adjacent) {
         animT += dt;
-
-        float dx = px - x, dy = py - y;
 
         switch (act) {
             case 0:
@@ -54,12 +55,15 @@ public class Enemy {
             case 1:
                 floater.moving = false;
                 if (!acted) {
-                    if (attackT < 0) {
-                        if (adjacent) attackT = 0;
+                    if (attackT < 0 && !glowing) {
+                        if (adjacent) glowing = true;
                         else acted = true;
+                    } else if (glowing) {
+                        attackT += dt;
+                        if (attackT > GLOW_DUR) { glowing = false; attackT = 0; }
                     } else {
                         attackT += dt;
-                        if (attackT > 0.9f) { attackT = -1; acted = true; }
+                        if (attackT > ATK_DUR) { attackT = -1; acted = true; }
                     }
                 } else {
                     act = 2;
