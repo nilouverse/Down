@@ -101,7 +101,6 @@ public class Story {
         city = Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 4);
     }
 
-    // ---------- hex math ----------
     private static void hexToWorld(int q, int r, float[] out) {
         out[0] = HEX * (float) Math.sqrt(3) * (q + r / 2f);
         out[1] = HEX * 1.5f * r * SQUASH;
@@ -128,7 +127,6 @@ public class Story {
         return ((long) q << 32) | (r & 0xFFFFFFFFL);
     }
 
-    // ---------- loading ----------
     public void load(String name) {
         evs.clear(); actors.clear(); props.clear(); cracks.clear();
         blocked.clear(); triggers.clear();
@@ -234,8 +232,8 @@ public class Story {
         if (t.length > 4 && t[4].equals("left")) a.facing = -1;
         if (t.length > 5 && t[5].equals("hidden")) a.hidden = true;
         if (a.id.equals("nilou")) {
-            a.idle = Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4), false, true);
-            a.glide = Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2), true, false);
+            a.idle = new ArrayList<>(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/idle.png", 2, 2, 4), false, true));
+            a.glide = new ArrayList<>(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/glide.png", 2, 2, 2), true, false));
             if (a.idle.size() >= 4) { a.idle.get(1).dx = -8f; a.idle.get(2).dx = -8f; }
             a.h = 220;
         } else {
@@ -263,7 +261,6 @@ public class Story {
         return true;
     }
 
-    // ---------- update ----------
     public void update(float dt) {
         nameT += dt;
         flashT += dt;
@@ -371,7 +368,6 @@ public class Story {
         }
     }
 
-    // ---------- touch ----------
     public boolean touch(MotionEvent e) {
         int act = e.getActionMasked();
         if (ended) {
@@ -413,7 +409,6 @@ public class Story {
         return true;
     }
 
-    // ---------- draw ----------
     private float sx(float wx) { return (wx - camX) * zoom + W / 2f + shakeX; }
     private float sy(float wy) { return (wy - camY) * zoom + H / 2f + shakeY; }
 
