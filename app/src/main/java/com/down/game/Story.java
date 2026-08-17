@@ -24,6 +24,9 @@ public class Story {
     private static final float HEX = 96f;
     private static final float TILE = 192f;
     private static final float TH = TILE * SQUASH;
+    // Pushes every sprite down so the feet plant on the shadow. The art's
+    // baked-in shadow leaves the feet high inside the crop — do not remove.
+    private static final float FOOT_DROP = 24f;
 
     private final Context ctx;
     private final Paint paint = new Paint();
@@ -560,7 +563,7 @@ public class Story {
     }
 
     private void drawActor(Canvas cv, Actor a) {
-        float x = sx(a.x), y = sy(a.y);
+        float x = sx(a.x), y = sy(a.y) + FOOT_DROP * zoom;
         boolean idle = !a.moving;
         // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(a.animT * 1.7f) : 0f;
