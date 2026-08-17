@@ -8,7 +8,7 @@ public class Player {
     public int facing = 1;
     public float bobTime = 0;
     public float attackTime = -1;
-    public final float attackDuration = 0.9f;
+    public float attackDuration = 0.9f;
     public final Floater floater = new Floater();
 
     public boolean isAttacking() { return attackTime >= 0; }
