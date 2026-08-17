@@ -544,8 +544,8 @@ public class Story {
     private void drawActor(Canvas cv, Actor a) {
         float x = sx(a.x), y = sy(a.y);
         boolean idle = !a.moving;
-        float br = idle ? (float) Math.sin(a.animT * 2.1f) : 0f;
-        float sw = 45 * zoom * (1f - 0.03f * br);
+        float br = idle ? (float) Math.sin(a.animT * 1.3f) : 0f;
+        float sw = 45 * zoom * (1f - 0.06f * br);
         paint.setAlpha(200);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadow(), null, rf, paint);
@@ -554,7 +554,7 @@ public class Story {
         cv.save();
         cv.translate(x, y);
         if (a.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.012f * br, 1f + 0.02f * br);
+        if (br != 0f) cv.scale(1f - 0.028f * br, 1f + 0.045f * br);
         Frame fa = null, fb = null;
         float fk = 0;
         if (a.moving && a.glide != null && a.glide.size() >= 4) {
@@ -584,9 +584,9 @@ public class Story {
         } else if (f.cCenter) {
             int wl = Math.max(0, f.rgt - f.ww);
             int wr = f.rgt;
-            frameSrc.set(wl, 0, wr, f.bmp.getHeight());
+            frameSrc.set(wl, f.top, wr, f.top + f.ch);
             float right = f.ww * s / 2f;
-            rf.set(right - (wr - wl) * s, -f.bmp.getHeight() * s, right, 0);
+            rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
         } else {
             frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
             rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
