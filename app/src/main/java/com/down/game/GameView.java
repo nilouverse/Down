@@ -1,4 +1,3 @@
-app/src/main/java/com/down/game/GameView.java
 package com.down.game;
 
 import android.content.Context;
