@@ -36,6 +36,7 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float TH = TILE * SQUASH;
     private static final int MOVE_HEX = 3;
     private static final float PLAYER_H = 220f, ENEMY_H = 200f;
+    private static final float ENEMY_SINK = 16f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF221829;
@@ -396,11 +397,16 @@ public class GameView extends SurfaceView implements Runnable {
                                  : tx * TILE + TILE * (0.25f + ((h >>> 9) & 127) / 127f * 0.5f);
                 float ay = large ? (ty + 1) * TH - TH * 0.10f
                                  : (ty + 1) * TH - TH * (0.15f + ((h >>> 11) & 31) / 31f * 0.25f);
-                float bw = Math.min(pr.getWidth() * s * 0.35f, HEX);
-                float fh = TH * 0.8f;
-                if (HO_F[0] >= ax - bw && HO_F[0] <= ax + bw
-                        && HO_F[1] >= ay - fh && HO_F[1] <= ay + TH * 0.25f) {
-                    return true;
+                if (large) {
+                    float bw = Math.min(pr.getWidth() * s * 0.35f, HEX * 0.9f);
+                    float fh = TH * 0.8f;
+                    if (HO_F[0] >= ax - bw && HO_F[0] <= ax + bw
+                            && HO_F[1] >= ay - fh && HO_F[1] <= ay + TH * 0.25f) {
+                        return true;
+                    }
+                } else {
+                    worldToHex(ax, ay, HO_A);
+                    if (HO_A[0] == q && HO_A[1] == r) return true;
                 }
             }
         }
@@ -590,10 +596,23 @@ public class GameView extends SurfaceView implements Runnable {
             exploreT += dt;
             if (exploreT > 6 || player.isMoving()) exploring = false;
         }
+        float fx = player.x, fy = player.y;
+        if (phase == PH_ENEMY && ei < enemies.size()) {
+            Enemy ae = enemies.get(ei);
+            if (!ae.dead) {
+                worldToHex(player.x, player.y, IH_A);
+                worldToHex(ae.x, ae.y, IH_B);
+                if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= 8
+                        && (ae.planMove || ae.attacking())) {
+                    fx = ae.x;
+                    fy = ae.y;
+                }
+            }
+        }
         if (!exploring && H > 0) {
             float k = 1 - (float) Math.exp(-dt * 8);
-            camX += (player.x - camX) * k;
-            camY += ((player.y - (H * 0.28f) / zoom) - camY) * k;
+            camX += (fx - camX) * k;
+            camY += ((fy - (H * 0.28f) / zoom) - camY) * k;
         }
         runeT += dt;
 
@@ -1125,7 +1144,9 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
-        float sw = (fl ? 45 : 55) * zoom;
+        boolean idle = player.floater.state == 0 && !player.isAttacking();
+        float br = idle ? (float) Math.sin(player.bobTime * 2.1f) : 0f;
+        float sw = (fl ? 45 : 55) * zoom * (1f - 0.03f * br);
         paint.setAlpha(fl ? 150 : 220);
         rf.set(sx(player.x) - sw, sy(player.y) - sw * 0.36f,
                sx(player.x) + sw, sy(player.y) + sw * 0.36f);
@@ -1136,6 +1157,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.save();
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
+        if (br != 0f) cv.scale(1f - 0.012f * br, 1f + 0.02f * br);
         if (frameA != null) drawFrame(cv, frameA, 255);
         if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
         cv.restore();
@@ -1179,8 +1201,10 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
-        float x = sx(en.x), y = sy(en.y);
-        float sw = 45 * zoom;
+        float x = sx(en.x), y = sy(en.y) + ENEMY_SINK * zoom;
+        boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
+        float br = idle ? (float) Math.sin(en.animT * 2.1f) : 0f;
+        float sw = 45 * zoom * (1f - 0.03f * br);
         paint.setAlpha(220);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadowBmp, null, rf, paint);
@@ -1191,6 +1215,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.save();
         cv.translate(x, y);
         if (en.facing < 0) cv.scale(-1, 1);
+        if (br != 0f) cv.scale(1f - 0.012f * br, 1f + 0.02f * br);
         if (en.dead) p.setAlpha((int) (255 * (1 - en.deathT / 0.7f)));
         if (fr != null) {
             float s = ENEMY_H * zoom / fr.ref;
@@ -1482,7 +1507,7 @@ public class GameView extends SurfaceView implements Runnable {
         float bestY = -1f;
         for (Enemy en : enemies) {
             if (en.dead) continue;
-            float ex = sx(en.x), ey = sy(en.y);
+            float ex = sx(en.x), ey = sy(en.y) + ENEMY_SINK * zoom;
             float hw = ENEMY_H * 0.4f * zoom;
             if (x >= ex - hw && x <= ex + hw
                     && y >= ey - ENEMY_H * zoom - 20 && y <= ey + 10) {
