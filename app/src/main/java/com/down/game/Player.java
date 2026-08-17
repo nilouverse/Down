@@ -23,7 +23,7 @@ public class Player {
 
     public void update(float dt) {
         bobTime += dt;
-        floater.moving = isMoving() || isAttacking();
+        floater.moving = isMoving() && !isAttacking();
         floater.update(dt);
 
         if (isAttacking()) {
