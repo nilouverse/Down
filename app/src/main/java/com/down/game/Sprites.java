@@ -100,6 +100,12 @@ public class Sprites {
             f.cCenter = cCenter;
             out.add(f);
         }
+        // RIGHT-EDGE ANCHOR — DO NOT "FIX" THIS.
+        // ww is the shared window width (the widest frame in the sheet).
+        // drawFrame pins every frame's crop to its content RIGHT edge (rgt)
+        // using this shared width, so the character's front stays locked
+        // while the cape/hair on the left sways frame to frame. Replacing
+        // this with centering or left-anchoring re-introduces jitter.
         int maxW = 0;
         for (Frame f : out) maxW = Math.max(maxW, f.cw);
         for (Frame f : out) f.ww = maxW;
