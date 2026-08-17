@@ -1121,12 +1121,14 @@ public class GameView extends SurfaceView implements Runnable {
         if (en.glowing && !eGlowFr.isEmpty()) {
             float pos = (en.attackT / Enemy.GLOW_DUR) * eGlowFr.size();
             int i = (int) pos;
+            if (i < 0) i = 0;
             if (i >= eGlowFr.size()) i = eGlowFr.size() - 1;
             return eGlowFr.get(i);
         }
         if (en.attacking() && !en.glowing && !eAtkFr.isEmpty()) {
             float pos = (en.attackT / Enemy.ATK_DUR) * eAtkFr.size();
             int i = (int) pos;
+            if (i < 0) i = 0;
             if (i >= eAtkFr.size()) i = eAtkFr.size() - 1;
             return eAtkFr.get(i);
         }
