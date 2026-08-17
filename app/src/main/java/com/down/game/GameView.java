@@ -36,7 +36,9 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float TH = TILE * SQUASH;
     private static final int MOVE_HEX = 3;
     private static final float PLAYER_H = 220f, ENEMY_H = 200f;
-    private static final float ENEMY_SINK = 0f;
+    // Pushes every sprite down so the feet plant on the shadow. The art's
+    // baked-in shadow leaves the feet high inside the crop — do not remove.
+    private static final float FOOT_DROP = 24f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF221829;
@@ -1085,25 +1087,26 @@ public class GameView extends SurfaceView implements Runnable {
         // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(player.bobTime * 1.7f) : 0f;
 
-        drawAura(cv, sx(player.x), sy(player.y), 0xFFff2233, player.bobTime);
+        float by = sy(player.y) + FOOT_DROP * zoom;
+        drawAura(cv, sx(player.x), by, 0xFFff2233, player.bobTime);
 
         float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
         paint.setAlpha(fl ? 150 : 220);
-        rf.set(sx(player.x) - sw, sy(player.y) - sw * 0.36f,
-               sx(player.x) + sw, sy(player.y) + sw * 0.36f);
+        rf.set(sx(player.x) - sw, by - sw * 0.36f,
+               sx(player.x) + sw, by + sw * 0.36f);
         cv.drawBitmap(shadowBmp, null, rf, paint);
         paint.setAlpha(255);
 
         computePlayerFrame();
         cv.save();
-        cv.translate(sx(player.x), sy(player.y));
+        cv.translate(sx(player.x), by);
         if (player.facing < 0) cv.scale(-1, 1);
         if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
         if (frameA != null) drawFrame(cv, frameA, 255);
         if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
         cv.restore();
 
-        float top = sy(player.y) - PLAYER_H * zoom - 34;
+        float x = sx(en.x), y = sy(en.y) + FOOT_DROP * zoom;
         paint.setColor(0xFF330000);
         cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 10, paint);
         paint.setColor(0xFFff2bd6);
