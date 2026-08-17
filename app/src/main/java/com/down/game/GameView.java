@@ -75,7 +75,7 @@ public class GameView extends SurfaceView implements Runnable {
 
     private static class Frame {
         Bitmap bmp;
-        int top, ch, left, cw;
+        int top, ch, left, cw, rgt, ww;
         float ref, dx;
         boolean vCrop, cCenter;
     }
@@ -145,14 +145,12 @@ public class GameView extends SurfaceView implements Runnable {
     private static final int[] TW_B = new int[2];
     private static final int[] TW_C = new int[2];
     private static final float[] HO_F = new float[2];
-    private static final float[] HO_LA = new float[2];
     private static final int[] HO_A = new int[2];
 
     private final Paint paint = new Paint();
     private final Paint tintPaint = new Paint();
     private final Path hexPath = new Path();
     private final RectF rf = new RectF();
-    private final Rect roadSrc = new Rect();
     private final Rect frameSrc = new Rect();
     private final ColorMatrixColorFilter brightFlash = new ColorMatrixColorFilter(new float[] {
             1.16f, 0, 0, 0, 90,
@@ -221,10 +219,14 @@ public class GameView extends SurfaceView implements Runnable {
             f.ch = Math.max(1, bottom - top + 1);
             f.left = left;
             f.cw = Math.max(1, right - left + 1);
+            f.rgt = left + f.cw;
             f.vCrop = vCrop;
             f.cCenter = cCenter;
             out.add(f);
         }
+        int maxW = 0;
+        for (Frame f : out) maxW = Math.max(maxW, f.cw);
+        for (Frame f : out) f.ww = maxW;
         if (!out.isEmpty()) {
             float r = out.get(0).ch;
             for (Frame f : out) f.ref = r;
@@ -260,16 +262,6 @@ public class GameView extends SurfaceView implements Runnable {
             else if (++g > gap) break;
         }
         return e;
-    }
-
-    private void addMirrored(ArrayList<Bitmap> dest, List<Bitmap> src) {
-        for (Bitmap t : src) {
-            dest.add(t);
-            Matrix m = new Matrix();
-            m.preScale(-1, 1);
-            m.postTranslate(t.getWidth(), 0);
-            dest.add(Bitmap.createBitmap(t, 0, 0, t.getWidth(), t.getHeight(), m, false));
-        }
     }
 
     private static List<Bitmap> trimBottom(List<Bitmap> src, float keep) {
@@ -404,10 +396,10 @@ public class GameView extends SurfaceView implements Runnable {
                                  : tx * TILE + TILE * (0.25f + ((h >>> 9) & 127) / 127f * 0.5f);
                 float ay = large ? (ty + 1) * TH - TH * 0.10f
                                  : (ty + 1) * TH - TH * (0.15f + ((h >>> 11) & 31) / 31f * 0.25f);
-                float halfW = pr.getWidth() * s * 0.5f;
-                float hgt = pr.getHeight() * s;
-                if (HO_F[0] >= ax - halfW && HO_F[0] <= ax + halfW
-                        && HO_F[1] >= ay - hgt && HO_F[1] <= ay + TH * 0.25f) {
+                float bw = Math.min(pr.getWidth() * s * 0.35f, HEX);
+                float fh = TH * 0.8f;
+                if (HO_F[0] >= ax - bw && HO_F[0] <= ax + bw
+                        && HO_F[1] >= ay - fh && HO_F[1] <= ay + TH * 0.25f) {
                     return true;
                 }
             }
@@ -1116,8 +1108,11 @@ public class GameView extends SurfaceView implements Runnable {
             frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
             rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
         } else if (f.cCenter) {
-            frameSrc.set(f.left, 0, f.left + f.cw, f.bmp.getHeight());
-            rf.set(-f.cw * s / 2f, -f.bmp.getHeight() * s, f.cw * s / 2f, 0);
+            int wl = Math.max(0, f.rgt - f.ww);
+            int wr = f.rgt;
+            frameSrc.set(wl, 0, wr, f.bmp.getHeight());
+            float right = f.ww * s / 2f;
+            rf.set(right - (wr - wl) * s, -f.bmp.getHeight() * s, right, 0);
         } else {
             frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
             rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
@@ -1203,8 +1198,11 @@ public class GameView extends SurfaceView implements Runnable {
                 frameSrc.set(0, fr.top, fr.bmp.getWidth(), fr.top + fr.ch);
                 rf.set(-fr.bmp.getWidth() * s / 2f, -fr.ch * s, fr.bmp.getWidth() * s / 2f, 0);
             } else if (fr.cCenter) {
-                frameSrc.set(fr.left, 0, fr.left + fr.cw, fr.bmp.getHeight());
-                rf.set(-fr.cw * s / 2f, -fr.bmp.getHeight() * s, fr.cw * s / 2f, 0);
+                int wl = Math.max(0, fr.rgt - fr.ww);
+                int wr = fr.rgt;
+                frameSrc.set(wl, 0, wr, fr.bmp.getHeight());
+                float right = fr.ww * s / 2f;
+                rf.set(right - (wr - wl) * s, -fr.bmp.getHeight() * s, right, 0);
             } else {
                 frameSrc.set(0, 0, fr.bmp.getWidth(), fr.bmp.getHeight());
                 rf.set(-fr.bmp.getWidth() * s / 2f, -fr.bmp.getHeight() * s,
