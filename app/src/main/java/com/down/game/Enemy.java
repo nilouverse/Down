@@ -56,7 +56,7 @@ public class Enemy {
                 floater.moving = false;
                 if (!acted) {
                     if (attackT < 0 && !glowing) {
-                        if (adjacent) glowing = true;
+                        if (adjacent) { glowing = true; attackT = 0; }
                         else acted = true;
                     } else if (glowing) {
                         attackT += dt;
