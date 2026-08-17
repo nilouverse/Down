@@ -9,6 +9,7 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RadialGradient;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.view.MotionEvent;
@@ -33,6 +34,8 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float CHUNK_PX = TILE * CHUNK_T;
     private static final float PLAYER_H = 260f, ENEMY_H = 200f;
     private static final long FRAME_NS = 16666667L;
+    private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
+    private static final int[][] DIRS = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
 
     private Thread loop;
     private volatile boolean running;
@@ -45,6 +48,11 @@ public class GameView extends SurfaceView implements Runnable {
 
     private final Player player = new Player();
     private float camX, camY;
+    private float zoom = 1.25f;
+    private boolean exploring;
+    private float exploreT;
+    private float downX = -9999, downY, lastPX, lastPY;
+    private boolean moved, panning;
 
     private List<Bitmap> idleF, glide, attack, eGlide, eAttack, props, props2;
     private final ArrayList<Bitmap> tileVar = new ArrayList<>();
@@ -121,6 +129,11 @@ public class GameView extends SurfaceView implements Runnable {
     private final Paint tintPaint = new Paint();
     private final Path hexPath = new Path();
     private final RectF rf = new RectF();
+    private final ColorMatrixColorFilter brightFilter = new ColorMatrixColorFilter(new float[] {
+            1.16f, 0, 0, 0, 12,
+            0, 1.16f, 0, 0, 12,
+            0, 0, 1.16f, 0, 12,
+            0, 0, 0, 1, 0 });
     private int W, H;
 
     public GameView(Context ctx) {
@@ -213,14 +226,14 @@ public class GameView extends SurfaceView implements Runnable {
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
         W = w; H = h;
         vig = new RadialGradient(W / 2f, H / 2f, Math.max(W, H) * 0.75f,
-                0x00000000, 0xB4000000, Shader.TileMode.CLAMP);
+                0x00000000, 0x78000000, Shader.TileMode.CLAMP);
         vigPaint.setShader(vig);
         haze = new LinearGradient(0, 0, 0, H,
-                new int[] { 0x42140a1c, 0x00000000, 0x00000000, 0x3010061a },
+                new int[] { 0x26140a1c, 0x00000000, 0x00000000, 0x1C10061a },
                 new float[] { 0f, 0.22f, 0.72f, 1f }, Shader.TileMode.CLAMP);
         hazePaint.setShader(haze);
         glow = new RadialGradient(W * 0.18f, -H * 0.25f, H * 1.15f,
-                0x12ffffff, 0x00000000, Shader.TileMode.CLAMP);
+                0x20ffffff, 0x00000000, Shader.TileMode.CLAMP);
         glowPaint.setShader(glow);
         if (embers.isEmpty()) {
             for (int i = 0; i < 40; i++) {
@@ -297,6 +310,14 @@ public class GameView extends SurfaceView implements Runnable {
         out[1] = (ty + 1) * TILE;
     }
 
+    private Bitmap groundBitmap(int wx, int wy) {
+        int t = terrainAt(wx, wy);
+        List<Bitmap> src = (t == 2) ? grassVar : tileVar;
+        if (src.isEmpty()) return null;
+        int h = ((wx >> 1) * 40503 ^ (wy >> 1) * 66827);
+        return src.get(((h & 1) << 1) | ((h >>> 2) & 1));
+    }
+
     private synchronized boolean hexBlocked(int q, int r) {
         hexToWorld(q, r, HO_F);
         int tx0 = (int) Math.floor(HO_F[0] / TILE), ty0 = (int) Math.floor(HO_F[1] / TILE);
@@ -326,7 +347,7 @@ public class GameView extends SurfaceView implements Runnable {
         return !hexOccupied(q, r, self) && !hexBlocked(q, r);
     }
 
-    // ---------- ground chunk baking ----------
+    // ---------- ground chunk baking (worker thread only for prewarm) ----------
     private Bitmap getChunk(int cx, int cy) {
         long key = ((long) cx << 32) | (cy & 0xFFFFFFFFL);
         Bitmap b = chunks.get(key);
@@ -342,9 +363,12 @@ public class GameView extends SurfaceView implements Runnable {
         Canvas c = new Canvas(b);
         Paint p = new Paint();
         p.setFilterBitmap(true);
+        p.setColorFilter(brightFilter);
         Paint sp = new Paint();
         sp.setFilterBitmap(true);
-        RectF lr = new RectF();
+        RectF lr = new RectF(), lr2 = new RectF();
+        Rect src = new Rect();
+        Path ep = new Path();
         float[] la = new float[2];
         int ox = cx * CHUNK_T, oy = cy * CHUNK_T;
 
@@ -352,30 +376,53 @@ public class GameView extends SurfaceView implements Runnable {
             for (int tx = 0; tx < CHUNK_T; tx++) {
                 int wx = ox + tx, wy = oy + ty;
                 float x = tx * TILE, y = ty * TILE;
-                int hash = (wx * 73856093 ^ wy * 19349663);
 
-                int t = terrainAt(wx, wy);
-                List<Bitmap> src = (t == 2) ? grassVar : tileVar;
-                if (src.isEmpty()) src = tileVar;
-                if (!src.isEmpty()) {
-                    Bitmap tile = src.get(((hash & 1) << 1) | ((hash >>> 2) & 1));
-                    lr.set(x, y, x + TILE + 1, y + TILE + 1);
-                    c.drawBitmap(tile, null, lr, p);
+                Bitmap base = groundBitmap(wx, wy);
+                lr.set(x, y, x + TILE + 1, y + TILE + 1);
+                if (base != null) {
+                    c.drawBitmap(base, null, lr, p);
                 } else {
+                    p.setColorFilter(null);
                     p.setColor(0xFF241a2e);
-                    lr.set(x, y, x + TILE + 1, y + TILE + 1);
                     c.drawRect(lr, p);
+                    p.setColorFilter(brightFilter);
                 }
 
-                int shade = (hash >>> 8) & 3;
+                for (int[] dr : DIRS) {
+                    Bitmap nb = groundBitmap(wx + dr[0], wy + dr[1]);
+                    if (nb == null || nb == base) continue;
+                    int eh = (wx * 7331 ^ wy * 9283 ^ (dr[0] * 5 + dr[1] * 3));
+                    int n = 2 + (eh & 1);
+                    ep.reset();
+                    for (int k2 = 0; k2 < n; k2++) {
+                        float f1 = ((eh >>> (k2 * 5 + 2)) & 255) / 255f;
+                        float f2 = ((eh >>> (k2 * 5 + 6)) & 255) / 255f;
+                        float rad = 26 + f2 * 44;
+                        float exx, eyy;
+                        if (dr[0] != 0) { exx = (dr[0] > 0) ? x + TILE : x; eyy = y + f1 * TILE; }
+                        else            { eyy = (dr[1] > 0) ? y + TILE : y; exx = x + f1 * TILE; }
+                        ep.addCircle(exx, eyy, rad, Path.Direction.CW);
+                    }
+                    float nx = x + dr[0] * TILE, ny = y + dr[1] * TILE;
+                    lr2.set(nx, ny, nx + TILE + 1, ny + TILE + 1);
+                    c.save();
+                    c.clipPath(ep);
+                    c.drawBitmap(nb, null, lr2, p);
+                    c.restore();
+                }
+
+                p.setColorFilter(null);
+                int sh = ((wx >> 1) * 40503 ^ (wy >> 1) * 66827);
+                int shade = (sh >>> 8) & 3;
                 if (shade > 0) {
                     lr.set(x, y, x + TILE + 1, y + TILE + 1);
-                    if (shade == 3) { p.setColor(0xFFffffff); p.setAlpha(5); }
-                    else { p.setColor(0xFF000000); p.setAlpha(shade * 5); }
+                    if (shade == 3) { p.setColor(0xFFffffff); p.setAlpha(6); }
+                    else { p.setColor(0xFF000000); p.setAlpha(shade * 4); }
                     c.drawRect(lr, p);
                     p.setAlpha(255);
                 }
 
+                int t = terrainAt(wx, wy);
                 int ph2 = (wx * 92821 ^ wy * 68927);
                 if (t == 0 && !isLargeCell(wx, wy) && ((ph2 >>> 2) & 15) == 0 && !props.isEmpty()) {
                     Bitmap pr = props.get((ph2 >>> 3) % props.size());
@@ -387,15 +434,17 @@ public class GameView extends SurfaceView implements Runnable {
                            pxx + pr.getWidth() * s / 2f, pyy);
                     c.drawBitmap(pr, null, lr, sp);
                 }
+                p.setColorFilter(brightFilter);
             }
         }
+        p.setColorFilter(null);
 
         int chh = (cx * 92821 ^ cy * 68927);
         for (int i = 0; i < 3; i++) {
             float bx = ((chh >>> (i * 5)) & 511) / 511f * px;
             float by = ((chh >>> (i * 5 + 9)) & 511) / 511f * px;
-            float br = 240 + ((chh >>> (i * 3)) & 255);
-            int col = (i == 2) ? 0x16000000 : 0x0Effffff;
+            float br = 260 + ((chh >>> (i * 3)) & 255);
+            int col = (i == 2) ? 0x10000000 : 0x12ffffff;
             p.setShader(new RadialGradient(bx, by, br, col, 0x00000000, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, px, px, p);
         }
@@ -414,8 +463,10 @@ public class GameView extends SurfaceView implements Runnable {
 
         if (!roadVar.isEmpty()) {
             float strip = 24f;
+            int tw = roadVar.get(0).getWidth(), th = roadVar.get(0).getHeight();
             for (float x = -strip; x < px + strip; x += strip) {
-                float tx = (ox * TILE + x) / TILE;
+                float wxp = ox * TILE + x;
+                float tx = wxp / TILE;
                 float cyw = (roadCenterF(tx) - oy * CHUNK_T) * TILE;
                 float half = TILE * (0.82f + 0.10f * (float) Math.sin(tx * 0.21f + 0.9f));
                 p.setColor(0xFF000000);
@@ -430,12 +481,19 @@ public class GameView extends SurfaceView implements Runnable {
                 p.setAlpha(255);
             }
             for (float x = -strip; x < px + strip; x += strip) {
-                float tx = (ox * TILE + x) / TILE;
+                float wxp = ox * TILE + x;
+                float tx = wxp / TILE;
                 float cyw = (roadCenterF(tx) - oy * CHUNK_T) * TILE;
                 float half = TILE * (0.82f + 0.10f * (float) Math.sin(tx * 0.21f + 0.9f));
-                int vi = ((int) Math.floor(tx / 3f)) & 1;
+                int vi = (((int) Math.floor(wxp / CHUNK_PX)) & 1) * 2;
+                float u = (wxp % CHUNK_PX) / CHUNK_PX;
+                if (u < 0) u += 1f;
+                int s0 = (int) (u * tw);
+                int s1 = Math.min(tw, (int) (u * tw + (strip + 4) * tw / CHUNK_PX) + 1);
+                if (s1 <= s0) s1 = s0 + 1;
+                src.set(s0, 0, s1, th);
                 lr.set(x - 2, cyw - half, x + strip + 2, cyw + half);
-                c.drawBitmap(roadVar.get(vi * 2), null, lr, sp);
+                c.drawBitmap(roadVar.get(vi), src, lr, sp);
             }
         }
 
@@ -518,9 +576,15 @@ public class GameView extends SurfaceView implements Runnable {
         if (hurtT > 0) hurtT -= dt;
         player.update(dt);
 
-        float k = 1 - (float) Math.exp(-dt * 8);
-        camX += (player.x - camX) * k;
-        camY += ((player.y - H * 0.28f) - camY) * k;
+        if (exploring) {
+            exploreT += dt;
+            if (exploreT > 6 || player.isMoving()) exploring = false;
+        }
+        if (!exploring) {
+            float k = 1 - (float) Math.exp(-dt * 8);
+            camX += (player.x - camX) * k;
+            camY += ((player.y - H * 0.28f) - camY) * k;
+        }
         runeT += dt;
 
         int ccx = (int) Math.floor(camX / CHUNK_PX);
@@ -719,18 +783,20 @@ public class GameView extends SurfaceView implements Runnable {
         h.unlockCanvasAndPost(cv);
     }
 
-    private float sx(float wx) { return wx - camX + W / 2f; }
-    private float sy(float wy) { return wy - camY + H / 2f; }
+    private float sx(float wx) { return (wx - camX) * zoom + W / 2f; }
+    private float sy(float wy) { return (wy - camY) * zoom + H / 2f; }
 
     private void drawGround(Canvas cv) {
-        int x0 = (int) Math.floor((camX - W / 2f) / CHUNK_PX);
-        int x1 = (int) Math.floor((camX + W / 2f) / CHUNK_PX);
-        int y0 = (int) Math.floor((camY - H / 2f) / CHUNK_PX);
-        int y1 = (int) Math.floor((camY + H / 2f) / CHUNK_PX);
+        float halfW = W / (2f * zoom), halfH = H / (2f * zoom);
+        int x0 = (int) Math.floor((camX - halfW) / CHUNK_PX);
+        int x1 = (int) Math.floor((camX + halfW) / CHUNK_PX);
+        int y0 = (int) Math.floor((camY - halfH) / CHUNK_PX);
+        int y1 = (int) Math.floor((camY + halfH) / CHUNK_PX);
+        float cs = CHUNK_PX * zoom;
         for (int cy = y0; cy <= y1; cy++) {
             for (int cx = x0; cx <= x1; cx++) {
                 float x = sx(cx * CHUNK_PX), y = sy(cy * CHUNK_PX);
-                rf.set(x, y, x + CHUNK_PX + 1, y + CHUNK_PX + 1);
+                rf.set(x, y, x + cs + 1, y + cs + 1);
                 cv.drawBitmap(getChunk(cx, cy), null, rf, paint);
             }
         }
@@ -744,10 +810,11 @@ public class GameView extends SurfaceView implements Runnable {
         for (int i = 0; i < drawList.size(); i++) dPool.add(drawList.get(i));
         drawList.clear();
 
-        int tx0 = (int) Math.floor((camX - W / 2f) / TILE) - 1;
-        int tx1 = (int) Math.ceil ((camX + W / 2f) / TILE) + 1;
-        int ty0 = (int) Math.floor((camY - H / 2f) / TILE) - 1;
-        int ty1 = (int) Math.ceil ((camY + H / 2f) / TILE) + 1;
+        float halfW = W / (2f * zoom), halfH = H / (2f * zoom);
+        int tx0 = (int) Math.floor((camX - halfW) / TILE) - 1;
+        int tx1 = (int) Math.ceil ((camX + halfW) / TILE) + 1;
+        int ty0 = (int) Math.floor((camY - halfH) / TILE) - 1;
+        int ty1 = (int) Math.ceil ((camY + halfH) / TILE) + 1;
         for (int ty = ty0; ty <= ty1; ty++) {
             for (int tx = tx0; tx <= tx1; tx++) {
                 if (!isLargeCell(tx, ty) || props2.isEmpty()) continue;
@@ -772,18 +839,19 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawLargeProp(Canvas cv, D d) {
-        float s = (TILE * 1.5f) / d.pr.getHeight();
+        float s = (TILE * 1.5f * zoom) / d.pr.getHeight();
         rf.set(sx(d.ax) - d.pr.getWidth() * s / 2f, sy(d.ay) - d.pr.getHeight() * s,
                sx(d.ax) + d.pr.getWidth() * s / 2f, sy(d.ay));
         cv.drawBitmap(d.pr, null, rf, propPaint);
     }
 
     private void drawHex(Canvas cv, float cx, float cy, int color, boolean filled) {
+        float hr = HEX * 0.92f * zoom;
         hexPath.reset();
         for (int i = 0; i < 6; i++) {
             float a = (float) Math.toRadians(60 * i - 30);
-            float x = cx + HEX * 0.92f * (float) Math.cos(a);
-            float y = cy + HEX * 0.92f * SQUASH * (float) Math.sin(a);
+            float x = cx + hr * (float) Math.cos(a);
+            float y = cy + hr * SQUASH * (float) Math.sin(a);
             if (i == 0) hexPath.moveTo(x, y); else hexPath.lineTo(x, y);
         }
         hexPath.close();
@@ -826,6 +894,14 @@ public class GameView extends SurfaceView implements Runnable {
                 int d = hexDist(IH_A[0], IH_A[1], IH_A[0] + q, IH_A[1] + r);
                 if (d < 1 || d > range) continue;
                 hexToWorld(IH_A[0] + q, IH_A[1] + r, FW_A);
+                drawHex(cv, sx(FW_A[0]), sy(FW_A[1]), 0xCCcc2233, false);
+            }
+        }
+        for (Enemy en : enemies) {
+            if (en.dead) continue;
+            worldToHex(en.x, en.y, IH_B);
+            if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= range) {
+                hexToWorld(IH_B[0], IH_B[1], FW_A);
                 drawHex(cv, sx(FW_A[0]), sy(FW_A[1]), 0x66ff2233, true);
             }
         }
@@ -838,7 +914,7 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setStrokeWidth(4);
         paint.setColor(0xFFff2bd6);
         paint.setAlpha((int) (255 * (1 - k)));
-        float r = 20 + k * 50;
+        float r = (20 + k * 50) * zoom;
         rf.set(sx(runeX) - r, sy(runeY) - r / 2f, sx(runeX) + r, sy(runeY) + r / 2f);
         cv.drawOval(rf, paint);
         paint.setStyle(Paint.Style.FILL);
@@ -850,14 +926,14 @@ public class GameView extends SurfaceView implements Runnable {
             float k = p.t / 0.5f;
             paint.setColor(0xFF6a2f8f);
             paint.setAlpha((int) (110 * (1 - k)));
-            cv.drawCircle(sx(p.x), sy(p.y) - k * 26, 12 + k * 46, paint);
+            cv.drawCircle(sx(p.x), sy(p.y) - k * 26 * zoom, (12 + k * 46) * zoom, paint);
         }
         paint.setAlpha(255);
     }
 
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
-        float sw = fl ? 45 : 55;
+        float sw = (fl ? 45 : 55) * zoom;
         paint.setAlpha(fl ? 150 : 220);
         rf.set(sx(player.x) - sw, sy(player.y) - sw * 0.36f,
                sx(player.x) + sw, sy(player.y) + sw * 0.36f);
@@ -869,14 +945,14 @@ public class GameView extends SurfaceView implements Runnable {
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
         if (frame != null) {
-            float s = PLAYER_H / frame.getHeight();
+            float s = PLAYER_H * zoom / frame.getHeight();
             rf.set(-frame.getWidth() * s / 2f, -frame.getHeight() * s,
                     frame.getWidth() * s / 2f, 0);
             cv.drawBitmap(frame, null, rf, paint);
         }
         cv.restore();
 
-        float top = sy(player.y) - PLAYER_H - 26;
+        float top = sy(player.y) - PLAYER_H * zoom - 26;
         paint.setColor(0xFF330000);
         cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 12, paint);
         paint.setColor(0xFFff2bd6);
@@ -921,7 +997,7 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawEnemy(Canvas cv, Enemy en) {
         float x = sx(en.x), y = sy(en.y);
         boolean fl = en.floater.floating();
-        float sw = fl ? 35 : 45;
+        float sw = (fl ? 35 : 45) * zoom;
         paint.setAlpha(fl ? 150 : 220);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadowBmp, null, rf, paint);
@@ -934,20 +1010,20 @@ public class GameView extends SurfaceView implements Runnable {
         if (en.facing < 0) cv.scale(-1, 1);
         if (en.dead) p.setAlpha((int) (255 * (1 - en.deathT / 0.7f)));
         if (frame != null) {
-            float s = ENEMY_H / frame.getHeight();
+            float s = ENEMY_H * zoom / frame.getHeight();
             rf.set(-frame.getWidth() * s / 2f, -frame.getHeight() * s,
                     frame.getWidth() * s / 2f, 0);
             cv.drawBitmap(frame, null, rf, p);
         } else {
             p.setColor(0xFFaa2233);
-            rf.set(-30, -ENEMY_H * 0.8f, 30, 0);
+            rf.set(-30 * zoom, -ENEMY_H * 0.8f * zoom, 30 * zoom, 0);
             cv.drawOval(rf, p);
         }
         p.setAlpha(255);
         cv.restore();
 
         if (!en.dead && en.hp < en.maxHp) {
-            float top = y - ENEMY_H - 26;
+            float top = y - ENEMY_H * zoom - 26;
             paint.setColor(0xFF330000);
             cv.drawRect(x - 45, top, x + 45, top + 12, paint);
             paint.setColor(0xFFff3344);
@@ -964,13 +1040,13 @@ public class GameView extends SurfaceView implements Runnable {
                 paint.setColor(0xFFff3344);
                 paint.setAlpha(60 - t * 15);
                 cv.drawCircle(sx(b.x - dx / d * t * 22), sy(b.y - dy / d * t * 22),
-                        12 - t * 2, paint);
+                        (12 - t * 2) * zoom, paint);
             }
             paint.setAlpha(220);
             paint.setColor(0xFFff3344);
-            cv.drawCircle(sx(b.x), sy(b.y), 13, paint);
+            cv.drawCircle(sx(b.x), sy(b.y), 13 * zoom, paint);
             paint.setColor(0xFFffffff);
-            cv.drawCircle(sx(b.x), sy(b.y), 6, paint);
+            cv.drawCircle(sx(b.x), sy(b.y), 6 * zoom, paint);
             paint.setAlpha(255);
         }
     }
@@ -994,11 +1070,19 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setColor(0xFFff3344);
         cv.drawRect(W / 2f - 160, 26, W / 2f - 160 + 320f * playerHp / 100, 44, paint);
 
+        paint.setColor(0x66ffffff);
+        cv.drawCircle(W - 64, 64, 40, paint);
+        cv.drawCircle(W - 164, 64, 40, paint);
+        paint.setColor(0xFFffffff);
+        paint.setTextSize(44);
+        paint.setTextAlign(Paint.Align.CENTER);
+        cv.drawText("+", W - 64, 80, paint);
+        cv.drawText("-", W - 164, 80, paint);
+
         paint.setColor(0x663355ff);
         cv.drawCircle(110, H - 110, 70, paint);
         paint.setColor(0xFFffffff);
         paint.setTextSize(34);
-        paint.setTextAlign(Paint.Align.CENTER);
         cv.drawText("END", 110, H - 98, paint);
 
         paint.setColor(0x66ff3355);
@@ -1016,17 +1100,58 @@ public class GameView extends SurfaceView implements Runnable {
         cv.drawText("D O W N", 24, 48, paint);
         paint.setTextSize(22);
         paint.setColor(0x88ffffff);
-        cv.drawText("her hex: fan - A1/A2: range - foe hex x2: hit", 24, 80, paint);
+        cv.drawText("her hex: fan - A1/A2: range - foe hex x2: hit - drag: look", 24, 80, paint);
+    }
+
+    private boolean uiZone(float x, float y) {
+        if (x < 190 && y > H - 190) return true;
+        if (x > W - 340 && y > H - 190) return true;
+        if (Math.hypot(x - (W - 64), y - 64) < 50) return true;
+        if (Math.hypot(x - (W - 164), y - 64) < 50) return true;
+        return false;
     }
 
     // ---------- input ----------
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (deadT > 0 || phase != PH_PLAYER) return true;
-        if (e.getActionMasked() != MotionEvent.ACTION_DOWN) return true;
+        int act = e.getActionMasked();
 
-        int idx = e.getActionIndex();
-        float x = e.getX(idx), y = e.getY(idx);
+        if (act == MotionEvent.ACTION_DOWN) {
+            downX = e.getX(); downY = e.getY();
+            moved = false; panning = false;
+            return true;
+        }
+        if (act == MotionEvent.ACTION_MOVE) {
+            if (downX < -9000) return true;
+            float x = e.getX(), y = e.getY();
+            if (!moved && Math.hypot(x - downX, y - downY) > 26) {
+                moved = true;
+                panning = !uiZone(downX, downY);
+                lastPX = downX; lastPY = downY;
+            }
+            if (moved && panning) {
+                camX -= (x - lastPX) / zoom;
+                camY -= (y - lastPY) / zoom;
+                exploring = true;
+                exploreT = 0;
+                lastPX = x; lastPY = y;
+            }
+            return true;
+        }
+        if (act != MotionEvent.ACTION_UP) return true;
+        float x = e.getX(), y = e.getY();
+        downX = -9999;
+        if (moved) return true;
+
+        if (Math.hypot(x - (W - 64), y - 64) < 46) {
+            zoom = Math.min(ZOOM_MAX, zoom + 0.15f);
+            return true;
+        }
+        if (Math.hypot(x - (W - 164), y - 64) < 46) {
+            zoom = Math.max(ZOOM_MIN, zoom - 0.15f);
+            return true;
+        }
 
         if (x < 190 && y > H - 190) {
             endPlayerTurn();
@@ -1047,8 +1172,8 @@ public class GameView extends SurfaceView implements Runnable {
             return true;
         }
 
-        float wx = camX + x - W / 2f;
-        float wy = camY + y - H / 2f;
+        float wx = camX + (x - W / 2f) / zoom;
+        float wy = camY + (y - H / 2f) / zoom;
         worldToHex(wx, wy, TW_A);
         worldToHex(player.x, player.y, TW_B);
         int dTap = hexDist(TW_B[0], TW_B[1], TW_A[0], TW_A[1]);
