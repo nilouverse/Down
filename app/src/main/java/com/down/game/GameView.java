@@ -38,6 +38,13 @@ public class GameView extends SurfaceView implements Runnable {
 
     private static final int[] GROUND_COLS = {
             0xFF241a30, 0xFF221829, 0xFF261c33, 0xFF211728, 0xFF1d1426, 0xFF251b2f };
+    private static final int[][] ATK_SEQ = {
+            { 0, 1, 2, 3, 4, 9, 5 },
+            { 0, 1, 2, 9, 5 },
+            { 0, 1, 2, 8, 3, 4, 10, 11, 5 } };
+    private static final float[] ATK_DUR = { 0.95f, 0.75f, 1.25f };
+    private static final float[] ATK_HIT = { 0.60f, 0.55f, 0.80f };
+    private static final int[] ATK_RANGE = { 1, 3, 2 };
 
     private Thread loop;
     private volatile boolean running;
@@ -126,8 +133,9 @@ public class GameView extends SurfaceView implements Runnable {
     public GameView(Context ctx) {
         super(ctx);
         idleF   = Sprites.cutSheet(ctx, "sprites/idle.png",         2, 2, 4);
-        glide   = Sprites.cutSheet(ctx, "sprites/glide.png",        2, 4, 4);
-        attack  = Sprites.cutSheet(ctx, "sprites/attack.png",       2, 4, 4);
+        glide   = Sprites.cutSheet(ctx, "sprites/glide.png",        2, 2, 2);
+        attack  = new ArrayList<>(Sprites.cutSheet(ctx, "sprites/attack_a.png", 2, 3, 2));
+        attack.addAll(Sprites.cutSheet(ctx, "sprites/attack_b.png", 2, 3, 2));
         eGlide  = Sprites.cutSheet(ctx, "sprites/enemy_glide.png",  2, 4, 4);
         eAttack = Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 4, 4);
         props   = Sprites.cutSheet(ctx, "sprites/props.png",        2, 4, 4);
@@ -384,6 +392,14 @@ public class GameView extends SurfaceView implements Runnable {
         Dmg d = new Dmg(); d.x = x; d.y = y; d.val = val; dmgs.add(d);
     }
 
+    private void hurtEnemy(Enemy en, int dmg) {
+        if (en.dead) return;
+        en.hp -= dmg;
+        en.hitFlash = 0.25f;
+        addDmg(en.x, en.y - ENEMY_H - 20, dmg);
+        if (en.hp <= 0) en.dead = true;
+    }
+
     private void startGame() {
         state = STATE_GAME;
         camSnap = false;
@@ -440,31 +456,35 @@ public class GameView extends SurfaceView implements Runnable {
             }
         }
 
-        if (strikeTarget != null && player.isAttacking() && attackType == 1
-                && !playerHitDone && player.attackTime > 0.4f) {
+        if (player.isAttacking() && !playerHitDone
+                && player.attackTime > ATK_DUR[attackType - 1] * ATK_HIT[attackType - 1]) {
             playerHitDone = true;
-            Enemy en = strikeTarget;
-            if (!en.dead) {
-                en.hp -= 12;
-                en.hitFlash = 0.25f;
-                addDmg(en.x, en.y - ENEMY_H - 20, 12);
-                if (en.hp <= 0) en.dead = true;
+            if (attackType == 1) {
+                if (strikeTarget != null) hurtEnemy(strikeTarget, 12);
+            } else if (attackType == 2) {
+                if (pendingBolt != null) {
+                    Bolt b = new Bolt();
+                    b.x0 = player.x + player.facing * 40;
+                    b.y0 = player.y - PLAYER_H * 0.75f;
+                    b.tx = pendingBolt.x;
+                    b.ty = pendingBolt.y - ENEMY_H * 0.5f;
+                    b.x = b.x0; b.y = b.y0; b.t = 0;
+                    b.tgt = pendingBolt;
+                    bolts.add(b);
+                    pendingBolt = null;
+                }
+            } else {
+                worldToHex(player.x, player.y, IH_A);
+                for (Enemy en : enemies) {
+                    if (en.dead) continue;
+                    worldToHex(en.x, en.y, IH_B);
+                    if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= ATK_RANGE[2]) {
+                        hurtEnemy(en, 10);
+                    }
+                }
             }
         }
         if (!player.isAttacking()) playerHitDone = false;
-
-        if (pendingBolt != null && player.isAttacking() && attackType == 2
-                && player.attackTime > 0.4f) {
-            Bolt b = new Bolt();
-            b.x0 = player.x + player.facing * 40;
-            b.y0 = player.y - PLAYER_H * 0.75f;
-            b.tx = pendingBolt.x;
-            b.ty = pendingBolt.y - ENEMY_H * 0.5f;
-            b.x = b.x0; b.y = b.y0; b.t = 0;
-            b.tgt = pendingBolt;
-            bolts.add(b);
-            pendingBolt = null;
-        }
 
         for (int i = bolts.size() - 1; i >= 0; i--) {
             Bolt b = bolts.get(i);
@@ -472,11 +492,7 @@ public class GameView extends SurfaceView implements Runnable {
             float kk = b.t / 0.28f;
             if (kk >= 1f) {
                 if (!b.tgt.dead) {
-                    Enemy en = b.tgt;
-                    en.hp -= 12;
-                    en.hitFlash = 0.25f;
-                    addDmg(en.x, en.y - ENEMY_H - 20, 12);
-                    if (en.hp <= 0) en.dead = true;
+                    hurtEnemy(b.tgt, 12);
                 }
                 bolts.remove(i);
             } else {
@@ -833,7 +849,7 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawAttackRange(Canvas cv) {
-        int range = (attackRangeShown == 1) ? 1 : 3;
+        int range = ATK_RANGE[attackRangeShown - 1];
         worldToHex(player.x, player.y, IH_A);
         for (int r = -range; r <= range; r++) {
             for (int q = -range; q <= range; q++) {
@@ -908,22 +924,22 @@ public class GameView extends SurfaceView implements Runnable {
 
     private Bitmap pickFrame() {
         if (player.isAttacking() && !attack.isEmpty()) {
+            int[] seq = ATK_SEQ[attackType - 1];
             float prog = player.attackTime / player.attackDuration;
-            if (attackType == 2 && attack.size() >= 8) {
-                int[] seq = { 0, 1, 2, 3, 6, 7 };
-                int i = (int) (prog * seq.length);
-                if (i >= seq.length) i = seq.length - 1;
-                return attack.get(seq[i]);
-            }
-            int i = (int) (prog * attack.size());
-            if (i >= attack.size()) i = attack.size() - 1;
-            return attack.get(i);
+            int i = (int) (prog * seq.length);
+            if (i >= seq.length) i = seq.length - 1;
+            return attack.get(seq[i]);
         }
         if (player.floater.state == 0 && !idleF.isEmpty()) {
             return idleF.get(((int) (player.bobTime * 2)) % idleF.size());
         }
-        if (!glide.isEmpty()) {
-            return glide.get(player.floater.frame(player.bobTime));
+        if (glide.size() >= 4) {
+            Floater f = player.floater;
+            int idx;
+            if (f.state == 1) idx = f.t < 0.1f ? 3 : 1;
+            else if (f.state == 2) idx = 1 + ((int) (player.bobTime * 6)) % 2;
+            else idx = f.t < 0.06f ? 2 : f.t < 0.12f ? 1 : f.t < 0.17f ? 3 : 0;
+            return glide.get(idx);
         }
         return null;
     }
@@ -1097,12 +1113,17 @@ public class GameView extends SurfaceView implements Runnable {
         paint.setColor(0xFFffffff);
         cv.drawText("A2", W - 260, H - 99, paint);
 
+        paint.setColor(0x66aa44ff);
+        cv.drawCircle(W - 410, H - 110, 70, paint);
+        paint.setColor(0xFFffffff);
+        cv.drawText("A3", W - 410, H - 99, paint);
+
         paint.setTextAlign(Paint.Align.LEFT);
     }
 
     private boolean uiZone(float x, float y) {
         if (x < 190 && y > H - 190) return true;
-        if (x > W - 340 && y > H - 190) return true;
+        if (x > W - 490 && y > H - 190) return true;
         if (Math.hypot(x - (W - 64), y - 64) < 50) return true;
         if (Math.hypot(x - (W - 164), y - 64) < 50) return true;
         return false;
@@ -1169,6 +1190,13 @@ public class GameView extends SurfaceView implements Runnable {
             }
             return true;
         }
+        if (x > W - 490 && x < W - 340 && y > H - 190) {
+            if (!hasAttacked) {
+                attackRangeShown = (attackRangeShown == 3) ? 0 : 3;
+                hexesShown = false; targetEnemy = null;
+            }
+            return true;
+        }
 
         float wx = camX + (x - W / 2f) / zoom;
         float wy = camY + (y - H / 2f) / zoom;
@@ -1184,7 +1212,7 @@ public class GameView extends SurfaceView implements Runnable {
         }
 
         if (tapped != null) {
-            int range = (attackRangeShown == 1) ? 1 : (attackRangeShown == 2) ? 3 : 0;
+            int range = attackRangeShown > 0 ? ATK_RANGE[attackRangeShown - 1] : 0;
             if (!hasAttacked && range > 0 && dTap <= range) {
                 if (targetEnemy != tapped) {
                     targetEnemy = tapped;
@@ -1192,9 +1220,10 @@ public class GameView extends SurfaceView implements Runnable {
                     hasAttacked = true;
                     attackType = attackRangeShown;
                     player.facing = tapped.x >= player.x ? 1 : -1;
+                    player.attackDuration = ATK_DUR[attackType - 1];
                     player.startAttack();
                     if (attackType == 1) strikeTarget = tapped;
-                    else pendingBolt = tapped;
+                    else if (attackType == 2) pendingBolt = tapped;
                     targetEnemy = null;
                     attackRangeShown = 0;
                     hexesShown = false;
