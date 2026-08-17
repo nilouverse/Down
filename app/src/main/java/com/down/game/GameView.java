@@ -36,7 +36,7 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float TH = TILE * SQUASH;
     private static final int MOVE_HEX = 3;
     private static final float PLAYER_H = 220f, ENEMY_H = 200f;
-    private static final float ENEMY_SINK = 16f;
+    private static final float ENEMY_SINK = 0f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF221829;
@@ -1042,9 +1042,9 @@ public class GameView extends SurfaceView implements Runnable {
         } else if (f.cCenter) {
             int wl = Math.max(0, f.rgt - f.ww);
             int wr = f.rgt;
-            frameSrc.set(wl, 0, wr, f.bmp.getHeight());
+            frameSrc.set(wl, f.top, wr, f.top + f.ch);
             float right = f.ww * s / 2f;
-            rf.set(right - (wr - wl) * s, -f.bmp.getHeight() * s, right, 0);
+            rf.set(right - (wr - wl) * s, -f.ch * s, right, 0);
         } else {
             frameSrc.set(0, 0, f.bmp.getWidth(), f.bmp.getHeight());
             rf.set(-f.bmp.getWidth() * s / 2f, -f.bmp.getHeight() * s,
@@ -1058,8 +1058,8 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
         boolean idle = player.floater.state == 0 && !player.isAttacking();
-        float br = idle ? (float) Math.sin(player.bobTime * 2.1f) : 0f;
-        float sw = (fl ? 45 : 55) * zoom * (1f - 0.03f * br);
+        float br = idle ? (float) Math.sin(player.bobTime * 1.3f) : 0f;
+        float sw = (fl ? 45 : 55) * zoom * (1f - 0.06f * br);
         paint.setAlpha(fl ? 150 : 220);
         rf.set(sx(player.x) - sw, sy(player.y) - sw * 0.36f,
                sx(player.x) + sw, sy(player.y) + sw * 0.36f);
@@ -1070,7 +1070,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.save();
         cv.translate(sx(player.x), sy(player.y));
         if (player.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.012f * br, 1f + 0.02f * br);
+        if (br != 0f) cv.scale(1f - 0.028f * br, 1f + 0.045f * br);
         if (frameA != null) drawFrame(cv, frameA, 255);
         if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
         cv.restore();
@@ -1116,8 +1116,8 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawEnemy(Canvas cv, Enemy en) {
         float x = sx(en.x), y = sy(en.y) + ENEMY_SINK * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
-        float br = idle ? (float) Math.sin(en.animT * 2.1f) : 0f;
-        float sw = 45 * zoom * (1f - 0.03f * br);
+        float br = idle ? (float) Math.sin(en.animT * 1.3f) : 0f;
+        float sw = 45 * zoom * (1f - 0.06f * br);
         paint.setAlpha(220);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadowBmp, null, rf, paint);
@@ -1128,7 +1128,7 @@ public class GameView extends SurfaceView implements Runnable {
         cv.save();
         cv.translate(x, y);
         if (en.facing < 0) cv.scale(-1, 1);
-        if (br != 0f) cv.scale(1f - 0.012f * br, 1f + 0.02f * br);
+        if (br != 0f) cv.scale(1f - 0.028f * br, 1f + 0.045f * br);
         if (en.dead) p.setAlpha((int) (255 * (1 - en.deathT / 0.7f)));
         if (fr != null) {
             float s = ENEMY_H * zoom / fr.ref;
@@ -1138,9 +1138,9 @@ public class GameView extends SurfaceView implements Runnable {
             } else if (fr.cCenter) {
                 int wl = Math.max(0, fr.rgt - fr.ww);
                 int wr = fr.rgt;
-                frameSrc.set(wl, 0, wr, fr.bmp.getHeight());
+                frameSrc.set(wl, fr.top, wr, fr.top + fr.ch);
                 float right = fr.ww * s / 2f;
-                rf.set(right - (wr - wl) * s, -fr.bmp.getHeight() * s, right, 0);
+                rf.set(right - (wr - wl) * s, -fr.ch * s, right, 0);
             } else {
                 frameSrc.set(0, 0, fr.bmp.getWidth(), fr.bmp.getHeight());
                 rf.set(-fr.bmp.getWidth() * s / 2f, -fr.bmp.getHeight() * s,
