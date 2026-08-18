@@ -46,7 +46,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF0a0608;
 
-    // ---- Nilouverse palette (site tokens) ----
     private static final int C_INK = 0xFF0a0608;
     private static final int C_BLOOD = 0xFFb3102a;
     private static final int C_BRIGHT = 0xFFff2747;
@@ -177,7 +176,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private Bitmap hexBmp, blastBmp;
     private final Sound sound = new Sound();
 
-    // perf / lifecycle
     private volatile boolean surfaceAlive;
     private long frameCostEma = 8000000L;
     private int quality = 1;
@@ -187,7 +185,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
     };
 
-    // brand / async assets
     private final Hero[] roster = new Hero[] { new NilouZila(), new Vex() };
     private Bitmap menuBg, keyBmp, coinBmp;
     private final RectF selBtn0 = new RectF(), selBtn1 = new RectF();
@@ -195,7 +192,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private volatile boolean assetsReady;
     private float loadT = 0;
     private Bitmap gameOverlay, splatterBmp;
-    private static class Decal { float x, y, rot, s; boolean active; }
+    private HashMap<String, List<Frame>> loadedFrames;
+    private static class Decal { float x, y, rot, s, flip; boolean active; }
     private final Decal[] decalPool = new Decal[8];
     private static class AssetBundle {
         HashMap<String, List<Frame>> frames;
@@ -329,6 +327,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void applyAssets() {
         AssetBundle b = pending;
         pending = null;
+        loadedFrames = b.frames;
         for (Hero h : roster) h.bind(b.frames);
         eIdleFr.addAll(b.eIdle); eGlideFr.addAll(b.eGlide); eAtkFr.addAll(b.eAtk);
         props = b.props; props2 = b.props2;
@@ -676,7 +675,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (!dcl.active) {
                 dcl.x = x; dcl.y = y;
                 dcl.rot = (float) (Math.random() * 360);
-                dcl.s = 0.8f + (float) Math.random() * 0.7f;
+                dcl.flip = Math.random() > 0.5f ? 1f : -1f;
+                dcl.s = 0.28f + (float) Math.random() * 0.22f;
                 dcl.active = true;
                 return;
             }
@@ -691,6 +691,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float h = splatterBmp.getHeight() * dcl.s * zoom * 0.5f;
             cv.save();
             cv.translate(sx(dcl.x), sy(dcl.y));
+            cv.scale(dcl.flip, 1);
             cv.rotate(dcl.rot);
             paint.setAlpha(140);
             rf.set(-w / 2f, -h / 2f, w / 2f, h / 2f);
@@ -733,17 +734,18 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void drawSlashes(Canvas cv) {
         for (Slash s : slashPool) {
             if (!s.active) continue;
-            float k = s.t / 0.3f;
-            float r = (34 + k * 56) * zoom;
+            float k = s.t / 0.22f;
+            float r = (26 + k * 64) * zoom;
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(5 * zoom * (1 - k * 0.5f));
+            paint.setStrokeWidth(3.5f * zoom * (1 - k));
             paint.setColor(C_MAGENTA);
-            paint.setAlpha((int) (220 * (1 - k)));
+            paint.setAlpha((int) (150 * (1 - k)));
             rf.set(sx(s.x) - r, sy(s.y) - r * SQUASH, sx(s.x) + r, sy(s.y) + r * SQUASH);
-            cv.drawArc(rf, s.rot, 130, false, paint);
+            cv.drawArc(rf, s.rot, 110, false, paint);
             paint.setColor(C_BONE);
-            paint.setStrokeWidth(2 * zoom);
-            cv.drawArc(rf, s.rot + 14, 100, false, paint);
+            paint.setStrokeWidth(1.5f * zoom * (1 - k));
+            paint.setAlpha((int) (200 * (1 - k)));
+            cv.drawArc(rf, s.rot + 20, 70, false, paint);
             paint.setStyle(Paint.Style.FILL);
             paint.setStrokeWidth(0);
             paint.setAlpha(255);
@@ -867,8 +869,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void startStory() {
-        story = new Story(getContext());
-        story.load("section1");
+        story = new Story(getContext(), loadedFrames);
+        story.load("act1");
         state = STATE_STORY;
     }
 
@@ -1033,6 +1035,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             bl.t += dt;
             if (bl.t > 0.5f) bl.active = false;
         }
+        for (Slash s : slashPool) {
+            if (!s.active) continue;
+            s.t += dt;
+            if (s.t > 0.22f) s.active = false;
+        }
 
         for (Particle p : particlePool) {
             if (!p.active) continue;
@@ -1044,7 +1051,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
 
         if (phase == PH_PLAYER) {
-            // the turn ends only when the player presses END
+            // player turn waits for input
         } else {
             if (ei < enemies.size()) {
                 Enemy en = enemies.get(ei);
