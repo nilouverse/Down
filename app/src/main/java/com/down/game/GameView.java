@@ -158,6 +158,7 @@ public class GameView extends SurfaceView implements Runnable {
             0, 0, 0.6f, 0, 0,
             0, 0, 0, 1, 0 });
     private PorterDuffColorFilter hexFilter;
+    private int lastHexColor = 0;
     private PorterDuffColorFilter blastFilter;
     private int W, H;
 
@@ -990,8 +991,9 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawHex(Canvas cv, float cx, float cy, int color, boolean filled) {
         float hr = HEX * 1.1f * zoom;
         rf.set(cx - hr, cy - hr * SQUASH, cx + hr, cy + hr * SQUASH);
-        if (hexFilter == null || hexFilter.getColor() != color) {
+        if (hexFilter == null || lastHexColor != color) {
             hexFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+            lastHexColor = color;
         }
         paint.setColorFilter(hexFilter);
         cv.drawBitmap(hexBmp, null, rf, paint);
