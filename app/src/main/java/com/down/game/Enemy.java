@@ -19,7 +19,6 @@ public class Enemy {
 
     public int act = 0;
     public boolean planned = false;
-    public boolean glowing = false;
     public int attacksPlanned = 0, attacksDone = 0;
     public float[] pathX = new float[7];
     public float[] pathY = new float[7];
@@ -28,10 +27,10 @@ public class Enemy {
     public static final float GLOW_DUR = 0.5f;
     public static final float ATK_DUR = 0.9f;
 
-    public boolean attacking() { return attackT >= 0 || glowing; }
+    public boolean attacking() { return attackT >= 0; }
 
     public void resetTurn() {
-        act = 0; planned = false; glowing = false;
+        act = 0; planned = false;
         attackT = -1; struck = false;
         attacksPlanned = 0; attacksDone = 0;
         pathLen = 0; pathI = 0;
@@ -59,7 +58,6 @@ public class Enemy {
                 } else if (floater.state == 0) {
                     if (attacksPlanned > 0 && adjacent) {
                         act = 1;
-                        glowing = true;
                         attackT = 0;
                         struck = false;
                         facing = px >= x ? 1 : -1;
@@ -68,21 +66,18 @@ public class Enemy {
                     }
                 }
                 break;
+
             case 1:
                 floater.moving = false;
-                if (glowing) {
-                    attackT += dt;
-                    if (attackT > GLOW_DUR) { glowing = false; attackT = 0; }
-                } else if (attackT >= 0) {
+                if (attackT >= 0) {
                     attackT += dt;
                     if (attackT > ATK_DUR) {
                         attacksDone++;
-                        attackT = -1;
                         struck = false;
                         if (attacksDone < attacksPlanned && adjacent) {
-                            glowing = true;
                             attackT = 0;
                         } else {
+                            attackT = -1;
                             act = 3;
                         }
                     }
