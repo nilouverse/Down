@@ -31,7 +31,7 @@ public abstract class Hero {
     }
 
     public static class Attack {
-        public final int range, dmg, mana, kind; // kind 0 melee,1 single ranged,2 aoe
+        public final int range, dmg, mana, kind; // kind 0 melee, 1 single ranged, 2 aoe
         public final Step[] steps;
         public Attack(int range, int dmg, int mana, int kind, Step[] steps) {
             this.range = range; this.dmg = dmg; this.mana = mana;
@@ -43,6 +43,8 @@ public abstract class Hero {
     public String name = "?", voice = "nilou", keyPrefix = "x:";
     public int moveMax = 3;
     public float hoverLift = -15f;
+    /** layer-1 weapon sound per attack index (layer-2 voice = voice + "_attack") */
+    public String[] atkSfx = new String[] { "swing", "bolt", "nova" };
     public SheetSpec[] sheets = new SheetSpec[0];
     public Attack[] attacks = new Attack[0];
     protected String[] idleSheets;
