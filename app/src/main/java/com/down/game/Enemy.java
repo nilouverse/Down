@@ -15,9 +15,12 @@ public class Enemy {
     public final Floater floater = new Floater();
 
     public int act = 0;
-    public boolean planned = false, planMove = false, acted = false;
-    public float tx, ty;
+    public boolean planned = false;
     public boolean glowing = false;
+    public int attacksPlanned = 0, attacksDone = 0;
+    public float[] pathX = new float[7];
+    public float[] pathY = new float[7];
+    public int pathLen = 0, pathI = 0;
 
     public static final float GLOW_DUR = 0.5f;
     public static final float ATK_DUR = 0.9f;
@@ -25,55 +28,62 @@ public class Enemy {
     public boolean attacking() { return attackT >= 0 || glowing; }
 
     public void resetTurn() {
-        act = 0; planned = false; planMove = false; acted = false;
-        attackT = -1; struck = false; glowing = false;
+        act = 0; planned = false; glowing = false;
+        attackT = -1; struck = false;
+        attacksPlanned = 0; attacksDone = 0;
+        pathLen = 0; pathI = 0;
     }
 
     public void turnUpdate(float dt, float px, float py, boolean adjacent) {
         switch (act) {
             case 0:
-                if (planMove) {
-                    float dx = tx - x, dy = ty - y;
-                    float distSq = dx * dx + dy * dy;
-                    if (distSq > 36f) {
+                if (pathI < pathLen) {
+                    float dx = pathX[pathI] - x, dy = pathY[pathI] - y;
+                    float d2 = dx * dx + dy * dy;
+                    if (d2 > 36f) {
                         floater.moving = true;
-                        float dist = (float) Math.sqrt(distSq);
-                        float step = Math.min(dist, speed * dt);
-                        x += dx / dist * step;
-                        y += dy / dist * step;
+                        float d = (float) Math.sqrt(d2);
+                        float step = Math.min(d, speed * dt);
+                        x += dx / d * step;
+                        y += dy / d * step;
                         if (dx < -0.05f) facing = -1;
                         if (dx >  0.05f) facing =  1;
                     } else {
-                        planMove = false;
-                        floater.moving = false;
+                        x = pathX[pathI]; y = pathY[pathI];
+                        pathI++;
+                        if (pathI >= pathLen) floater.moving = false;
                     }
-                } else if (planned) {
-                    floater.moving = false;
-                    if (floater.state == 0) act = 1;
+                } else if (floater.state == 0) {
+                    if (attacksPlanned > 0 && adjacent) {
+                        act = 1;
+                        glowing = true;
+                        attackT = 0;
+                        struck = false;
+                        facing = px >= x ? 1 : -1;
+                    } else {
+                        act = 3;
+                    }
                 }
                 break;
             case 1:
                 floater.moving = false;
-                if (!acted) {
-                    if (attackT < 0 && !glowing) {
-                        if (adjacent) {
+                if (glowing) {
+                    attackT += dt;
+                    if (attackT > GLOW_DUR) { glowing = false; attackT = 0; }
+                } else if (attackT >= 0) {
+                    attackT += dt;
+                    if (attackT > ATK_DUR) {
+                        attacksDone++;
+                        attackT = -1;
+                        struck = false;
+                        if (attacksDone < attacksPlanned && adjacent) {
                             glowing = true;
                             attackT = 0;
-                            facing = px >= x ? 1 : -1;
-                        } else acted = true;
-                    } else if (glowing) {
-                        attackT += dt;
-                        if (attackT > GLOW_DUR) { glowing = false; attackT = 0; }
-                    } else {
-                        attackT += dt;
-                        if (attackT > ATK_DUR) { attackT = -1; acted = true; }
+                        } else {
+                            act = 3;
+                        }
                     }
-                } else {
-                    act = 2;
                 }
-                break;
-            case 2:
-                if (floater.state == 0) act = 3;
                 break;
         }
         floater.update(dt);
