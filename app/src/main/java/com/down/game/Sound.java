@@ -5,13 +5,16 @@ import android.content.res.AssetFileDescriptor;
 import android.media.AudioAttributes;
 import android.media.SoundPool;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Random;
 
 public class Sound {
 
     private SoundPool pool;
     private boolean enabled = true;
-    private final HashMap<String, Integer> ids = new HashMap<>();
+    private final HashMap<String, ArrayList<Integer>> ids = new HashMap<>();
+    private final Random rnd = new Random();
     private static final String[] NAMES = {
             "swing", "hit", "bolt", "nova", "death", "hurt", "ui", "turn", "step"
     };
@@ -19,36 +22,14 @@ public class Sound {
     public void init(Context ctx) {
         try {
             pool = new SoundPool.Builder()
-                    .setMaxStreams(6)
+                    .setMaxStreams(8)
                     .setAudioAttributes(new AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_GAME)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build())
                     .build();
             for (String n : NAMES) {
-                try {
-                    AssetFileDescriptor afd = ctx.getAssets().openFd("sounds/" + n + ".ogg");
-                    ids.put(n, pool.load(afd, 1));
-                    afd.close();
-                } catch (Exception e) {
-                }
-            }
-        } catch (Exception e) {
-        }
-    }
-
-    public void play(String n) {
-        if (!enabled || pool == null) return;
-        Integer id = ids.get(n);
-        if (id == null) return;
-        pool.play(id, 1f, 1f, 0, 0, 1f);
-    }
-
-    public void setEnabled(boolean e) { enabled = e; }
-
-    public void release() {
-        if (pool != null) pool.release();
-        pool = null;
-        ids.clear();
-    }
-}
+                ArrayList<Integer> list = new ArrayList<>();
+                int base = load(ctx, "sounds/" + n + ".ogg");
+                if (base != 0) list.add(base);
+                for (int v = 2; v
