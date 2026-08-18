@@ -8,6 +8,7 @@ public class NilouZila extends Hero {
         keyPrefix = "nilou:";
         moveMax = 3;
         hoverLift = -15f;
+        atkSfx = new String[] { "swing", "bolt", "nova" };
         sheets = new SheetSpec[] {
             new SheetSpec("idle",  "sprites/idle.png",     2, 2, 4, false, true),
             new SheetSpec("glide", "sprites/glide.png",    2, 2, 2, true,  false),
