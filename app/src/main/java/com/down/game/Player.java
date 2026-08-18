@@ -15,7 +15,7 @@ public class Player {
 
     public boolean isMoving() {
         float dx = targetX - x, dy = targetY - y;
-        return (dx * dx + dy * dy) > 16;
+        return (dx * dx + dy * dy) > 16f;
     }
 
     public void setTarget(float tx, float ty) { targetX = tx; targetY = ty; }
@@ -31,7 +31,8 @@ public class Player {
             if (attackTime > attackDuration) attackTime = -1;
         } else if (isMoving()) {
             float dx = targetX - x, dy = targetY - y;
-            float dist = (float) Math.hypot(dx, dy);
+            float distSq = dx * dx + dy * dy;
+            float dist = (float) Math.sqrt(distSq);
             float step = Math.min(dist, speed * dt);
             x += dx / dist * step;
             y += dy / dist * step;
