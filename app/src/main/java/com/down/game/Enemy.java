@@ -4,6 +4,9 @@ public class Enemy {
 
     public float x, y;
     public int hp = 30, maxHp = 30;
+    public int gender = 0;
+    public int weapon = 0;
+    public boolean cried = false;
     public float speed = 220;
     public int facing = 1;
     public float animT = (float) (Math.random() * 10);
