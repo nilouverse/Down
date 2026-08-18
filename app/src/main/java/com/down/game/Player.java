@@ -7,11 +7,9 @@ public class Player {
     public float speed = 300;
     public int facing = 1;
     public float bobTime = 0;
-    public float attackTime = -1;
-    public float attackDuration = 0.9f;
-    public final Floater floater = new Floater();
+    public Hero hero;
 
-    public boolean isAttacking() { return attackTime >= 0; }
+    public boolean isAttacking() { return hero != null && hero.attacking(); }
 
     public boolean isMoving() {
         float dx = targetX - x, dy = targetY - y;
@@ -19,20 +17,14 @@ public class Player {
     }
 
     public void setTarget(float tx, float ty) { targetX = tx; targetY = ty; }
-    public void startAttack() { if (!isAttacking()) attackTime = 0; }
 
     public void update(float dt) {
         bobTime += dt;
-        floater.moving = isMoving() && !isAttacking();
-        floater.update(dt);
+        if (hero != null) hero.updateAnim(dt, isMoving());
 
-        if (isAttacking()) {
-            attackTime += dt;
-            if (attackTime > attackDuration) attackTime = -1;
-        } else if (isMoving()) {
+        if (!isAttacking() && isMoving()) {
             float dx = targetX - x, dy = targetY - y;
-            float distSq = dx * dx + dy * dy;
-            float dist = (float) Math.sqrt(distSq);
+            float dist = (float) Math.sqrt(dx * dx + dy * dy);
             float step = Math.min(dist, speed * dt);
             x += dx / dist * step;
             y += dy / dist * step;
