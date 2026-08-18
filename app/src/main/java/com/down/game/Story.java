@@ -8,6 +8,7 @@ import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.view.MotionEvent;
 
 import java.io.BufferedReader;
@@ -32,6 +33,9 @@ public class Story {
     private final Paint paint = new Paint();
     private final RectF rf = new RectF();
     private final Rect frameSrc = new Rect();
+    private Typeface fLogo, fBody, fSerif;
+    private int cacheKey = 0;
+    private final ArrayList<String> cacheLines = new ArrayList<>();
 
     private float camX, camY, zoom = 1.2f;
     private int W, H;
@@ -90,6 +94,7 @@ public class Story {
 
     private static class SD { float y; Prop p; Actor a; }
     private final ArrayList<SD> sdList = new ArrayList<>();
+    private final ArrayList<SD> sdPool = new ArrayList<>();
     private static final Comparator<SD> BY_Y = new Comparator<SD>() {
         public int compare(SD a, SD b) { return a.y < b.y ? -1 : (a.y > b.y ? 1 : 0); }
     };
@@ -102,6 +107,12 @@ public class Story {
         ctx = c;
         paint.setFilterBitmap(true);
         city = Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 4);
+        try { fLogo = Typeface.createFromAsset(c.getAssets(),
+                "fonts/MetalMania-Regular.ttf"); } catch (Exception e) { fLogo = Typeface.DEFAULT; }
+        try { fBody = Typeface.createFromAsset(c.getAssets(),
+                "fonts/SpaceGrotesk-Bold.ttf"); } catch (Exception e) { fBody = Typeface.DEFAULT_BOLD; }
+        try { fSerif = Typeface.createFromAsset(c.getAssets(),
+                "fonts/InstrumentSerif-Italic.ttf"); } catch (Exception e) { fSerif = Typeface.DEFAULT; }
     }
 
     private static void hexToWorld(int q, int r, float[] out) {
@@ -287,7 +298,7 @@ public class Story {
         for (Actor a : actors) {
             a.animT += dt;
             float dx = a.tx - a.x, dy = a.ty - a.y;
-            float d = (float) Math.hypot(dx, dy);
+            float d = (float) Math.sqrt(dx * dx + dy * dy);
             a.moving = d > 4;
             if (a.moving) {
                 float step = Math.min(d, 260 * dt);
@@ -326,7 +337,8 @@ public class Story {
                         a.tx = FW_A[0]; a.ty = FW_A[1];
                         a.hideOnArrive = ev.b != null;
                     }
-                    if (!a.moving && Math.hypot(a.tx - a.x, a.ty - a.y) <= 4) {
+                    if (!a.moving && Math.sqrt((a.tx - a.x) * (a.tx - a.x)
+                            + (a.ty - a.y) * (a.ty - a.y)) <= 4) {
                         if (a.hideOnArrive) { a.hidden = true; a.hideOnArrive = false; }
                         a.tq = 99999;
                         idx++;
@@ -388,7 +400,8 @@ public class Story {
         if (act == MotionEvent.ACTION_MOVE) {
             if (downX < -9000) return true;
             float x = e.getX(), y = e.getY();
-            if (!moved && Math.hypot(x - downX, y - downY) > 26) moved = true;
+            if (!moved && Math.sqrt((x - downX) * (x - downX)
+                    + (y - downY) * (y - downY)) > 26) moved = true;
             if (moved) {
                 camX -= (x - lastPX) / zoom;
                 camY -= (y - lastPY) / zoom;
@@ -439,9 +452,10 @@ public class Story {
 
         for (Prop p : props) if (p.decal) drawProp(cv, p);
 
+        for (int i = 0; i < sdList.size(); i++) sdPool.add(sdList.get(i));
         sdList.clear();
-        for (Prop p : props) if (!p.decal) { SD s = new SD(); s.y = p.ay; s.p = p; sdList.add(s); }
-        for (Actor a : actors) if (!a.hidden) { SD s = new SD(); s.y = a.y; s.a = a; sdList.add(s); }
+        for (Prop p : props) if (!p.decal) sdList.add(obtainSD(p.ay, p, null));
+        for (Actor a : actors) if (!a.hidden) sdList.add(obtainSD(a.y, null, a));
         Collections.sort(sdList, BY_Y);
         for (SD s : sdList) {
             try {
@@ -462,15 +476,16 @@ public class Story {
         if (dialogUp && idx < evs.size()) {
             Ev ev = evs.get(idx);
             float ph = H * 0.24f;
-            paint.setColor(0xDD120a18);
+            paint.setColor(0xDD0e0709);
             cv.drawRect(0, H - ph, W, H, paint);
-            paint.setColor(0xFFff2bd6);
+            paint.setColor(0xFFff2d7e);
             cv.drawRect(0, H - ph, W, H - ph + 3, paint);
             paint.setTextAlign(Paint.Align.LEFT);
+            paint.setTypeface(fBody);
             paint.setTextSize(H * 0.032f);
             paint.setColor(speakerColor(ev.a));
             cv.drawText(ev.a, 40, H - ph + H * 0.065f, paint);
-            paint.setColor(0xFFeee6f2);
+            paint.setColor(0xFFefe6dd);
             paint.setTextSize(H * 0.028f);
             wrapText(cv, ev.b, 40, H - ph + H * 0.12f, W - 80, H * 0.045f);
             if (((int) (System.currentTimeMillis() / 400)) % 2 == 0) {
@@ -483,9 +498,11 @@ public class Story {
             int a = nameT < 2f ? 220 : (int) ((2.5f - nameT) / 0.5f * 220);
             paint.setAlpha(a);
             paint.setTextSize(54);
+            paint.setTypeface(fLogo);
             paint.setTextAlign(Paint.Align.CENTER);
-            paint.setColor(0xFFff2bd6);
+            paint.setColor(0xFFff2d7e);
             cv.drawText(sectionName, W / 2f, H * 0.22f, paint);
+            paint.setTypeface(fBody);
             paint.setAlpha(255);
             paint.setTextAlign(Paint.Align.LEFT);
         }
@@ -494,11 +511,13 @@ public class Story {
             paint.setColor(0xCC000000);
             cv.drawRect(0, 0, W, H, paint);
             paint.setTextSize(64);
+            paint.setTypeface(fLogo);
             paint.setTextAlign(Paint.Align.CENTER);
-            paint.setColor(0xFFff2bd6);
+            paint.setColor(0xFFff2d7e);
             cv.drawText("TO BE CONTINUED", W / 2f, H / 2f, paint);
+            paint.setTypeface(fBody);
             paint.setTextSize(26);
-            paint.setColor(0xAAffffff);
+            paint.setColor(0xAAefe6dd);
             cv.drawText("tap to return", W / 2f, H / 2f + 60, paint);
             paint.setTextAlign(Paint.Align.LEFT);
         }
@@ -512,20 +531,31 @@ public class Story {
     }
 
     private void wrapText(Canvas cv, String text, float x, float y, float maxW, float lh) {
-        String[] words = text.split("\\s+");
-        StringBuilder line = new StringBuilder();
-        float cy = y;
-        for (String w : words) {
-            String test = line.length() == 0 ? w : line + " " + w;
-            if (paint.measureText(test) > maxW && line.length() > 0) {
-                cv.drawText(line.toString(), x, cy, paint);
-                line = new StringBuilder(w);
-                cy += lh;
-            } else {
-                line = new StringBuilder(test);
+        int key = text.hashCode() ^ (int) maxW;
+        if (key != cacheKey) {
+            cacheKey = key;
+            cacheLines.clear();
+            String[] words = text.split("\\s+");
+            StringBuilder line = new StringBuilder();
+            for (String w : words) {
+                String test = line.length() == 0 ? w : line + " " + w;
+                if (paint.measureText(test) > maxW && line.length() > 0) {
+                    cacheLines.add(line.toString());
+                    line = new StringBuilder(w);
+                } else {
+                    line = new StringBuilder(test);
+                }
             }
+            if (line.length() > 0) cacheLines.add(line.toString());
         }
-        if (line.length() > 0) cv.drawText(line.toString(), x, cy, paint);
+        float cy = y;
+        for (String l : cacheLines) { cv.drawText(l, x, cy, paint); cy += lh; }
+    }
+
+    private SD obtainSD(float y, Prop p, Actor a) {
+        SD s = sdPool.isEmpty() ? new SD() : sdPool.remove(sdPool.size() - 1);
+        s.y = y; s.p = p; s.a = a;
+        return s;
     }
 
     private void drawProp(Canvas cv, Prop p) {
@@ -627,9 +657,9 @@ public class Story {
     }
 
     private int speakerColor(String s) {
-        if (s.equals("NilouZila")) return 0xFFff2bd6;
-        if (s.equals("Velkarya")) return 0xFF7dff8a;
-        if (s.equals("Soldier")) return 0xFFffaa55;
-        return 0xFFffffff;
+        if (s.equals("NilouZila")) return 0xFFff2d7e;
+        if (s.equals("Velkarya")) return 0xFFb07cff;
+        if (s.equals("Soldier")) return 0xFFff7a1a;
+        return 0xFFefe6dd;
     }
 }
