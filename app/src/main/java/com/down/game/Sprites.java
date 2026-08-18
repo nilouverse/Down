@@ -3,10 +3,16 @@ package com.down.game;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Sprites {
 
@@ -38,7 +44,8 @@ public class Sprites {
                 else if (ex > 100) a = (140 - ex) * 255 / 40;
             }
 
-            px[i] = (a << 24) | ((r * a / 255) << 16) | ((g * a / 255) << 8) | (b * a / 255);
+            px[i] = (a << 24) | ((r * a / 255) << 16)
+                         | ((g * a / 255) << 8) | (b * a / 255);
         }
 
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -56,22 +63,25 @@ public class Sprites {
             opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
             opts.inPremultiplied = false;
             Bitmap sheet = BitmapFactory.decodeStream(in, null, opts);
-            in.close();
+            try { in.close(); } catch (Exception ignored) {}
             if (sheet == null) return frames;
-            sheet = chromaKey(sheet);
-            int cw = sheet.getWidth() / cols;
-            int ch = sheet.getHeight() / rows;
+            Bitmap keyed = chromaKey(sheet);
+            // Free the raw decoded sheet; cut frames share keyed's pixels.
+            if (!sheet.isRecycled()) sheet.recycle();
+            int cw = keyed.getWidth() / cols;
+            int ch = keyed.getHeight() / rows;
             for (int r = 0; r < rows; r++)
                 for (int c = 0; c < cols; c++)
-                    frames.add(Bitmap.createBitmap(sheet,
+                    frames.add(Bitmap.createBitmap(keyed,
                             c * cw + margin, r * ch + margin,
                             cw - 2 * margin, ch - 2 * margin));
-        } catch (Exception e) {
+        } catch (Exception ignored) {
         }
         return frames;
     }
 
-    public static List<Frame> buildFrames(List<Bitmap> cells, boolean vCrop, boolean cCenter) {
+    public static List<Frame> buildFrames(List<Bitmap> cells,
+                                           boolean vCrop, boolean cCenter) {
         ArrayList<Frame> out = new ArrayList<>();
         for (Bitmap b : cells) {
             int w = b.getWidth(), h = b.getHeight();
@@ -81,14 +91,18 @@ public class Sprites {
             boolean[] colHas = new boolean[w];
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
-                    if ((px[y * w + x] >>> 24) > 16) { rowHas[y] = true; colHas[x] = true; }
+                    if ((px[y * w + x] >>> 24) > 16) {
+                        rowHas[y] = true; colHas[x] = true;
+                    }
                 }
             }
             int top = runStart(rowHas, h / 2, 10);
             int bottom = runEnd(rowHas, h / 2, 10);
             int left = runStart(colHas, w / 2, 10);
             int right = runEnd(colHas, w / 2, 10);
-            if (top < 0) { top = 0; bottom = h - 1; left = 0; right = w - 1; }
+            if (top < 0) {
+                top = 0; bottom = h - 1; left = 0; right = w - 1;
+            }
             Frame f = new Frame();
             f.bmp = b;
             f.top = top;
@@ -100,7 +114,7 @@ public class Sprites {
             f.cCenter = cCenter;
             out.add(f);
         }
-        
+
         int maxW = 0;
         for (Frame f : out) if (f.cw > maxW) maxW = f.cw;
         for (Frame f : out) f.ww = maxW;
@@ -114,8 +128,29 @@ public class Sprites {
     public static List<Bitmap> trimBottom(List<Bitmap> src, float keep) {
         List<Bitmap> out = new ArrayList<>();
         for (Bitmap b : src) {
-            out.add(Bitmap.createBitmap(b, 0, 0, b.getWidth(), (int) (b.getHeight() * keep)));
+            out.add(Bitmap.createBitmap(b, 0, 0,
+                    b.getWidth(), (int) (b.getHeight() * keep)));
         }
+        return out;
+    }
+
+    // ----- Pre-tint cache (P3): avoids per-frame ColorFilter allocations -----
+    private static final Map<Long, Bitmap> TINT_CACHE = new HashMap<>();
+    private static final Paint TINT_PAINT = new Paint();
+
+    public static Bitmap tinted(Bitmap src, int color) {
+        long key = ((long) System.identityHashCode(src) << 32)
+                 | (color & 0xFFFFFFFFL);
+        Bitmap cached = TINT_CACHE.get(key);
+        if (cached != null && !cached.isRecycled()) return cached;
+        Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(),
+                                         Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        TINT_PAINT.setColorFilter(
+            new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+        c.drawBitmap(src, 0, 0, TINT_PAINT);
+        TINT_PAINT.setColorFilter(null);
+        TINT_CACHE.put(key, out);
         return out;
     }
 
