@@ -112,6 +112,8 @@ public class GameView extends SurfaceView implements Runnable {
     private int attackRangeShown = 0;
     private int attackType = 1;
     private int mana = 100;
+    private String voice = "nilou";
+    private boolean playerCried = false;
     private Enemy targetEnemy = null;
     private Enemy strikeTarget = null;
     private Enemy pendingBolt = null;
@@ -411,6 +413,7 @@ public class GameView extends SurfaceView implements Runnable {
         ei = 0;
         mana = Math.min(100, mana + 25);
         if (enemies.size() < 5) spawnEnemy();
+        sound.play(voice + "_turn");
     }
 
     private void endPlayerTurn() {
@@ -444,6 +447,7 @@ public class GameView extends SurfaceView implements Runnable {
 
     private void resetFight() {
         playerHp = 100;
+        playerCried = false;
         mana = 100;
         enemies.clear();
         for (Dmg d : dmgPool) d.active = false;
@@ -524,7 +528,19 @@ public class GameView extends SurfaceView implements Runnable {
         en.hitFlash = 0.25f;
         addDmg(en.x, en.y - ENEMY_H - 20, dmg);
         sound.play("hit");
-        if (en.hp <= 0) { en.dead = true; sound.play("death"); }
+        sound.play(en.gender == 1 ? "female_hurt" : "male_hurt");
+
+        if (en.hp > 0 && en.hp <= 30 && !en.cried) {
+            en.cried = true;
+            sound.play(en.gender == 1 ? "female_cry" : "male_cry");
+        }
+
+        if (en.hp <= 0) {
+            en.dead = true;
+            sound.play("death");
+            sound.play(en.gender == 1 ? "female_death" : "male_death");
+            sound.play(voice + "_kill");
+        }
     }
 
     private void planEnemy(Enemy en) {
@@ -679,6 +695,7 @@ public class GameView extends SurfaceView implements Runnable {
                 if (en.deathT > 0.7f) {
                     spawnDeathParticles(en.x, en.y);
                     enemies.remove(i);
+                    if (enemies.isEmpty()) sound.play(voice + "_victory");
                 }
             }
         }
@@ -758,7 +775,11 @@ public class GameView extends SurfaceView implements Runnable {
                     worldToHex(player.x, player.y, IH_A);
                     worldToHex(en.x, en.y, IH_B);
                     boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
+                    boolean wasAttacking = en.attacking();
                     en.turnUpdate(dt, player.x, player.y, adj);
+                    if (!wasAttacking && en.attacking()) {
+                        sound.play(en.weapon == 1 ? "claw" : "swing");
+                    }
                     if (en.attacking() && !en.glowing && en.attackT > 0.45f && !en.struck) {
                         en.struck = true;
                         if (adj) {
@@ -766,10 +787,18 @@ public class GameView extends SurfaceView implements Runnable {
                             hurtT = 0.3f;
                             addDmg(player.x, player.y - PLAYER_H - 20, -10);
                             sound.play("hurt");
+                            sound.play(voice + "_hurt");
                             post(new Runnable() { public void run() {
                                 performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
                             } });
-                            if (playerHp <= 0) { playerHp = 0; deadT = 2f; }
+                            if (playerHp <= 0) {
+                                playerHp = 0;
+                                deadT = 2f;
+                                sound.play(voice + "_death");
+                            } else if (playerHp <= 30 && !playerCried) {
+                                playerCried = true;
+                                sound.play(voice + "_wounded");
+                            }
                         }
                     }
                     if (en.act == 3) ei++;
@@ -1590,6 +1619,13 @@ public class GameView extends SurfaceView implements Runnable {
         worldToHex(player.x, player.y, TW_B);
         int dTap = hexDist(TW_B[0], TW_B[1], TW_A[0], TW_A[1]);
 
+        if (dTap == 0) {
+            sound.play(voice + "_select");
+            hexesShown = !hexesShown;
+            attackRangeShown = 0;
+            return true;
+        }
+
         if (attackRangeShown == 3 && canAct() && dTap <= ATK_RANGE[2]) {
             actionsLeft--;
             attackType = 3;
@@ -1636,19 +1672,19 @@ public class GameView extends SurfaceView implements Runnable {
                     player.attackDuration = ATK_DUR[attackType - 1];
                     player.startAttack();
                     mana -= ATK_MANA[attackType - 1];
-                    if (attackType == 1) { strikeTarget = tapped; sound.play("swing"); }
-                    else if (attackType == 2) { pendingBolt = tapped; sound.play("swing"); }
+                    if (attackType == 1) {
+                        strikeTarget = tapped;
+                        sound.play("swing");
+                        sound.play(voice + "_attack");
+                    } else if (attackType == 2) {
+                        pendingBolt = tapped;
+                        sound.play("swing");
+                    }
                     targetEnemy = null;
                     attackRangeShown = 0;
                     hexesShown = false;
                 }
             }
-            return true;
-        }
-
-        if (dTap == 0) {
-            hexesShown = !hexesShown;
-            attackRangeShown = 0;
             return true;
         }
 
@@ -1665,6 +1701,7 @@ public class GameView extends SurfaceView implements Runnable {
                 hexesShown = false;
                 runeX = TW_F[0]; runeY = TW_F[1]; runeT = 0;
                 sound.play("step");
+                sound.play(voice + "_move");
             }
         }
         return true;
