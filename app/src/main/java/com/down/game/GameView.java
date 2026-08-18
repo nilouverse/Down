@@ -185,7 +185,7 @@ public class GameView extends SurfaceView implements Runnable {
         }
         eIdleFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_idle.png", 2, 2, 4), false, true));
         eGlideFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glide.png", 2, 2, 2), true, false));
-        eGlowFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_glow.png", 2, 2, 2), true, false));
+        // enemy_glow removed
         eAtkFr.addAll(Sprites.buildFrames(Sprites.cutSheet(ctx, "sprites/enemy_attack.png", 2, 3, 2), false, false));
         props   = Sprites.trimBottom(Sprites.cutSheet(ctx, "sprites/props.png",  2, 4, 4), 0.9f);
         props2  = Sprites.trimBottom(Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
@@ -234,6 +234,7 @@ public class GameView extends SurfaceView implements Runnable {
 
     public void start() {
         if (running) return;
+        sound.init(getContext());
         running = true;
         loop = new Thread(this);
         loop.start();
@@ -775,12 +776,13 @@ public class GameView extends SurfaceView implements Runnable {
                     worldToHex(player.x, player.y, IH_A);
                     worldToHex(en.x, en.y, IH_B);
                     boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
-                    boolean wasGlowing = en.glowing;
+                    boolean wasAttacking = en.attacking();
+                    int prevAttacksDone = en.attacksDone;
                     en.turnUpdate(dt, player.x, player.y, adj);
-                    if (!wasGlowing && en.glowing) {
+                    if ((!wasAttacking && en.attacking()) || (en.attacksDone > prevAttacksDone && en.attacking())) {
                         sound.play(en.weapon == 1 ? "claw" : "swing");
                     }
-                    if (en.attacking() && !en.glowing && en.attackT > 0.45f && !en.struck) {
+                    if (en.attacking() && en.attackT > 0.45f && !en.struck) {
                         en.struck = true;
                         if (adj) {
                             playerHp -= 10;
@@ -1276,14 +1278,7 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private Frame pickEnemyFrame(Enemy en) {
-        if (en.glowing && !eGlowFr.isEmpty()) {
-            float pos = (en.attackT / Enemy.GLOW_DUR) * eGlowFr.size();
-            int i = (int) pos;
-            if (i < 0) i = 0;
-            if (i >= eGlowFr.size()) i = eGlowFr.size() - 1;
-            return eGlowFr.get(i);
-        }
-        if (en.attacking() && !en.glowing && !eAtkFr.isEmpty()) {
+        if (en.attacking() && !eAtkFr.isEmpty()) {
             float pos = (en.attackT / Enemy.ATK_DUR) * eAtkFr.size();
             int i = (int) pos;
             if (i < 0) i = 0;
@@ -1415,13 +1410,7 @@ public class GameView extends SurfaceView implements Runnable {
         drawBolts(cv);
         drawDmgs(cv);
 
-        if (overlay != null) { rf.set(0, 0, W, H); cv.drawBitmap(overlay, null, rf, paint); }
-
-        paint.setColor(0xFF050508);
-        paint.setAlpha(180);
-        rf.set(0, 0, W, H);
-        cv.drawRoundRect(rf, 0, 0, paint);
-        paint.setAlpha(255);
+        // full brightness for testing
 
         paint.setColor(0xFFff7a30);
         for (Ember em : embers) {
@@ -1678,7 +1667,6 @@ public class GameView extends SurfaceView implements Runnable {
                         sound.play(voice + "_attack");
                     } else if (attackType == 2) {
                         pendingBolt = tapped;
-                        sound.play("swing");
                     }
                     targetEnemy = null;
                     attackRangeShown = 0;
