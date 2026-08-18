@@ -8,6 +8,7 @@ public class Vex extends Hero {
         keyPrefix = "vex:";
         moveMax = 4;
         hoverLift = -10f;
+        atkSfx = new String[] { "slash", "poison", "slash" };
         sheets = new SheetSpec[] {
             new SheetSpec("idleA", "sprites/vex_idle_a.png", 2, 2, 4, false, true),
             new SheetSpec("idleB", "sprites/vex_idle_b.png", 2, 2, 4, false, true),
@@ -32,7 +33,7 @@ public class Vex extends Hero {
                 new Step("atk", 4, 0.16f, EV_NONE),
                 new Step("atk", 5, 0.16f, EV_NONE),
             }),
-            // poisoned dart: single windup frame, target poisoned 5 x 4 turns
+            // poisoned dart: single windup frame, target poisoned 5 x 4 enemy turns
             new Attack(4, 0, 20, 1, new Step[] {
                 new Step("atk", 0, 0.30f, EV_POISON),
             }),
