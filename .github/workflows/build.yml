@@ -21,6 +21,11 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: Unpack launcher icon
+        run: |
+          unzip -o res.zip -d app/src/main
+          rm res.zip
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
