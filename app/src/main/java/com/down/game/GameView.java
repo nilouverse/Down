@@ -31,7 +31,8 @@ import java.util.List;
 
 public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Callback {
 
-    private static final int STATE_MENU = 0, STATE_GAME = 1, STATE_STORY = 2;
+    private static final int STATE_MENU = 0, STATE_GAME = 1, STATE_STORY = 2,
+            STATE_SELECT = 3;
     private static final int PH_PLAYER = 0, PH_ENEMY = 1;
 
     private static final float SQUASH = 0.6f;
@@ -93,11 +94,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private float velX, velY, flingX, flingY;
     private long lastMoveT;
 
-    private final ArrayList<Frame> idleFr = new ArrayList<>();
-    private final ArrayList<Frame> glideFr = new ArrayList<>();
-    private final ArrayList<Frame> atkFr = new ArrayList<>();
-    private Frame frameA, frameB;
-    private float frameK;
+    private static class Slash { float x, y, rot, t; boolean active; }
+    private final Slash[] slashPool = new Slash[24];
 
     private final ArrayList<Frame> eIdleFr = new ArrayList<>();
     private final ArrayList<Frame> eGlideFr = new ArrayList<>();
@@ -107,7 +105,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private float runeX, runeY, runeT = 99;
 
-    private static class Particle { float x, y, vx, vy, t, life; int col; boolean active; }
+    private static class Particle { float x, y, vx, vy, t, life, grav = 400; int col; boolean active; }
     private final Particle[] particlePool = new Particle[200];
     private static class Puff { float x, y, t; boolean active; }
     private final Puff[] puffPool = new Puff[50];
@@ -131,9 +129,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private String voice = "nilou";
     private boolean playerCried = false;
     private Enemy targetEnemy = null;
-    private Enemy strikeTarget = null;
-    private Enemy pendingBolt = null;
-    private static class Bolt { float x, y, x0, y0, tx, ty, t; Enemy tgt; boolean active; }
+    private static class Bolt { float x, y, x0, y0, tx, ty, t; Enemy tgt; int dmg; boolean active; }
     private final Bolt[] boltPool = new Bolt[20];
 
     private int phase = PH_PLAYER;
@@ -145,8 +141,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final HashSet<Long> reserved = new HashSet<>();
     private int playerHp = 100;
     private float hurtT = 0, deadT = 0;
-    private boolean playerHitDone = false;
-    private static class Dmg { float x, y, t; int val; String txt; boolean active; }
+    private static class Dmg { float x, y, t; int val; int col; String txt; boolean active; }
     private final Dmg[] dmgPool = new Dmg[30];
 
     private static class D { float y; int kind; Enemy en; Bitmap pr; float ax, ay, s; }
@@ -196,6 +191,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     };
 
     // brand / async assets
+    private final Hero[] roster = new Hero[] { new NilouZila(), new Vex() };
+    private Bitmap menuBg, keyBmp, coinBmp;
+    private final RectF selBtn0 = new RectF(), selBtn1 = new RectF();
     private Typeface fLogo, fBody, fSerif;
     private volatile boolean assetsReady;
     private float loadT = 0;
@@ -203,8 +201,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static class Decal { float x, y, rot, s; boolean active; }
     private final Decal[] decalPool = new Decal[8];
     private static class AssetBundle {
-        ArrayList<Frame> idle, glide, atk, eIdle, eGlide, eAtk;
+        HashMap<String, List<Frame>> frames;
+        ArrayList<Frame> eIdle, eGlide, eAtk;
         List<Bitmap> props, props2;
+        Bitmap menuBg, keyBmp, coinBmp;
     }
     private volatile AssetBundle pending;
     private final Path btnPath = new Path();
@@ -225,15 +225,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     android.os.Process.THREAD_PRIORITY_BACKGROUND);
             Context c = getContext();
             AssetBundle b = new AssetBundle();
-            b.idle = new ArrayList<>(Sprites.buildFrames(
-                    Sprites.cutSheet(c, "sprites/idle.png", 2, 2, 4), false, true));
-            b.glide = new ArrayList<>(Sprites.buildFrames(
-                    Sprites.cutSheet(c, "sprites/glide.png", 2, 2, 2), true, false));
-            b.atk = new ArrayList<>(Sprites.buildFrames(
-                    Sprites.cutSheet(c, "sprites/attack_a.png", 2, 3, 2), true, false));
-            b.atk.addAll(Sprites.buildFrames(
-                    Sprites.cutSheet(c, "sprites/attack_b.png", 2, 3, 2), true, false));
-            if (b.idle.size() >= 4) { b.idle.get(1).dx = -8f; b.idle.get(2).dx = -8f; }
+            b.frames = new HashMap<>();
+            for (Hero h : roster) {
+                for (Hero.SheetSpec s : h.sheets) {
+                    List<Frame> built = Sprites.buildFrames(Sprites.cutSheet(
+                            c, s.path, s.rows, s.cols, s.margin), s.vCrop, s.cCenter);
+                    String key = h.keyPrefix + s.id;
+                    List<Frame> l = b.frames.get(key);
+                    if (l == null) { l = new ArrayList<>(); b.frames.put(key, l); }
+                    l.addAll(built);
+                }
+            }
             b.eIdle = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_idle.png", 2, 2, 4), false, true));
             b.eGlide = new ArrayList<>(Sprites.buildFrames(
@@ -244,6 +246,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/props.png",  2, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
                     Sprites.cutSheet(c, "sprites/props2.png", 2, 4, 4), 0.9f);
+            b.menuBg = decodeSampled(c, "art/hero.webp", 1024);
+            b.keyBmp = decodeRaw(c, "art/button.webp");
+            b.coinBmp = decodeRaw(c, "art/coin.webp");
             pending = b;
             assetsReady = true;
         } }, "NV-assetload");
@@ -261,11 +266,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         worldToHex(640, 640, IH_A);
         hexToWorld(IH_A[0], IH_A[1], FW_A);
+        player.hero = roster[0];
         player.x = FW_A[0]; player.y = FW_A[1];
         player.targetX = FW_A[0]; player.targetY = FW_A[1];
 
         for (int i = 0; i < particlePool.length; i++) particlePool[i] = new Particle();
         for (int i = 0; i < decalPool.length; i++) decalPool[i] = new Decal();
+        for (int i = 0; i < slashPool.length; i++) slashPool[i] = new Slash();
         for (int i = 0; i < puffPool.length; i++) puffPool[i] = new Puff();
         for (int i = 0; i < blastPool.length; i++) blastPool[i] = new Blast();
         for (int i = 0; i < boltPool.length; i++) boltPool[i] = new Bolt();
@@ -325,11 +332,39 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void applyAssets() {
         AssetBundle b = pending;
         pending = null;
-        idleFr.addAll(b.idle);   glideFr.addAll(b.glide);  atkFr.addAll(b.atk);
+        for (Hero h : roster) h.bind(b.frames);
         eIdleFr.addAll(b.eIdle); eGlideFr.addAll(b.eGlide); eAtkFr.addAll(b.eAtk);
         props = b.props; props2 = b.props2;
+        menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
+    }
+
+    private static Bitmap decodeSampled(Context c, String path, int max) {
+        try {
+            java.io.InputStream in = c.getAssets().open(path);
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeStream(in, null, o);
+            in.close();
+            int scale = 1;
+            while (Math.max(o.outWidth, o.outHeight) / scale > max) scale *= 2;
+            in = c.getAssets().open(path);
+            BitmapFactory.Options o2 = new BitmapFactory.Options();
+            o2.inSampleSize = scale;
+            Bitmap b = BitmapFactory.decodeStream(in, null, o2);
+            in.close();
+            return b;
+        } catch (Exception e) { return null; }
+    }
+
+    private static Bitmap decodeRaw(Context c, String path) {
+        try {
+            java.io.InputStream in = c.getAssets().open(path);
+            Bitmap b = BitmapFactory.decodeStream(in);
+            in.close();
+            return b;
+        } catch (Exception e) { return null; }
     }
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
@@ -405,7 +440,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             frameCostEma += (cost - frameCostEma) * 0.05f;
             if (frameCostEma > 12000000L && quality > 0) quality--;
             else if (frameCostEma < 7000000L && quality < 1) quality = 1;
-            long period = (state == STATE_MENU) ? FRAME_NS_MENU : FRAME_NS;
+            long period = (state == STATE_MENU || state == STATE_SELECT)
+                    ? FRAME_NS_MENU : FRAME_NS;
             long rem = period - (System.nanoTime() - now);
             if (rem > 0) {
                 long sleepNs = rem - 2000000L;
@@ -520,7 +556,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         attackLocked = false;
         sound.play("turn");
         attackRangeShown = 0;
-        targetEnemy = null; strikeTarget = null; pendingBolt = null;
+        targetEnemy = null;
         hexesShown = false;
         ei = 0;
         mana = Math.min(100, mana + 25);
@@ -533,6 +569,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         phase = PH_ENEMY; phaseT = 0; ei = 0;
         hexesShown = false; targetEnemy = null; attackRangeShown = 0;
         for (Enemy en : enemies) en.resetTurn();
+        for (Enemy en : enemies) {
+            if (en.dead || en.poisonTurns <= 0) continue;
+            en.poisonTurns--;
+            spawnWoosh(en.x, en.y);
+            sound.play("poison");
+            hurtEnemy(en, 5);
+            addDmg(en.x, en.y - ENEMY_H - 44, 5, C_CYAN);
+        }
         reserved.clear();
         buildFlow();
     }
@@ -581,10 +625,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return b < cap ? b : cap;
     }
 
-    private void addDmg(float x, float y, int val) {
+    private void addDmg(float x, float y, int val) { addDmg(x, y, val, 0); }
+
+    private void addDmg(float x, float y, int val, int col) {
         for (Dmg d : dmgPool) {
             if (!d.active) {
-                d.x = x; d.y = y; d.val = val; d.txt = String.valueOf(val);
+                d.x = x; d.y = y; d.val = val; d.col = col;
+                d.txt = String.valueOf(val);
                 d.t = 0; d.active = true;
                 return;
             }
@@ -609,11 +656,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
     }
 
-    private void spawnBolt(float x0, float y0, float tx, float ty, Enemy tgt) {
+    private void spawnBolt(float x0, float y0, float tx, float ty, Enemy tgt, int dmg) {
         for (Bolt b : boltPool) {
             if (!b.active) {
                 b.x0 = x0; b.y0 = y0; b.tx = tx; b.ty = ty;
-                b.x = x0; b.y = y0; b.t = 0; b.tgt = tgt; b.active = true;
+                b.x = x0; b.y = y0; b.t = 0; b.tgt = tgt; b.dmg = dmg; b.active = true;
                 return;
             }
         }
@@ -673,9 +720,60 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     p.x = player.x; p.y = player.y - 100;
                     p.vx = (float) (Math.random() * 240 - 120);
                     p.vy = (float) (-Math.random() * 260 - 60);
+                    p.grav = 400;
                     p.life = 0.7f + (float) Math.random() * 0.6f;
                     p.t = 0;
                     p.col = (i & 1) == 0 ? C_EMBER : C_MAGENTA;
+                    p.active = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    private void spawnSlash(float x, float y) {
+        for (Slash s : slashPool) {
+            if (!s.active) {
+                s.x = x; s.y = y - ENEMY_H * 0.5f;
+                s.rot = (float) (Math.random() * 360);
+                s.t = 0; s.active = true;
+                return;
+            }
+        }
+    }
+
+    private void drawSlashes(Canvas cv) {
+        for (Slash s : slashPool) {
+            if (!s.active) continue;
+            float k = s.t / 0.3f;
+            float r = (34 + k * 56) * zoom;
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(5 * zoom * (1 - k * 0.5f));
+            paint.setColor(C_MAGENTA);
+            paint.setAlpha((int) (220 * (1 - k)));
+            rf.set(sx(s.x) - r, sy(s.y) - r * SQUASH, sx(s.x) + r, sy(s.y) + r * SQUASH);
+            cv.drawArc(rf, s.rot, 130, false, paint);
+            paint.setColor(C_BONE);
+            paint.setStrokeWidth(2 * zoom);
+            cv.drawArc(rf, s.rot + 14, 100, false, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(0);
+            paint.setAlpha(255);
+        }
+    }
+
+    private void spawnWoosh(float x, float y) {
+        for (int i = 0; i < 10; i++) {
+            for (Particle p : particlePool) {
+                if (!p.active) {
+                    p.x = x + (float) (Math.random() * 44 - 22);
+                    p.y = y - (float) (Math.random() * 90);
+                    p.vx = (float) (Math.random() * 20 - 10);
+                    p.vy = -60 - (float) (Math.random() * 70);
+                    p.grav = -40;
+                    p.life = 0.5f + (float) Math.random() * 0.3f;
+                    p.t = 0;
+                    p.col = C_CYAN;
                     p.active = true;
                     break;
                 }
@@ -690,6 +788,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     p.x = x; p.y = y;
                     p.vx = (float)(Math.random() * 100 - 50);
                     p.vy = (float)(Math.random() * -150 - 50);
+                    p.grav = 400;
                     p.life = 0.5f + (float)Math.random() * 0.5f;
                     p.t = 0;
                     p.col = (Math.random() > 0.5) ? C_BLOOD : 0xFF050508;
@@ -772,7 +871,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
     }
 
-    private void startGame() {
+    private void startGame(Hero h) {
+        player.hero = h;
+        voice = h.voice;
         state = STATE_GAME;
         camSnap = false;
     }
@@ -795,7 +896,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         loadT += dt;
         if (assetsReady && pending != null) applyAssets();
         updateEmbers(dt);
-        if (state == STATE_MENU) return;
+        if (state == STATE_MENU || state == STATE_SELECT) return;
         if (state == STATE_STORY) {
             story.update(dt);
             if (story.quitRequested) { story = null; state = STATE_MENU; }
@@ -884,33 +985,46 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
 
-        if (player.isAttacking() && !playerHitDone
-                && player.attackTime > ATK_DUR[attackType - 1] * ATK_HIT[attackType - 1]) {
-            playerHitDone = true;
-            hitstopT = 0.05f;
-            shakeT = 0.15f;
-            if (attackType == 1) {
-                if (strikeTarget != null) hurtEnemy(strikeTarget, ATK_DMG[0]);
-            } else if (attackType == 2) {
-                if (pendingBolt != null) {
+        int ev;
+        while ((ev = player.hero.pollEvent()) != 0) {
+            Hero h = player.hero;
+            Hero.Attack atk = h.cur;
+            if (ev == Hero.EV_SHAKE) {
+                shakeT = 0.15f;
+            } else if (ev == Hero.EV_STRIKE) {
+                hitstopT = 0.05f;
+                shakeT = 0.15f;
+                if (h.target != null && !h.target.dead) {
+                    spawnSlash(h.target.x, h.target.y);
+                    hurtEnemy(h.target, atk.dmg);
+                }
+            } else if (ev == Hero.EV_BOLT) {
+                if (h.target != null && !h.target.dead) {
                     spawnBolt(player.x + player.facing * 40, player.y - PLAYER_H * 0.75f,
-                              pendingBolt.x, pendingBolt.y - ENEMY_H * 0.5f, pendingBolt);
-                    pendingBolt = null;
+                              h.target.x, h.target.y - ENEMY_H * 0.5f, h.target, atk.dmg);
                     sound.play("bolt");
                 }
-            } else {
+            } else if (ev == Hero.EV_AOE) {
                 spawnBlast(player.x, player.y);
+                shakeT = 0.15f;
                 worldToHex(player.x, player.y, IH_A);
                 for (Enemy en : enemies) {
                     if (en.dead) continue;
                     worldToHex(en.x, en.y, IH_B);
-                    if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= ATK_RANGE[2]) {
-                        hurtEnemy(en, ATK_DMG[2]);
+                    if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= atk.range) {
+                        spawnSlash(en.x, en.y);
+                        hurtEnemy(en, atk.dmg);
                     }
+                }
+                sound.play("nova");
+            } else if (ev == Hero.EV_POISON) {
+                if (h.target != null && !h.target.dead) {
+                    h.target.poisonTurns = 4;
+                    spawnWoosh(h.target.x, h.target.y);
+                    sound.play("poison");
                 }
             }
         }
-        if (!player.isAttacking()) playerHitDone = false;
 
         for (Bolt b : boltPool) {
             if (!b.active) continue;
@@ -918,7 +1032,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float kk = b.t / 0.28f;
             if (kk >= 1f) {
                 if (!b.tgt.dead) {
-                    hurtEnemy(b.tgt, ATK_DMG[1]);
+                    hurtEnemy(b.tgt, b.dmg);
                     hitstopT = 0.04f;
                     shakeT = 0.1f;
                 }
@@ -939,16 +1053,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (!p.active) continue;
             p.t += dt;
             if (p.t >= p.life) { p.active = false; continue; }
-            p.vy += 400 * dt;
+            p.vy += p.grav * dt;
             p.x += p.vx * dt;
             p.y += p.vy * dt;
         }
 
         if (phase == PH_PLAYER) {
-            if (actionsLeft == 0 && !player.isMoving()
-                    && !player.isAttacking() && player.floater.state == 0) {
-                endPlayerTurn();
-            }
+            // the turn ends only when the player presses END
         } else {
             if (ei < enemies.size()) {
                 Enemy en = enemies.get(ei);
@@ -991,7 +1102,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
 
-        if (player.floater.floating() && player.isMoving()) {
+        if (player.hero.airborne() && player.isMoving()) {
             puffTimer += dt;
             if (puffTimer > 0.09f) {
                 puffTimer = 0;
@@ -1021,6 +1132,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         W = cv.getWidth(); H = cv.getHeight();
         if (state == STATE_MENU) drawMenu(cv);
+        else if (state == STATE_SELECT) drawSelect(cv);
         else if (state == STATE_STORY) story.draw(cv);
         else drawGame(cv);
         h.unlockCanvasAndPost(cv);
@@ -1032,6 +1144,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void drawMenu(Canvas cv) {
         if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
         else cv.drawColor(C_INK);
+        if (menuBg != null) {
+            paint.setAlpha(110);
+            rf.set(0, 0, W, H); cv.drawBitmap(menuBg, null, rf, paint);
+            paint.setAlpha(255);
+        }
+        if (keyBmp != null) {
+            float ks = 46 + (float) Math.sin(loadT * 2.2f) * 3;
+            float ky = H * 0.30f - Math.min(W * 0.16f, 170) * 1.05f;
+            rf.set(W / 2f - ks / 2, ky - ks, W / 2f + ks / 2, ky);
+            cv.drawBitmap(keyBmp, null, rf, paint);
+        }
 
         if (quality > 0) {
             paint.setColor(C_EMBER);
@@ -1148,12 +1271,58 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
         if (act == MotionEvent.ACTION_UP) {
-            if (menuPress == 1 && menuBtnTest.contains(e.getX(), e.getY())) startGame();
+            if (menuPress == 1 && menuBtnTest.contains(e.getX(), e.getY())) {
+                sound.play("ui");
+                state = STATE_SELECT;
+            }
             if (menuPress == 2 && menuBtnStory.contains(e.getX(), e.getY())) startStory();
             menuPress = 0;
             return true;
         }
         return true;
+    }
+
+    private boolean onSelectTouch(MotionEvent e) {
+        int act = e.getActionMasked();
+        if (!assetsReady) return true;
+        if (act == MotionEvent.ACTION_DOWN) {
+            menuPress = 0;
+            if (selBtn0.contains(e.getX(), e.getY())) menuPress = 3;
+            else if (selBtn1.contains(e.getX(), e.getY())) menuPress = 4;
+            return true;
+        }
+        if (act == MotionEvent.ACTION_UP) {
+            if (menuPress == 3 && selBtn0.contains(e.getX(), e.getY())) {
+                sound.play("ui"); startGame(roster[0]);
+            }
+            if (menuPress == 4 && selBtn1.contains(e.getX(), e.getY())) {
+                sound.play("ui"); startGame(roster[1]);
+            }
+            menuPress = 0;
+            return true;
+        }
+        return true;
+    }
+
+    private void drawSelect(Canvas cv) {
+        if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
+        if (menuBg != null) {
+            paint.setAlpha(110);
+            rf.set(0, 0, W, H); cv.drawBitmap(menuBg, null, rf, paint);
+            paint.setAlpha(255);
+        }
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(fLogo);
+        paint.setTextSize(64);
+        paint.setColor(C_BONE);
+        cv.drawText("DOWN", W / 2f, H * 0.26f, paint);
+        float bw = Math.min(W * 0.38f, 420), bh = Math.min(H * 0.16f, 110);
+        selBtn0.set(W / 2f - bw - 20, H * 0.45f, W / 2f - 20, H * 0.45f + bh);
+        selBtn1.set(W / 2f + 20, H * 0.45f, W / 2f + bw + 20, H * 0.45f + bh);
+        drawMenuButton(cv, selBtn0, roster[0].name, C_MAGENTA, menuPress == 3, true);
+        drawMenuButton(cv, selBtn1, roster[1].name, C_CYAN, menuPress == 4, true);
+        if (overlay != null) { rf.set(0, 0, W, H); cv.drawBitmap(overlay, null, rf, paint); }
+        paint.setTextAlign(Paint.Align.LEFT);
     }
 
     private void drawGround(Canvas cv) {
@@ -1303,15 +1472,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void drawMoveFan(Canvas cv) {
         int budget = moveBudget();
+        int mm = player.hero.moveMax;
         worldToHex(player.x, player.y, IH_A);
-        for (int r = -MOVE_MAX; r <= MOVE_MAX; r++) {
-            for (int q = -MOVE_MAX; q <= MOVE_MAX; q++) {
+        for (int r = -mm; r <= mm; r++) {
+            for (int q = -mm; q <= mm; q++) {
                 int d = hexDist(IH_A[0], IH_A[1], IH_A[0] + q, IH_A[1] + r);
-                if (d < 1 || d > MOVE_MAX) continue;
+                if (d < 1 || d > mm) continue;
                 hexToWorld(IH_A[0] + q, IH_A[1] + r, FW_A);
                 if (d <= budget) {
                     if (hexFree(IH_A[0] + q, IH_A[1] + r, null)) {
-                        int col = (movedTotal + d > 3) ? 0x77ff7a1a : 0x7734e3d6;
+                        int col = (movedTotal + d > mm) ? 0x77ff7a1a : 0x7734e3d6;
                         drawHex(cv, sx(FW_A[0]), sy(FW_A[1]), col, true);
                     } else {
                         drawHex(cv, sx(FW_A[0]), sy(FW_A[1]), 0xCCff2747, false);
@@ -1322,8 +1492,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void drawAttackRange(Canvas cv) {
-        int range = ATK_RANGE[attackRangeShown - 1];
-        boolean nova = attackRangeShown == 3;
+        Hero.Attack atkSel = player.hero.attacks[attackRangeShown - 1];
+        int range = atkSel.range;
+        boolean nova = atkSel.kind == 2;
         worldToHex(player.x, player.y, IH_A);
         for (int r = -range; r <= range; r++) {
             for (int q = -range; q <= range; q++) {
@@ -1406,42 +1577,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return k < 0 ? 0 : (k > 1 ? 1 : k);
     }
 
-    private void computePlayerFrame() {
-        frameB = null; frameK = 0;
-        if (player.isAttacking() && !atkFr.isEmpty()) {
-            int[] seq = ATK_SEQ[attackType - 1];
-            float pos = (player.attackTime / player.attackDuration) * seq.length;
-            int i0 = (int) pos;
-            if (i0 >= seq.length) { i0 = seq.length - 1; pos = i0; }
-            int i1 = Math.min(i0 + 1, seq.length - 1);
-            frameA = atkFr.get(seq[i0]);
-            frameB = atkFr.get(seq[i1]);
-            frameK = blendCurve(pos - i0);
-            return;
-        }
-        if (player.floater.state == 0 && !idleFr.isEmpty()) {
-            frameA = idleFr.get(((int) (player.bobTime * 3f)) % idleFr.size());
-            return;
-        }
-        if (glideFr.size() >= 4) {
-            Floater f = player.floater;
-            if (f.state == 1) {
-                frameA = glideFr.get(f.t < 0.1f ? 3 : 1);
-            } else if (f.state == 2) {
-                float pos = player.bobTime * 6f;
-                int i0 = 1 + ((int) pos) % 2;
-                int i1 = 1 + (((int) pos) + 1) % 2;
-                frameA = glideFr.get(i0);
-                frameB = glideFr.get(i1);
-                frameK = blendCurve(pos - (int) pos);
-            } else {
-                frameA = glideFr.get(f.t < 0.06f ? 2 : f.t < 0.12f ? 1 : f.t < 0.17f ? 3 : 0);
-            }
-            return;
-        }
-        frameA = null;
-    }
-
     private void drawFrame(Canvas cv, Frame f, int alpha) {
         float s = PLAYER_H * zoom / f.ref;
         paint.setAlpha(alpha);
@@ -1471,26 +1606,31 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void drawPlayer(Canvas cv) {
-        boolean fl = player.floater.floating();
-        boolean idle = player.floater.state == 0 && !player.isAttacking();
+        Hero h = player.hero;
+        boolean fl = h.airborne();
+        boolean idle = h.mode == 0 && !player.isAttacking();
         float br = idle ? (float) Math.sin(player.bobTime * 1.7f) : 0f;
 
-        float by = sy(player.y + player.floater.visualY) + FOOT_DROP * zoom;
+        float by = sy(player.y + h.visualY) + FOOT_DROP * zoom;
 
-        float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
-        paint.setAlpha(fl ? 150 : 220);
-        rf.set(sx(player.x) - sw, by - sw * 0.36f,
-               sx(player.x) + sw, by + sw * 0.36f);
-        cv.drawBitmap(shadowBmp, null, rf, paint);
-        paint.setAlpha(255);
+        if (!h.hidden) {
+            float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
+            paint.setAlpha(fl ? 150 : 220);
+            rf.set(sx(player.x) - sw, by - sw * 0.36f,
+                   sx(player.x) + sw, by + sw * 0.36f);
+            cv.drawBitmap(shadowBmp, null, rf, paint);
+            paint.setAlpha(255);
+        }
 
-        computePlayerFrame();
         cv.save();
         cv.translate(sx(player.x), by);
         if (player.facing < 0) cv.scale(-1, 1);
         if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
-        if (frameA != null) drawFrame(cv, frameA, 255);
-        if (frameB != null && frameK > 0.02f) drawFrame(cv, frameB, (int) (frameK * 255));
+        if (!h.hidden) {
+            if (h.frameA != null) drawFrame(cv, h.frameA, 255);
+            if (h.frameB != null && h.frameK > 0.02f)
+                drawFrame(cv, h.frameB, (int) (h.frameK * 255));
+        }
         cv.restore();
 
         float top = by - PLAYER_H * zoom - 34;
@@ -1611,7 +1751,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (!d.active) continue;
             float k = d.t / 0.8f;
             paint.setAlpha((int) (255 * (1 - k)));
-            paint.setColor(d.val < 0 ? C_BRIGHT : C_BONE);
+            paint.setColor(d.col != 0 ? d.col : (d.val < 0 ? C_BRIGHT : C_BONE));
             cv.drawText(d.txt, sx(d.x), sy(d.y) - k * 80, paint);
         }
         paint.setFakeBoldText(false);
@@ -1639,6 +1779,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         drawBlasts(cv);
         drawBolts(cv);
+        drawSlashes(cv);
         drawDmgs(cv);
 
         if (gameOverlay != null) {
@@ -1692,18 +1833,26 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         float bottomY = H - 90;
 
         drawGlassButton(cv, 110, bottomY, btnSize, "END", C_BONE_DIM, true);
-        drawGlassButton(cv, W - 110, bottomY, btnSize, "REND", C_BRIGHT, canAct() && mana >= ATK_MANA[0]);
-        drawGlassButton(cv, W - 250, bottomY, btnSize, "BOLT", C_EMBER, canAct() && mana >= ATK_MANA[1]);
-        drawGlassButton(cv, W - 390, bottomY, btnSize, "NOVA", C_VIOLET, canAct() && mana >= ATK_MANA[2]);
+        drawGlassButton(cv, W - 110, bottomY, btnSize, "REND", C_BRIGHT, canAct() && mana >= player.hero.attacks[0].mana);
+        drawGlassButton(cv, W - 250, bottomY, btnSize, "BOLT", C_EMBER, canAct() && mana >= player.hero.attacks[1].mana);
+        drawGlassButton(cv, W - 390, bottomY, btnSize, "NOVA", C_VIOLET, canAct() && mana >= player.hero.attacks[2].mana);
 
         for (int i = 0; i < 2; i++) {
             float px = W / 2f - 40 + i * 80, py = H - 110;
-            paint.setColor(i < actionsLeft ? (attackLocked ? C_EMBER : C_MAGENTA) : 0xFF222222);
-            cv.save();
-            cv.translate(px, py);
-            cv.rotate(45);
-            cv.drawRect(-16, -16, 16, 16, paint);
-            cv.restore();
+            if (coinBmp != null) {
+                paint.setAlpha(i < actionsLeft ? 255 : 70);
+                rf.set(px - 16, py - 16, px + 16, py + 16);
+                cv.drawBitmap(coinBmp, null, rf, paint);
+                paint.setAlpha(255);
+            } else {
+                paint.setColor(i < actionsLeft
+                        ? (attackLocked ? C_EMBER : C_MAGENTA) : 0xFF222222);
+                cv.save();
+                cv.translate(px, py);
+                cv.rotate(45);
+                cv.drawRect(-16, -16, 16, 16, paint);
+                cv.restore();
+            }
         }
 
         paint.setTextAlign(Paint.Align.LEFT);
@@ -1746,6 +1895,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (state == STATE_MENU) return onMenuTouch(e);
+        if (state == STATE_SELECT) return onSelectTouch(e);
         if (state == STATE_STORY) return story.touch(e);
         if (deadT > 0 || phase != PH_PLAYER) return true;
         int act = e.getActionMasked();
@@ -1827,7 +1977,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
         if (x > W - 340 && x < W - 190 && y > H - 190) {
-            if (canAct() && mana >= ATK_MANA[1]) {
+            if (canAct() && mana >= player.hero.attacks[1].mana) {
                 attackRangeShown = (attackRangeShown == 2) ? 0 : 2;
                 hexesShown = false; targetEnemy = null;
                 sound.play("ui");
@@ -1835,7 +1985,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
         if (x > W - 490 && x < W - 340 && y > H - 190) {
-            if (canAct() && mana >= ATK_MANA[2]) {
+            if (canAct() && mana >= player.hero.attacks[2].mana) {
                 attackRangeShown = (attackRangeShown == 3) ? 0 : 3;
                 hexesShown = false; targetEnemy = null;
                 sound.play("ui");
@@ -1856,14 +2006,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
 
-        if (attackRangeShown == 3 && canAct() && dTap <= ATK_RANGE[2]) {
+        if (attackRangeShown == 3 && canAct()
+                && dTap <= player.hero.attacks[2].range) {
             actionsLeft--;
             attackType = 3;
             player.facing = wx >= player.x ? 1 : -1;
-            player.attackDuration = ATK_DUR[2];
-            player.startAttack();
-            mana -= ATK_MANA[2];
-            sound.play("nova");
+            mana -= player.hero.attacks[2].mana;
+            player.hero.startAttack(2, null);
+            sound.play("slash");
+            sound.play(voice + "_attack");
             attackRangeShown = 0;
             hexesShown = false;
             targetEnemy = null;
@@ -1890,25 +2041,20 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
 
         if (tapped != null) {
-            int range = attackRangeShown > 0 ? ATK_RANGE[attackRangeShown - 1] : 0;
+            int range = attackRangeShown > 0 ? player.hero.attacks[attackRangeShown - 1].range : 0;
             if (canAct() && range > 0 && dTap <= range) {
                 if (targetEnemy != tapped) {
                     targetEnemy = tapped;
                     sound.play("ui");
                 } else {
+                    int ai = attackRangeShown - 1;
                     actionsLeft--;
                     attackType = attackRangeShown;
                     player.facing = tapped.x >= player.x ? 1 : -1;
-                    player.attackDuration = ATK_DUR[attackType - 1];
-                    player.startAttack();
-                    mana -= ATK_MANA[attackType - 1];
-                    if (attackType == 1) {
-                        strikeTarget = tapped;
-                        sound.play("swing");
-                        sound.play(voice + "_attack");
-                    } else if (attackType == 2) {
-                        pendingBolt = tapped;
-                    }
+                    mana -= player.hero.attacks[ai].mana;
+                    player.hero.startAttack(ai, tapped);
+                    sound.play(ai == 0 ? "swing" : "slash");
+                    sound.play(voice + "_attack");
                     targetEnemy = null;
                     attackRangeShown = 0;
                     hexesShown = false;
@@ -1919,7 +2065,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (hexesShown && dTap >= 1 && dTap <= moveBudget()
                 && hexFree(TW_A[0], TW_A[1], null)) {
-            boolean danger = movedTotal + dTap > 3;
+            boolean danger = movedTotal + dTap > player.hero.moveMax;
             int cost = danger ? (movedTotal == 0 ? 2 : 1) : 1;
             if (cost <= actionsLeft) {
                 hexToWorld(TW_A[0], TW_A[1], TW_F);
