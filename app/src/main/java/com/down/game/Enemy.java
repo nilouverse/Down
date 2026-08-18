@@ -33,14 +33,16 @@ public class Enemy {
         switch (act) {
             case 0:
                 if (planMove) {
-                    float d = (float) Math.hypot(tx - x, ty - y);
-                    if (d > 6) {
+                    float dx = tx - x, dy = ty - y;
+                    float distSq = dx * dx + dy * dy;
+                    if (distSq > 36f) {
                         floater.moving = true;
-                        float step = Math.min(d, speed * dt);
-                        x += (tx - x) / d * step;
-                        y += (ty - y) / d * step;
-                        if (tx - x < -0.05f) facing = -1;
-                        if (tx - x >  0.05f) facing =  1;
+                        float dist = (float) Math.sqrt(distSq);
+                        float step = Math.min(dist, speed * dt);
+                        x += dx / dist * step;
+                        y += dy / dist * step;
+                        if (dx < -0.05f) facing = -1;
+                        if (dx >  0.05f) facing =  1;
                     } else {
                         planMove = false;
                         floater.moving = false;
