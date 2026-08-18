@@ -8,6 +8,8 @@ import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -36,12 +38,10 @@ public class GameView extends SurfaceView implements Runnable {
     private static final float TH = TILE * SQUASH;
     private static final int MOVE_HEX = 3;
     private static final float PLAYER_H = 200f, ENEMY_H = 200f;
-    // Pushes every sprite down so the feet plant on the shadow. The art's
-    // baked-in shadow leaves the feet high inside the crop — do not remove.
     private static final float FOOT_DROP = 40f;
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
-    private static final int GROUND_COL = 0xFF221829;
+    private static final int GROUND_COL = 0xFF140B16;
 
     private static final int[][] ATK_SEQ = {
             { 0, 1, 2, 3, 4, 9, 5 },
@@ -91,12 +91,14 @@ public class GameView extends SurfaceView implements Runnable {
 
     private float runeX, runeY, runeT = 99;
 
-    private static class Puff { float x, y, t; }
-    private final ArrayList<Puff> puffs = new ArrayList<>();
+    private static class Particle { float x, y, vx, vy, t, life; int col; boolean active; }
+    private final Particle[] particlePool = new Particle[200];
+    private static class Puff { float x, y, t; boolean active; }
+    private final Puff[] puffPool = new Puff[50];
     private float puffTimer;
 
-    private static class Blast { float x, y, t; }
-    private final ArrayList<Blast> blasts = new ArrayList<>();
+    private static class Blast { float x, y, t; boolean active; }
+    private final Blast[] blastPool = new Blast[20];
 
     private Bitmap overlay, menuBmp, shadowBmp;
     private static class Ember { float x, y, s; }
@@ -110,8 +112,8 @@ public class GameView extends SurfaceView implements Runnable {
     private Enemy targetEnemy = null;
     private Enemy strikeTarget = null;
     private Enemy pendingBolt = null;
-    private static class Bolt { float x, y, x0, y0, tx, ty, t; Enemy tgt; }
-    private final ArrayList<Bolt> bolts = new ArrayList<>();
+    private static class Bolt { float x, y, x0, y0, tx, ty, t; Enemy tgt; boolean active; }
+    private final Bolt[] boltPool = new Bolt[20];
 
     private int phase = PH_PLAYER;
     private float phaseT = 0;
@@ -124,8 +126,8 @@ public class GameView extends SurfaceView implements Runnable {
     private int playerHp = 100;
     private float hurtT = 0, deadT = 0;
     private boolean playerHitDone = false;
-    private static class Dmg { float x, y, t; int val; }
-    private final ArrayList<Dmg> dmgs = new ArrayList<>();
+    private static class Dmg { float x, y, t; int val; boolean active; }
+    private final Dmg[] dmgPool = new Dmg[30];
 
     private static class D { float y; int kind; Enemy en; Bitmap pr; float ax, ay, s; }
     private final ArrayList<D> drawList = new ArrayList<>();
@@ -155,7 +157,13 @@ public class GameView extends SurfaceView implements Runnable {
             0, 0.6f, 0, 0, 0,
             0, 0, 0.6f, 0, 0,
             0, 0, 0, 1, 0 });
+    private PorterDuffColorFilter hexFilter;
+    private PorterDuffColorFilter blastFilter;
     private int W, H;
+
+    private float hitstopT = 0;
+    private float shakeT = 0, shakeX = 0, shakeY = 0;
+    private Bitmap hexBmp, blastBmp;
 
     public GameView(Context ctx) {
         super(ctx);
@@ -191,6 +199,29 @@ public class GameView extends SurfaceView implements Runnable {
 
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
+
+        for (int i = 0; i < particlePool.length; i++) particlePool[i] = new Particle();
+        for (int i = 0; i < puffPool.length; i++) puffPool[i] = new Puff();
+        for (int i = 0; i < blastPool.length; i++) blastPool[i] = new Blast();
+        for (int i = 0; i < boltPool.length; i++) boltPool[i] = new Bolt();
+        for (int i = 0; i < dmgPool.length; i++) dmgPool[i] = new Dmg();
+
+        hexBmp = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888);
+        Canvas hc = new Canvas(hexBmp);
+        Paint hp = new Paint(); hp.setColor(0xFFFFFFFF); hp.setAntiAlias(true);
+        Path hPath = new Path();
+        for (int i = 0; i < 6; i++) {
+            float a = (float) Math.toRadians(60 * i - 30);
+            float x = 64 + 60 * (float) Math.cos(a);
+            float y = 64 + 60 * SQUASH * (float) Math.sin(a);
+            if (i == 0) hPath.moveTo(x, y); else hPath.lineTo(x, y);
+        }
+        hPath.close(); hc.drawPath(hPath, hp);
+
+        blastBmp = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888);
+        Canvas bc = new Canvas(blastBmp);
+        Paint bp = new Paint(); bp.setColor(0xFFFFFFFF); bp.setAntiAlias(true);
+        bc.drawCircle(64, 64, 60, bp);
     }
 
     public void start() {
@@ -405,9 +436,11 @@ public class GameView extends SurfaceView implements Runnable {
         playerHp = 100;
         mana = 100;
         enemies.clear();
-        dmgs.clear();
-        bolts.clear();
-        blasts.clear();
+        for (Dmg d : dmgPool) d.active = false;
+        for (Bolt b : boltPool) b.active = false;
+        for (Blast b : blastPool) b.active = false;
+        for (Puff p : puffPool) p.active = false;
+        for (Particle p : particlePool) p.active = false;
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
     }
@@ -455,7 +488,57 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void addDmg(float x, float y, int val) {
-        Dmg d = new Dmg(); d.x = x; d.y = y; d.val = val; dmgs.add(d);
+        for (Dmg d : dmgPool) {
+            if (!d.active) {
+                d.x = x; d.y = y; d.val = val; d.t = 0; d.active = true;
+                return;
+            }
+        }
+    }
+
+    private void spawnPuff(float x, float y) {
+        for (Puff p : puffPool) {
+            if (!p.active) {
+                p.x = x; p.y = y; p.t = 0; p.active = true;
+                return;
+            }
+        }
+    }
+
+    private void spawnBlast(float x, float y) {
+        for (Blast b : blastPool) {
+            if (!b.active) {
+                b.x = x; b.y = y; b.t = 0; b.active = true;
+                return;
+            }
+        }
+    }
+
+    private void spawnBolt(float x0, float y0, float tx, float ty, Enemy tgt) {
+        for (Bolt b : boltPool) {
+            if (!b.active) {
+                b.x0 = x0; b.y0 = y0; b.tx = tx; b.ty = ty;
+                b.x = x0; b.y = y0; b.t = 0; b.tgt = tgt; b.active = true;
+                return;
+            }
+        }
+    }
+
+    private void spawnDeathParticles(float x, float y) {
+        for (int i = 0; i < 15; i++) {
+            for (Particle p : particlePool) {
+                if (!p.active) {
+                    p.x = x; p.y = y;
+                    p.vx = (float)(Math.random() * 100 - 50);
+                    p.vy = (float)(Math.random() * -150 - 50);
+                    p.life = 0.5f + (float)Math.random() * 0.5f;
+                    p.t = 0;
+                    p.col = (Math.random() > 0.5) ? 0xFF8A0303 : 0xFF050508;
+                    p.active = true;
+                    break;
+                }
+            }
+        }
     }
 
     private void hurtEnemy(Enemy en, int dmg) {
@@ -491,6 +574,20 @@ public class GameView extends SurfaceView implements Runnable {
         if (state == STATE_STORY) {
             story.update(dt);
             if (story.quitRequested) { story = null; state = STATE_MENU; }
+            return;
+        }
+
+        if (shakeT > 0) {
+            shakeT -= dt;
+            float mag = shakeT * 40f;
+            shakeX = (float)(Math.random() * mag * 2 - mag);
+            shakeY = (float)(Math.random() * mag * 2 - mag);
+        } else { shakeX = 0; shakeY = 0; }
+
+        if (hitstopT > 0) {
+            hitstopT -= dt;
+            for (Puff p : puffPool) if (p.active) p.t += dt;
+            for (Dmg d : dmgPool) if (d.active) d.t += dt;
             return;
         }
 
@@ -551,31 +648,28 @@ public class GameView extends SurfaceView implements Runnable {
                 en.deathT += dt;
                 en.floater.moving = false;
                 en.floater.update(dt);
-                if (en.deathT > 0.7f) enemies.remove(i);
+                if (en.deathT > 0.7f) {
+                    spawnDeathParticles(en.x, en.y);
+                    enemies.remove(i);
+                }
             }
         }
 
         if (player.isAttacking() && !playerHitDone
                 && player.attackTime > ATK_DUR[attackType - 1] * ATK_HIT[attackType - 1]) {
             playerHitDone = true;
+            hitstopT = 0.05f;
+            shakeT = 0.15f;
             if (attackType == 1) {
                 if (strikeTarget != null) hurtEnemy(strikeTarget, ATK_DMG[0]);
             } else if (attackType == 2) {
                 if (pendingBolt != null) {
-                    Bolt b = new Bolt();
-                    b.x0 = player.x + player.facing * 40;
-                    b.y0 = player.y - PLAYER_H * 0.75f;
-                    b.tx = pendingBolt.x;
-                    b.ty = pendingBolt.y - ENEMY_H * 0.5f;
-                    b.x = b.x0; b.y = b.y0; b.t = 0;
-                    b.tgt = pendingBolt;
-                    bolts.add(b);
+                    spawnBolt(player.x + player.facing * 40, player.y - PLAYER_H * 0.75f,
+                              pendingBolt.x, pendingBolt.y - ENEMY_H * 0.5f, pendingBolt);
                     pendingBolt = null;
                 }
             } else {
-                Blast bl = new Blast();
-                bl.x = player.x; bl.y = player.y; bl.t = 0;
-                blasts.add(bl);
+                spawnBlast(player.x, player.y);
                 worldToHex(player.x, player.y, IH_A);
                 for (Enemy en : enemies) {
                     if (en.dead) continue;
@@ -588,24 +682,36 @@ public class GameView extends SurfaceView implements Runnable {
         }
         if (!player.isAttacking()) playerHitDone = false;
 
-        for (int i = bolts.size() - 1; i >= 0; i--) {
-            Bolt b = bolts.get(i);
+        for (Bolt b : boltPool) {
+            if (!b.active) continue;
             b.t += dt;
             float kk = b.t / 0.28f;
             if (kk >= 1f) {
                 if (!b.tgt.dead) {
                     hurtEnemy(b.tgt, ATK_DMG[1]);
+                    hitstopT = 0.04f;
+                    shakeT = 0.1f;
                 }
-                bolts.remove(i);
+                b.active = false;
             } else {
                 b.x = b.x0 + (b.tx - b.x0) * kk;
                 b.y = b.y0 + (b.ty - b.y0) * kk - (float) Math.sin(kk * Math.PI) * 40;
             }
         }
 
-        for (int i = blasts.size() - 1; i >= 0; i--) {
-            blasts.get(i).t += dt;
-            if (blasts.get(i).t > 0.5f) blasts.remove(i);
+        for (Blast bl : blastPool) {
+            if (!bl.active) continue;
+            bl.t += dt;
+            if (bl.t > 0.5f) bl.active = false;
+        }
+
+        for (Particle p : particlePool) {
+            if (!p.active) continue;
+            p.t += dt;
+            if (p.t >= p.life) { p.active = false; continue; }
+            p.vy += 400 * dt;
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
         }
 
         if (phase == PH_PLAYER) {
@@ -644,20 +750,19 @@ public class GameView extends SurfaceView implements Runnable {
             puffTimer += dt;
             if (puffTimer > 0.09f) {
                 puffTimer = 0;
-                Puff p = new Puff();
-                p.x = player.x + (float) (Math.random() * 36 - 18);
-                p.y = player.y + (float) (Math.random() * 10 - 5);
-                p.t = 0;
-                puffs.add(p);
+                spawnPuff(player.x + (float) (Math.random() * 36 - 18),
+                          player.y + (float) (Math.random() * 10 - 5));
             }
         }
-        for (int i = puffs.size() - 1; i >= 0; i--) {
-            puffs.get(i).t += dt;
-            if (puffs.get(i).t > 0.5f) puffs.remove(i);
+        for (Puff p : puffPool) {
+            if (!p.active) continue;
+            p.t += dt;
+            if (p.t > 0.5f) p.active = false;
         }
-        for (int i = dmgs.size() - 1; i >= 0; i--) {
-            dmgs.get(i).t += dt;
-            if (dmgs.get(i).t > 0.8f) dmgs.remove(i);
+        for (Dmg d : dmgPool) {
+            if (!d.active) continue;
+            d.t += dt;
+            if (d.t > 0.8f) d.active = false;
         }
     }
 
@@ -676,8 +781,8 @@ public class GameView extends SurfaceView implements Runnable {
         h.unlockCanvasAndPost(cv);
     }
 
-    private float sx(float wx) { return (wx - camX) * zoom + W / 2f; }
-    private float sy(float wy) { return (wy - camY) * zoom + H / 2f; }
+    private float sx(float wx) { return (wx - camX + shakeX) * zoom + W / 2f; }
+    private float sy(float wy) { return (wy - camY + shakeY) * zoom + H / 2f; }
 
     private void drawMenu(Canvas cv) {
         if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
@@ -883,29 +988,22 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawHex(Canvas cv, float cx, float cy, int color, boolean filled) {
-        float hr = HEX * 0.92f * zoom;
-        hexPath.reset();
-        for (int i = 0; i < 6; i++) {
-            float a = (float) Math.toRadians(60 * i - 30);
-            float x = cx + hr * (float) Math.cos(a);
-            float y = cy + hr * SQUASH * (float) Math.sin(a);
-            if (i == 0) hexPath.moveTo(x, y); else hexPath.lineTo(x, y);
+        float hr = HEX * 1.1f * zoom;
+        rf.set(cx - hr, cy - hr * SQUASH, cx + hr, cy + hr * SQUASH);
+        if (hexFilter == null || hexFilter.getColor() != color) {
+            hexFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
         }
-        hexPath.close();
+        paint.setColorFilter(hexFilter);
+        cv.drawBitmap(hexBmp, null, rf, paint);
+        paint.setColorFilter(null);
+
         if (filled) {
-            paint.setColor(color);
-            cv.drawPath(hexPath, paint);
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(2);
-            paint.setColor(0x66ffffff);
-            cv.drawPath(hexPath, paint);
+            paint.setStrokeWidth(2 * zoom);
+            paint.setColor(0x44ffffff);
+            cv.drawOval(rf, paint);
             paint.setStyle(Paint.Style.FILL);
-        } else {
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(3);
-            paint.setColor(color);
-            cv.drawPath(hexPath, paint);
-            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(0);
         }
     }
 
@@ -964,7 +1062,8 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawPuffs(Canvas cv) {
-        for (Puff p : puffs) {
+        for (Puff p : puffPool) {
+            if (!p.active) continue;
             float k = p.t / 0.5f;
             paint.setColor(0xFF6a2f8f);
             paint.setAlpha((int) (110 * (1 - k)));
@@ -974,24 +1073,32 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawBlasts(Canvas cv) {
-        for (Blast b : blasts) {
+        for (Blast b : blastPool) {
+            if (!b.active) continue;
             float k = b.t / 0.5f;
             float r = (40 + k * HEX * 3.6f) * zoom;
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth((14 * (1 - k) + 2) * zoom);
-            paint.setColor(0xFFff3344);
-            paint.setAlpha((int) (200 * (1 - k)));
             rf.set(sx(b.x) - r, sy(b.y) - r * SQUASH, sx(b.x) + r, sy(b.y) + r * SQUASH);
-            cv.drawOval(rf, paint);
-            paint.setColor(0xFFffffff);
-            paint.setAlpha((int) (120 * (1 - k)));
-            paint.setStrokeWidth((6 * (1 - k) + 1) * zoom);
-            rf.set(sx(b.x) - r * 0.8f, sy(b.y) - r * 0.8f * SQUASH,
-                   sx(b.x) + r * 0.8f, sy(b.y) + r * 0.8f * SQUASH);
-            cv.drawOval(rf, paint);
-            paint.setStyle(Paint.Style.FILL);
+
+            if (blastFilter == null) {
+                blastFilter = new PorterDuffColorFilter(0xFF8A0303, PorterDuff.Mode.SRC_IN);
+            }
+            paint.setColorFilter(blastFilter);
+            paint.setAlpha((int) (220 * (1 - k)));
+            cv.drawBitmap(blastBmp, null, rf, paint);
+            paint.setColorFilter(null);
             paint.setAlpha(255);
         }
+    }
+
+    private void drawParticles(Canvas cv) {
+        for (Particle p : particlePool) {
+            if (!p.active) continue;
+            float k = p.t / p.life;
+            paint.setColor(p.col);
+            paint.setAlpha((int) (255 * (1 - k)));
+            cv.drawCircle(sx(p.x), sy(p.y), (4 + k * 6) * zoom, paint);
+        }
+        paint.setAlpha(255);
     }
 
     private static float blendCurve(float frac) {
@@ -1042,10 +1149,6 @@ public class GameView extends SurfaceView implements Runnable {
             frameSrc.set(0, f.top, f.bmp.getWidth(), f.top + f.ch);
             rf.set(-f.bmp.getWidth() * s / 2f, -f.ch * s, f.bmp.getWidth() * s / 2f, 0);
         } else if (f.cCenter) {
-            // RIGHT-EDGE ANCHOR — DO NOT "FIX" THIS. The left side (cape,
-            // hair) animates while the front stays put; pinning the crop to
-            // the content's RIGHT edge (rgt) with the shared width (ww)
-            // keeps the body stable. Centering re-introduces jitter.
             int wl = Math.max(0, f.rgt - f.ww);
             int wr = f.rgt;
             if (wl >= wr || f.top + f.ch > f.bmp.getHeight()) {
@@ -1070,10 +1173,9 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawPlayer(Canvas cv) {
         boolean fl = player.floater.floating();
         boolean idle = player.floater.state == 0 && !player.isAttacking();
-        // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(player.bobTime * 1.7f) : 0f;
 
-        float by = sy(player.y) + FOOT_DROP * zoom;
+        float by = sy(player.y + player.floater.visualY) + FOOT_DROP * zoom;
 
         float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
         paint.setAlpha(fl ? 150 : 220);
@@ -1092,16 +1194,16 @@ public class GameView extends SurfaceView implements Runnable {
         cv.restore();
 
         float top = by - PLAYER_H * zoom - 34;
-        paint.setColor(0xFF330000);
-        cv.drawRect(sx(player.x) - 45, top, sx(player.x) + 45, top + 10, paint);
-        paint.setColor(0xFFff2bd6);
-        cv.drawRect(sx(player.x) - 45, top,
-                sx(player.x) - 45 + 90f * playerHp / 100, top + 10, paint);
-        paint.setColor(0xFF001133);
-        cv.drawRect(sx(player.x) - 45, top + 13, sx(player.x) + 45, top + 21, paint);
-        paint.setColor(0xFF3399ff);
-        cv.drawRect(sx(player.x) - 45, top + 13,
-                sx(player.x) - 45 + 90f * mana / 100, top + 21, paint);
+        float bw = 90, bh = 8;
+        rf.set(sx(player.x) - bw/2, top, sx(player.x) + bw/2, top + bh);
+        paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
+        rf.right = rf.left + bw * (playerHp / 100f);
+        paint.setColor(0xFF8A0303); cv.drawRoundRect(rf, 4, 4, paint);
+
+        rf.set(sx(player.x) - bw/2, top + 11, sx(player.x) + bw/2, top + 11 + bh);
+        paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
+        rf.right = rf.left + bw * (mana / 100f);
+        paint.setColor(0xFF3355ff); cv.drawRoundRect(rf, 4, 4, paint);
     }
 
     private Frame pickEnemyFrame(Enemy en) {
@@ -1135,9 +1237,8 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
-        float x = sx(en.x), y = sy(en.y) + FOOT_DROP * zoom;
+        float x = sx(en.x), y = sy(en.y + en.floater.visualY) + FOOT_DROP * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
-        // Soft-ball breath: slow squash & stretch. Intentional — do not remove.
         float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
         float sw = 45 * zoom * (1f - 0.045f * br);
         paint.setAlpha(220);
@@ -1179,26 +1280,28 @@ public class GameView extends SurfaceView implements Runnable {
 
         if (!en.dead) {
             float top = y - ENEMY_H * zoom - 24;
-            paint.setColor(0xFF330000);
-            cv.drawRect(x - 45, top, x + 45, top + 10, paint);
-            paint.setColor(0xFFff3344);
-            cv.drawRect(x - 45, top, x - 45 + 90f * en.hp / en.maxHp, top + 10, paint);
+            float bw = 90, bh = 8;
+            rf.set(x - bw/2, top, x + bw/2, top + bh);
+            paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
+            rf.right = rf.left + bw * (en.hp / (float)en.maxHp);
+            paint.setColor(0xFF8A0303); cv.drawRoundRect(rf, 4, 4, paint);
         }
     }
 
     private void drawBolts(Canvas cv) {
-        for (Bolt b : bolts) {
+        for (Bolt b : boltPool) {
+            if (!b.active) continue;
             float dx = b.tx - b.x0, dy = b.ty - b.y0;
-            float d = (float) Math.hypot(dx, dy);
+            float d = (float) Math.sqrt(dx * dx + dy * dy);
             if (d < 1) d = 1;
             for (int t = 3; t >= 1; t--) {
-                paint.setColor(0xFFff3344);
-                paint.setAlpha(60 - t * 15);
+                paint.setColor(0xFF8A0303);
+                paint.setAlpha(80 - t * 20);
                 cv.drawCircle(sx(b.x - dx / d * t * 22), sy(b.y - dy / d * t * 22),
                         (12 - t * 2) * zoom, paint);
             }
             paint.setAlpha(220);
-            paint.setColor(0xFFff3344);
+            paint.setColor(0xFF8A0303);
             cv.drawCircle(sx(b.x), sy(b.y), 13 * zoom, paint);
             paint.setColor(0xFFffffff);
             cv.drawCircle(sx(b.x), sy(b.y), 6 * zoom, paint);
@@ -1209,12 +1312,15 @@ public class GameView extends SurfaceView implements Runnable {
     private void drawDmgs(Canvas cv) {
         paint.setTextSize(34);
         paint.setTextAlign(Paint.Align.CENTER);
-        for (Dmg d : dmgs) {
+        paint.setFakeBoldText(true);
+        for (Dmg d : dmgPool) {
+            if (!d.active) continue;
             float k = d.t / 0.8f;
             paint.setAlpha((int) (255 * (1 - k)));
-            paint.setColor(d.val < 0 ? 0xFFff2233 : 0xFFffffff);
+            paint.setColor(d.val < 0 ? 0xFF8A0303 : 0xFFffffff);
             cv.drawText(String.valueOf(d.val), sx(d.x), sy(d.y) - k * 80, paint);
         }
+        paint.setFakeBoldText(false);
         paint.setAlpha(255);
         paint.setTextAlign(Paint.Align.LEFT);
     }
@@ -1234,12 +1340,19 @@ public class GameView extends SurfaceView implements Runnable {
         drawPuffs(cv);
 
         drawSorted(cv);
+        drawParticles(cv);
 
         drawBlasts(cv);
         drawBolts(cv);
         drawDmgs(cv);
 
         if (overlay != null) { rf.set(0, 0, W, H); cv.drawBitmap(overlay, null, rf, paint); }
+
+        paint.setColor(0xFF050508);
+        paint.setAlpha(180);
+        rf.set(0, 0, W, H);
+        cv.drawRoundRect(rf, 0, 0, paint);
+        paint.setAlpha(255);
 
         paint.setColor(0xFFff7a30);
         for (Ember em : embers) {
@@ -1277,32 +1390,37 @@ public class GameView extends SurfaceView implements Runnable {
     }
 
     private void drawUI(Canvas cv) {
-        // (top HUD bars removed — HP/MP now float overhead per character)
-
-        paint.setColor(0x663355ff);
-        cv.drawCircle(110, H - 110, 70, paint);
-        paint.setColor(0xFFffffff);
-        paint.setTextSize(30);
         paint.setTextAlign(Paint.Align.CENTER);
-        cv.drawText("END", 110, H - 99, paint);
+        float btnSize = 120;
+        float bottomY = H - 90;
 
-        paint.setColor(mana >= ATK_MANA[0] ? 0x66ff3355 : 0x22888888);
-        cv.drawCircle(W - 110, H - 110, 70, paint);
-        paint.setColor(0xFFffffff);
-        paint.setTextSize(26);
-        cv.drawText("REND", W - 110, H - 100, paint);
-
-        paint.setColor(mana >= ATK_MANA[1] ? 0x66ff8833 : 0x22888888);
-        cv.drawCircle(W - 260, H - 110, 70, paint);
-        paint.setColor(0xFFffffff);
-        cv.drawText("BOLT", W - 260, H - 100, paint);
-
-        paint.setColor(mana >= ATK_MANA[2] ? 0x66aa44ff : 0x22888888);
-        cv.drawCircle(W - 410, H - 110, 70, paint);
-        paint.setColor(0xFFffffff);
-        cv.drawText("NOVA", W - 410, H - 100, paint);
+        drawGlassButton(cv, 110, bottomY, btnSize, "END", 0xFF3355ff, true);
+        drawGlassButton(cv, W - 110, bottomY, btnSize, "REND", 0xFF8A0303, mana >= ATK_MANA[0]);
+        drawGlassButton(cv, W - 250, bottomY, btnSize, "BOLT", 0xFFcc4400, mana >= ATK_MANA[1]);
+        drawGlassButton(cv, W - 390, bottomY, btnSize, "NOVA", 0xFF6611aa, mana >= ATK_MANA[2]);
 
         paint.setTextAlign(Paint.Align.LEFT);
+    }
+
+    private void drawGlassButton(Canvas cv, float cx, float cy, float size, String label, int accent, boolean enabled) {
+        float half = size / 2f;
+        rf.set(cx - half, cy - half, cx + half, cy + half);
+
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xCC050508);
+        cv.drawRoundRect(rf, 20, 20, paint);
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(3);
+        paint.setColor(enabled ? accent : 0xFF222222);
+        cv.drawRoundRect(rf, 20, 20, paint);
+
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(enabled ? 0xFFe0e0e0 : 0xFF555555);
+        paint.setTextSize(28);
+        paint.setFakeBoldText(true);
+        cv.drawText(label, cx, cy + 10, paint);
+        paint.setFakeBoldText(false);
     }
 
     private boolean uiZone(float x, float y) {
