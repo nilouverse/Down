@@ -775,9 +775,9 @@ public class GameView extends SurfaceView implements Runnable {
                     worldToHex(player.x, player.y, IH_A);
                     worldToHex(en.x, en.y, IH_B);
                     boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
-                    boolean wasAttacking = en.attacking();
+                    boolean wasGlowing = en.glowing;
                     en.turnUpdate(dt, player.x, player.y, adj);
-                    if (!wasAttacking && en.attacking()) {
+                    if (!wasGlowing && en.glowing) {
                         sound.play(en.weapon == 1 ? "claw" : "swing");
                     }
                     if (en.attacking() && !en.glowing && en.attackT > 0.45f && !en.struck) {
