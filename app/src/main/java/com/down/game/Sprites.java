@@ -17,8 +17,8 @@ public class Sprites {
 
         int corner = px[0];
         int kr = (corner >> 16) & 255, kg = (corner >> 8) & 255, kb = corner & 255;
-        boolean greenBg = (kg > 150 && kg - Math.max(kr, kb) > 60);
-        boolean magBg   = (kr > 150 && kb > 150 && Math.min(kr, kb) - kg > 60);
+        boolean greenBg = (kg > 150 && kg - (kr > kb ? kr : kb) > 60);
+        boolean magBg   = (kr > 150 && kb > 150 && (kr < kb ? kr : kb) - kg > 60);
 
         for (int i = 0; i < px.length; i++) {
             int p = px[i];
@@ -26,14 +26,14 @@ public class Sprites {
             int a = 255;
 
             if (greenBg) {
-                int ex = g - Math.max(r, b);
+                int ex = g - (r > b ? r : b);
                 boolean olive = (g > 90 && b < 90 && g * 2 > r);
                 boolean darkGreen = (g > r && g > b && g > 40 && r < 90 && b < 90);
                 if (ex > 120 || darkGreen) a = 0;
                 else if (ex > 60) a = (120 - ex) * 255 / 60;
                 else if (olive) a = 90;
             } else if (magBg) {
-                int ex = Math.min(r, b) - g;
+                int ex = (r < b ? r : b) - g;
                 if (ex > 140) a = 0;
                 else if (ex > 100) a = (140 - ex) * 255 / 40;
             }
@@ -92,22 +92,17 @@ public class Sprites {
             Frame f = new Frame();
             f.bmp = b;
             f.top = top;
-            f.ch = Math.max(1, bottom - top + 1);
+            f.ch = (bottom > top) ? bottom - top + 1 : 1;
             f.left = left;
-            f.cw = Math.max(1, right - left + 1);
+            f.cw = (right > left) ? right - left + 1 : 1;
             f.rgt = left + f.cw;
             f.vCrop = vCrop;
             f.cCenter = cCenter;
             out.add(f);
         }
-        // RIGHT-EDGE ANCHOR — DO NOT "FIX" THIS.
-        // ww is the shared window width (the widest frame in the sheet).
-        // drawFrame pins every frame's crop to its content RIGHT edge (rgt)
-        // using this shared width, so the character's front stays locked
-        // while the cape/hair on the left sways frame to frame. Replacing
-        // this with centering or left-anchoring re-introduces jitter.
+        
         int maxW = 0;
-        for (Frame f : out) maxW = Math.max(maxW, f.cw);
+        for (Frame f : out) if (f.cw > maxW) maxW = f.cw;
         for (Frame f : out) f.ww = maxW;
         if (!out.isEmpty()) {
             float r = out.get(0).ch;
