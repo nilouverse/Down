@@ -3,6 +3,7 @@
 
     <application
         android:label="Down"
+        android:icon="@drawable/ic_launcher"
         android:hardwareAccelerated="true"
         android:appCategory="game"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
