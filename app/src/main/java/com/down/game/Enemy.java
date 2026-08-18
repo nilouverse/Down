@@ -15,6 +15,7 @@ public class Enemy {
     public float deathT = 0;
     public float attackT = -1;
     public boolean struck = false;
+    public int poisonTurns = 0;
     public final Floater floater = new Floater();
 
     public int act = 0;
