@@ -20,10 +20,17 @@ public class Enemy {
 
     public int act = 0;
     public boolean planned = false;
+    public boolean acted = false;
+    public int intent = 0; // 0 none, 1 will attack, 2 will advance
     public int attacksPlanned = 0, attacksDone = 0;
     public float[] pathX = new float[7];
     public float[] pathY = new float[7];
     public int pathLen = 0, pathI = 0;
+
+    // seamless state crossfade (D1): prevF fades out while curF fades in
+    public Frame curF, prevF;
+    public float fadeT = 1f;
+    public int lastGroup = -1;
 
     public static final float GLOW_DUR = 0.5f;
     public static final float ATK_DUR = 0.9f;
@@ -31,10 +38,26 @@ public class Enemy {
     public boolean attacking() { return attackT >= 0; }
 
     public void resetTurn() {
-        act = 0; planned = false;
+        act = 0; planned = false; acted = false; intent = 0;
         attackT = -1; struck = false;
         attacksPlanned = 0; attacksDone = 0;
         pathLen = 0; pathI = 0;
+    }
+
+    public void present(Frame f, int group, float dt) {
+        if (f == null) { curF = null; prevF = null; fadeT = 1f; lastGroup = -1; return; }
+        if (group != lastGroup) {
+            prevF = (curF != null && curF != f) ? curF : null;
+            curF = f;
+            fadeT = (prevF != null) ? 0f : 1f;
+            lastGroup = group;
+        } else {
+            curF = f;
+            if (fadeT < 1f) {
+                fadeT += dt / 0.12f;
+                if (fadeT >= 1f) { fadeT = 1f; prevF = null; }
+            }
+        }
     }
 
     public void turnUpdate(float dt, float px, float py, boolean adjacent) {
