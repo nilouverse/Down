@@ -25,13 +25,18 @@ public abstract class Hero {
     public static class Step {
         public final String sheet; public final int frame;
         public final float dur; public final int event;
+        public final float lungeX, lungeY;
         public Step(String sheet, int frame, float dur, int event) {
+            this(sheet, frame, dur, event, 0, 0);
+        }
+        public Step(String sheet, int frame, float dur, int event, float lungeX, float lungeY) {
             this.sheet = sheet; this.frame = frame; this.dur = dur; this.event = event;
+            this.lungeX = lungeX; this.lungeY = lungeY;
         }
     }
 
     public static class Attack {
-        public final int range, dmg, mana, kind; // kind 0 melee, 1 single ranged, 2 aoe
+        public final int range, dmg, mana, kind;
         public final Step[] steps;
         public Attack(int range, int dmg, int mana, int kind, Step[] steps) {
             this.range = range; this.dmg = dmg; this.mana = mana;
@@ -39,11 +44,9 @@ public abstract class Hero {
         }
     }
 
-    // identity / data — subclasses fill these
     public String name = "?", voice = "nilou", keyPrefix = "x:";
     public int moveMax = 3;
     public float hoverLift = -15f;
-    /** layer-1 weapon sound per attack index (layer-2 voice = voice + "_attack") */
     public String[] atkSfx = new String[] { "swing", "bolt", "nova" };
     public SheetSpec[] sheets = new SheetSpec[0];
     public Attack[] attacks = new Attack[0];
@@ -53,16 +56,15 @@ public abstract class Hero {
     protected int[] liftSeq; protected float[] liftDur;
     protected int[] landSeq; protected float[] landDur;
 
-    // resolved frames
     protected List<Frame> idleFrames = new ArrayList<>();
     protected HashMap<String, List<Frame>> all;
 
-    // sequencer runtime
-    public int mode = 0; // 0 idle 1 lift 2 glide 3 land 4 attack
+    public int mode = 0;
     public float clock = 0, modeT = 0;
     public int seqI = 0;
     public boolean hidden;
     public float visualY = 0;
+    public float visualX = 0; // Lunge offset
     public Frame frameA, frameB; public float frameK;
     public Attack cur; public Enemy target;
 
@@ -105,6 +107,15 @@ public abstract class Hero {
     public void updateAnim(float dt, boolean isMoving) {
         float liftTarget = airborne() ? hoverLift : 0f;
         visualY += (liftTarget - visualY) * (1f - (float) Math.exp(-dt * 15f));
+
+        // Lunge interpolation
+        float lx = 0, ly = 0;
+        if (mode == 4 && cur != null && seqI < cur.steps.length) {
+            Step s = cur.steps[seqI];
+            lx = s.lungeX;
+            ly = s.lungeY;
+        }
+        visualX += (lx - visualX) * (1f - (float) Math.exp(-dt * 25f));
 
         if (mode == 4) {
             modeT += dt;
