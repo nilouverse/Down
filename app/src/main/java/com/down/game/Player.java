@@ -12,6 +12,9 @@ public class Player {
     public int hp = 100;
     public boolean cried = false;
 
+    // input buffer: queued move consumed on arrival (C1)
+    public float qX, qY, qT;
+
     public boolean isAttacking() { return hero != null && hero.attacking(); }
 
     public boolean isMoving() {
@@ -20,6 +23,10 @@ public class Player {
     }
 
     public void setTarget(float tx, float ty) { targetX = tx; targetY = ty; }
+
+    public void queueTarget(float tx, float ty) { qX = tx; qY = ty; qT = 0.18f; }
+
+    public void clearQueue() { qT = 0f; }
 
     public void update(float dt) {
         bobTime += dt;
@@ -33,6 +40,14 @@ public class Player {
             y += dy / dist * step;
             if (dx < -0.05f) facing = -1;
             if (dx >  0.05f) facing =  1;
+        }
+
+        if (qT > 0) {
+            qT -= dt;
+            if (qT > 0 && !isMoving() && !isAttacking()) {
+                setTarget(qX, qY);
+                qT = 0f;
+            }
         }
     }
 }
