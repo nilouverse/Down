@@ -4,141 +4,267 @@ import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.media.AudioAttributes;
 import android.media.SoundPool;
+import android.os.Build;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Random;
+import java.util.HashSet;
 
 public class Sound {
 
+    private static final int MAX_STREAMS = 16;
+
+    private static final String[] HERO_FOLDERS = {
+            "nilou", "vex"
+    };
+
+    private static final String[] GENERAL_SOUNDS = {
+            "ui",
+            "turn",
+            "step",
+            "hit",
+            "hurt",
+            "death",
+            "poison",
+            "claw",
+            "swing",
+            "male_hurt",
+            "male_cry",
+            "male_death",
+            "female_hurt",
+            "female_cry",
+            "female_death"
+    };
+
+    private static final String[] HERO_ACTIONS = {
+            "select",
+            "turn",
+            "move",
+            "attack",
+            "hurt",
+            "wounded",
+            "death",
+            "kill",
+            "victory"
+    };
+
+    private final Object lock = new Object();
+
+    private final HashMap<String, Integer> loaded = new HashMap<>();
+    private final HashMap<Integer, String> loadIdToName = new HashMap<>();
+    private final HashSet<String> loading = new HashSet<>();
+    private final HashSet<String> failed = new HashSet<>();
+    private final HashSet<String> pending = new HashSet<>();
+
+    private Context context;
     private SoundPool pool;
-    private boolean enabled = true;
-    private boolean initialized = false;
-    private final HashMap<String, ArrayList<Integer>> ids = new HashMap<>();
-    private final Random rnd = new Random();
 
-    /** Idempotent — safe to call repeatedly; only the first one does work. */
     public void init(Context ctx) {
-        if (initialized && pool != null) return;
-        try {
-            if (pool != null) {
-                pool.release();
-                pool = null;
-            }
-            ids.clear();
+        if (pool != null) return;
 
-            pool = new SoundPool.Builder()
-                    .setMaxStreams(12)
-                    .setAudioAttributes(new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_GAME)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build())
-                    .build();
-
-            // generic SFX live in sounds/
-            loadDir(ctx, "sounds", null);
-
-            // character voices live in speech/<voice>/ (vex, Nilou, ...)
-            try {
-                String[] voices = ctx.getAssets().list("speech");
-                if (voices != null) {
-                    for (String v : voices) {
-                        if (v == null || v.length() == 0) continue;
-                        loadDir(ctx, "speech/" + v,
-                                v.toLowerCase(java.util.Locale.US));
-                    }
-                }
-            } catch (Exception ignored) {}
-
-            initialized = true;
-        } catch (Exception ignored) {
-            initialized = true;
-        }
+        context = ctx.getApplicationContext();
+        createPool();
+        preloadKnownSounds();
     }
 
-    /**
-     * Loads .ogg/.wav from a dir into the pool.
-     * Trailing digits are stripped (attack2.ogg -> attack), so any number of
-     * numbered variants pool under one key and one is picked at random.
-     * prefix != null turns "attack" into "<prefix>_attack".
-     */
-    private void loadDir(Context ctx, String dir, String prefix) {
-        try {
-            String[] files = ctx.getAssets().list(dir);
-            if (files == null) return;
-            for (String file : files) {
-                if (file == null) continue;
-                String low = file.toLowerCase(java.util.Locale.US);
-                if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
+    private void createPool() {
+        if (Build.VERSION.SDK_INT >= 21) {
+            AudioAttributes attributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
 
-                int dot = file.lastIndexOf('.');
-                String base = file.substring(0, dot);
-                while (base.length() > 0
-                       && Character.isDigit(base.charAt(base.length() - 1))) {
-                    base = base.substring(0, base.length() - 1);
-                }
-                if (base.length() == 0) continue;
+            pool = new SoundPool.Builder()
+                    .setMaxStreams(MAX_STREAMS)
+                    .setAudioAttributes(attributes)
+                    .build();
+        } else {
+            pool = new SoundPool(
+                    MAX_STREAMS,
+                    android.media.AudioManager.STREAM_MUSIC,
+                    0
+            );
+        }
 
-                String key = base.toLowerCase(java.util.Locale.US);
-                if (prefix != null) key = prefix + "_" + key;
+        pool.setOnLoadCompleteListener(new SoundPool.OnLoadCompleteListener() {
+            @Override
+            public void onLoadComplete(SoundPool soundPool, int sampleId, int status) {
+                if (status == 0) {
+                    String name;
+                    boolean shouldPlay = false;
 
-                AssetFileDescriptor afd = null;
-                try {
-                    afd = ctx.getAssets().openFd(dir + "/" + file);
-                    int id = pool.load(afd, 1);
-                    if (id != 0) {
-                        ArrayList<Integer> list = ids.get(key);
-                        if (list == null) {
-                            list = new ArrayList<>();
-                            ids.put(key, list);
+                    synchronized (lock) {
+                        name = loadIdToName.remove(sampleId);
+                        if (name != null) {
+                            loaded.put(name, sampleId);
+                            loading.remove(name);
+
+                            if (pending.remove(name)) {
+                                shouldPlay = true;
+                            }
                         }
-                        list.add(id);
                     }
-                } catch (Exception ignored) {
-                } finally {
-                    if (afd != null) {
-                        try { afd.close(); } catch (Exception ignored) {}
+
+                    if (shouldPlay) {
+                        SoundPool p = pool;
+                        if (p != null) {
+                            p.play(sampleId, 1f, 1f, 0, 0, 1f);
+                        }
+                    }
+                } else {
+                    synchronized (lock) {
+                        String name = loadIdToName.remove(sampleId);
+                        if (name != null) {
+                            loading.remove(name);
+                            failed.add(name);
+                            pending.remove(name);
+                        }
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        });
+    }
+
+    private void preloadKnownSounds() {
+        for (String name : GENERAL_SOUNDS) {
+            load(name);
+        }
+
+        for (String hero : HERO_FOLDERS) {
+            for (String action : HERO_ACTIONS) {
+                load(hero + "_" + action);
+            }
+        }
     }
 
     public void play(String name) {
-        if (!enabled || pool == null || name == null) return;
-        ArrayList<Integer> list = ids.get(name.toLowerCase(java.util.Locale.US));
-        if (list == null || list.isEmpty()) return;
-        int id = list.get(rnd.nextInt(list.size()));
-        float rate = 0.95f + rnd.nextFloat() * 0.1f;
-        pool.play(id, 1f, 1f, 0, 0, rate);
+        SoundPool p = pool;
+        if (p == null || name == null) return;
+
+        int id = 0;
+        boolean shouldLoad = false;
+
+        synchronized (lock) {
+            if (failed.contains(name)) return;
+
+            Integer loadedId = loaded.get(name);
+            if (loadedId != null) {
+                id = loadedId;
+            } else {
+                shouldLoad = true;
+                pending.add(name);
+            }
+        }
+
+        if (id != 0) {
+            p.play(id, 1f, 1f, 0, 0, 1f);
+            return;
+        }
+
+        if (shouldLoad) {
+            load(name);
+        }
     }
 
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    private void load(String name) {
+        synchronized (lock) {
+            if (pool == null
+                    || name == null
+                    || loaded.containsKey(name)
+                    || loading.contains(name)
+                    || failed.contains(name)) {
+                return;
+            }
 
-    /** Pause — keeps the pool alive; called on Activity pause. */
+            loading.add(name);
+        }
+
+        AssetFileDescriptor afd = null;
+
+        try {
+            String path = resolveSoundPath(name);
+            afd = context.getAssets().openFd(path);
+
+            int id = 0;
+
+            synchronized (lock) {
+                SoundPool p = pool;
+                if (p != null) {
+                    id = p.load(
+                            afd.getFileDescriptor(),
+                            afd.getStartOffset(),
+                            afd.getLength(),
+                            1
+                    );
+                }
+            }
+
+            synchronized (lock) {
+                if (id == 0 || pool == null) {
+                    loading.remove(name);
+                    failed.add(name);
+                    pending.remove(name);
+                } else {
+                    loadIdToName.put(id, name);
+                }
+            }
+        } catch (Exception e) {
+            synchronized (lock) {
+                loading.remove(name);
+                failed.add(name);
+                pending.remove(name);
+            }
+        } finally {
+            if (afd != null) {
+                try {
+                    afd.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private String resolveSoundPath(String name) {
+        for (String hero : HERO_FOLDERS) {
+            String prefix = hero + "_";
+            if (name.startsWith(prefix)) {
+                return "sounds/" + hero + "/" + name + ".ogg";
+            }
+        }
+
+        return "sounds/" + name + ".ogg";
+    }
+
     public void stopAll() {
-        if (pool != null) {
-            try { pool.autoPause(); } catch (Exception ignored) {}
+        SoundPool p = pool;
+        if (p != null) {
+            p.autoPause();
         }
     }
 
-    /** Resume — called on Activity resume. */
     public void resumeAll() {
-        if (pool != null) {
-            try { pool.autoResume(); } catch (Exception ignored) {}
+        SoundPool p = pool;
+        if (p != null) {
+            p.autoResume();
         }
     }
 
-    /** True release — only on Activity destroy. */
     public void destroy() {
-        if (pool != null) {
-            try { pool.release(); } catch (Exception ignored) {}
-            pool = null;
-        }
-        ids.clear();
-        initialized = false;
-    }
+        SoundPool p = pool;
+        pool = null;
 
-    /** Kept for backward compat; delegates to destroy. */
-    public void release() { destroy(); }
+        if (p != null) {
+            try {
+                p.release();
+            } catch (Exception ignored) {
+            }
+        }
+
+        synchronized (lock) {
+            loaded.clear();
+            loadIdToName.clear();
+            loading.clear();
+            failed.clear();
+            pending.clear();
+        }
+    }
 }
