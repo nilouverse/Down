@@ -188,6 +188,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final Hero[] roster = new Hero[] { new NilouZila(), new Vex() };
     private Bitmap menuBg, keyBmp, coinBmp;
     private final RectF selBtn0 = new RectF(), selBtn1 = new RectF();
+    private float dockSlide = 0;
+    private final RectF dockPanel = new RectF();
+    private final RectF dockEnd = new RectF();
+    private final RectF[] dockAtk = new RectF[] {
+            new RectF(), new RectF(), new RectF() };
     private Typeface fLogo, fBody, fSerif;
     private volatile boolean assetsReady;
     private float loadT = 0;
@@ -921,6 +926,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         phaseT += dt;
         if (hurtT > 0) hurtT -= dt;
+        float dockTarget = (phase == PH_PLAYER && deadT <= 0) ? 1 : 0;
+        dockSlide += (dockTarget - dockSlide) * (1 - (float) Math.exp(-dt * 10));
         player.update(dt);
 
         if (!panning && !player.isMoving() && (flingX != 0 || flingY != 0)) {
@@ -1467,7 +1474,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void drawMoveFan(Canvas cv) {
-        if (actionsLeft <= 0) return;
+        if (actionsLeft <= 0 || player.isMoving()) return;
         int mm = player.hero.moveMax;
         worldToHex(player.x, player.y, IH_A);
         for (int r = -mm; r <= mm; r++) {
@@ -1820,62 +1827,108 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
     }
 
-    private void drawUI(Canvas cv) {
-        paint.setTextAlign(Paint.Align.CENTER);
-        float btnSize = 120;
-        float bottomY = H - 90;
+    private void layoutDock() {
+        float panelW = Math.min(W - 24, 620);
+        float panelH = 92;
+        float off = (1 - dockSlide) * (panelH + 60);
+        float y0 = H - panelH - 12 + off;
+        dockPanel.set(W / 2f - panelW / 2, y0, W / 2f + panelW / 2, y0 + panelH);
+        float pad = 14, gap = 10, bw = 108;
+        float x = dockPanel.left + pad;
+        dockEnd.set(x, y0 + pad, x + bw, y0 + panelH - pad);
+        x = dockEnd.right + gap + 76 + gap;
+        for (int i = 0; i < 3; i++) {
+            dockAtk[i].set(x, y0 + pad, x + bw, y0 + panelH - pad);
+            x += bw + gap;
+        }
+    }
 
-        drawGlassButton(cv, 110, bottomY, btnSize, "END", C_BONE_DIM, true);
-        drawGlassButton(cv, W - 110, bottomY, btnSize, "REND", C_BRIGHT, canAct() && mana >= player.hero.attacks[0].mana);
-        drawGlassButton(cv, W - 250, bottomY, btnSize, "BOLT", C_EMBER, canAct() && mana >= player.hero.attacks[1].mana);
-        drawGlassButton(cv, W - 390, bottomY, btnSize, "NOVA", C_VIOLET, canAct() && mana >= player.hero.attacks[2].mana);
+    private void drawUI(Canvas cv) {
+        if (dockSlide < 0.02f) return;
+        layoutDock();
+        int baseA = (int) (dockSlide * 255);
+        paint.setAlpha(baseA);
+        paint.setTextAlign(Paint.Align.CENTER);
+
+        cutRect(dockPanel, 14);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xD40e0709);
+        cv.drawPath(btnPath, paint);
+        cv.save();
+        cv.clipPath(btnPath);
+        paint.setColor(0x14efe6dd);
+        cv.drawRect(dockPanel.left, dockPanel.top, dockPanel.right, dockPanel.top + 2, paint);
+        paint.setColor(0x0Affffff);
+        cv.drawRect(dockPanel.left, dockPanel.top + 2, dockPanel.right, dockPanel.top + 3, paint);
+        cv.restore();
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(1.5f);
+        paint.setColor(0x35ff2747);
+        cv.drawPath(btnPath, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setStrokeWidth(0);
+
+        drawDockButton(cv, dockEnd, "END", C_BONE_DIM, true, menuPress == 5, false);
+        String[] lbl = { "REND", "BOLT", "NOVA" };
+        int[] acc = { C_BRIGHT, C_EMBER, C_VIOLET };
+        for (int i = 0; i < 3; i++) {
+            boolean on = attackRangeShown == i + 1;
+            boolean en = canAct() && mana >= player.hero.attacks[i].mana;
+            drawDockButton(cv, dockAtk[i], lbl[i], acc[i], en || on, menuPress == 6 + i, on);
+        }
 
         for (int i = 0; i < 2; i++) {
-            float px = W / 2f - 40 + i * 80, py = H - 110;
+            float px = dockEnd.right + 30 + i * 36, py = dockPanel.centerY();
             if (coinBmp != null) {
-                paint.setAlpha(i < actionsLeft ? 255 : 70);
-                rf.set(px - 16, py - 16, px + 16, py + 16);
+                paint.setAlpha((int) (dockSlide * (i < actionsLeft ? 255 : 70)));
+                rf.set(px - 14, py - 14, px + 14, py + 14);
                 cv.drawBitmap(coinBmp, null, rf, paint);
-                paint.setAlpha(255);
             } else {
+                paint.setAlpha(baseA);
                 paint.setColor(i < actionsLeft ? C_MAGENTA : 0xFF222222);
                 cv.save();
                 cv.translate(px, py);
                 cv.rotate(45);
-                cv.drawRect(-16, -16, 16, 16, paint);
+                cv.drawRect(-12, -12, 12, 12, paint);
                 cv.restore();
             }
         }
-
+        paint.setAlpha(255);
         paint.setTextAlign(Paint.Align.LEFT);
     }
 
-    private void drawGlassButton(Canvas cv, float cx, float cy, float size, String label, int accent, boolean enabled) {
-        float half = size / 2f;
-        rf.set(cx - half, cy - half, cx + half, cy + half);
-
-        cutRect(rf, 10);
+    private void drawDockButton(Canvas cv, RectF r, String label, int accent,
+                                boolean enabled, boolean pressed, boolean armed) {
+        cutRect(r, 10);
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0xCC050508);
+        paint.setColor(pressed ? 0x50301f4a : 0x2A1c1230);
         cv.drawPath(btnPath, paint);
-
+        if (pressed) {
+            cv.save();
+            cv.clipPath(btnPath);
+            paint.setColor(0x22ffffff);
+            cv.drawRect(r.centerX() - 16, r.top, r.centerX() + 16, r.bottom, paint);
+            cv.restore();
+        }
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(3);
+        paint.setStrokeWidth(armed ? 3.5f : 2f);
         paint.setColor(enabled ? accent : 0xFF222222);
         cv.drawPath(btnPath, paint);
-
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(enabled ? C_BONE : 0xFF555555);
         paint.setTypeface(fBody);
-        paint.setTextSize(28);
+        paint.setTextSize(24);
         paint.setFakeBoldText(true);
-        cv.drawText(label, cx, cy + 10, paint);
+        cv.drawText(label, r.centerX(), r.centerY() + 8, paint);
         paint.setFakeBoldText(false);
+        paint.setStrokeWidth(0);
     }
 
     private boolean uiZone(float x, float y) {
-        if (x < 190 && y > H - 190) return true;
-        if (x > W - 490 && y > H - 190) return true;
+        if (dockSlide > 0.9f) {
+            layoutDock();
+            return dockPanel.contains(x, y);
+        }
         return false;
     }
 
@@ -1897,6 +1950,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             moved = false; panning = false; pinching = false;
             flingX = 0; flingY = 0; velX = 0; velY = 0;
             lastMoveT = e.getEventTime();
+            menuPress = 0;
+            if (state == STATE_GAME && phase == PH_PLAYER && dockSlide > 0.9f) {
+                layoutDock();
+                if (dockEnd.contains(downX, downY)) menuPress = 5;
+                else for (int i = 0; i < 3; i++)
+                    if (dockAtk[i].contains(downX, downY)) menuPress = 6 + i;
+            }
             return true;
         }
         if (act == MotionEvent.ACTION_POINTER_DOWN) {
@@ -1955,34 +2015,26 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
         panning = false;
 
-        if (x < 190 && y > H - 190) {
-            sound.play("ui");
-            endPlayerTurn();
-            return true;
-        }
-        if (x > W - 190 && y > H - 190) {
-            if (canAct()) {
-                attackRangeShown = (attackRangeShown == 1) ? 0 : 1;
-                hexesShown = false; targetEnemy = null;
+        menuPress = 0;
+        if (phase == PH_PLAYER && dockSlide > 0.9f) {
+            layoutDock();
+            if (dockEnd.contains(x, y)) {
                 sound.play("ui");
+                endPlayerTurn();
+                return true;
             }
-            return true;
-        }
-        if (x > W - 340 && x < W - 190 && y > H - 190) {
-            if (canAct() && mana >= player.hero.attacks[1].mana) {
-                attackRangeShown = (attackRangeShown == 2) ? 0 : 2;
-                hexesShown = false; targetEnemy = null;
-                sound.play("ui");
+            for (int i = 0; i < 3; i++) {
+                if (dockAtk[i].contains(x, y)) {
+                    if (canAct() && (mana >= player.hero.attacks[i].mana
+                            || attackRangeShown == i + 1)) {
+                        attackRangeShown = (attackRangeShown == i + 1) ? 0 : i + 1;
+                        hexesShown = false; targetEnemy = null;
+                        sound.play("ui");
+                    }
+                    return true;
+                }
             }
-            return true;
-        }
-        if (x > W - 490 && x < W - 340 && y > H - 190) {
-            if (canAct() && mana >= player.hero.attacks[2].mana) {
-                attackRangeShown = (attackRangeShown == 3) ? 0 : 3;
-                hexesShown = false; targetEnemy = null;
-                sound.play("ui");
-            }
-            return true;
+            if (dockPanel.contains(x, y)) return true;
         }
 
         float wx = camX + (x - W / 2f) / zoom;
@@ -2060,7 +2112,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hexToWorld(TW_A[0], TW_A[1], TW_F);
             player.setTarget(TW_F[0], TW_F[1]);
             actionsLeft--;
-            hexesShown = actionsLeft > 0;
+            hexesShown = false;
             runeX = TW_F[0]; runeY = TW_F[1]; runeT = 0;
             sound.play("step");
             sound.play(voice + "_move");
