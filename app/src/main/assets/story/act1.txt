@@ -1,6 +1,5 @@
 # ACT ONE: THE LAST STAND OF VELKARYA
 # Continuous-map trigger script. Zones fire once (consumed) unless gated.
-# Coordinates are hex-grid (q r). Player starts at (0,0).
 
 ZONE cliff_edge 0 0 5
 ON_ENTER cliff_edge
@@ -16,7 +15,7 @@ SAY NilouZila The eastern wall is down.
 
 ZONE soldier_report 6 5 4
 ON_ENTER soldier_report
-SPAWN wounded_soldier 7 6
+SPAWN wounded 7 6
 SAY Wounded Soldier Lieutenant! The front line has collapsed! They broke through the Dead Gate - the reanimators are dead - all of them-
 SAY NilouZila How many came through the gate?
 SAY Wounded Soldier We couldn't count. Hundreds. Maybe thousands. They're not stopping to fight - they're just pouring in and spreading.
@@ -28,21 +27,24 @@ SAY Wounded Soldier What about you?
 SAY NilouZila I'm going to the courtyard.
 SAY Wounded Soldier That's suicide-
 SAY NilouZila Everything is suicide today. At least this way I choose where I die.
-DESPAWN wounded_soldier
+DESPAWN wounded
 SAY NilouZila I've served her for four hundred years. I didn't crawl through the Pit of Screaming souls, survive the Binding Trials, and kneel at her feet for four centuries just to watch her fall from a cliff.
 ACTION flash 300
 SAY NilouZila Let's go.
+
+ZONE descent_mouth 12 2 4
+ON_ENTER descent_mouth
 SETFLAG descent_open
 
-ZONE descent_ambush 20 -10 3
+ZONE descent_ambush 21 -1 3
 GATE descent_ambush descent_open
 ON_ENTER descent_ambush
 SAY NilouZila Thornborn. Of course they survived. Cockroaches, all of them.
-SPAWN thornborn 22 -10
-SPAWN thornborn 23 -9
-SPAWN thornborn 22 -8
-SPAWN thornborn 24 -10
-SPAWN thornborn 23 -11
+SPAWN thornborn 22 -2
+SPAWN thornborn 23 -1
+SPAWN thornborn 22 -3
+SPAWN thornborn 24 -2
+SPAWN thornborn 23 0
 SAY Thornborn Scout Velkarya's bitch! Kill her!
 FIGHT 5
 SAY NilouZila Five down. Several thousand to go.
@@ -58,7 +60,7 @@ SAY Carrion Infantry Leader A lieutenant! She wears the marks! Take her alive - 
 SAY NilouZila Come and try.
 SPAWN infantry 42 4
 SPAWN infantry 43 5
-SPAWN infantry 43 7
+SPAWN infantry 45 4
 SPAWN infantry 44 3
 SPAWN infantry 45 8
 SPAWN infantry 46 5
@@ -131,8 +133,8 @@ SPAWN fodder 61 3
 SPAWN fodder 61 5
 SPAWN fodder 62 2
 SPAWN fodder 62 6
-FIGHT 7
 REINFORCE 20
+FIGHT 7
 SAY NilouZila Enchanted weapons. Lovely.
 SAY NilouZila Two more. Just two more.
 SAY NilouZila Get up. Get UP.
@@ -145,7 +147,7 @@ SETFLAG velkarya_final_open
 
 ZONE velkarya_final 67 4 2
 GATE velkarya_final velkarya_final_open
-WAIT_FLAG courtyard_cleared
+WAIT_FLAG velkarya_final courtyard_cleared
 ON_ENTER velkarya_final
 SAY Velkarya They're coming. All of them. I can feel them - Mordethail himself is approaching. He's brought his Phalanx of Ruin. Six hundred of his finest.
 SAY NilouZila Six hundred?
