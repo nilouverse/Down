@@ -3,6 +3,8 @@ package com.down.game;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RadialGradient;
@@ -12,321 +14,336 @@ import android.graphics.Shader;
 import java.util.ArrayList;
 
 public class SceneMap {
-    public static final int SHAPE_FIELD = 0, SHAPE_BRIDGE = 1, SHAPE_STREET = 2,
-            SHAPE_CAMP = 3, SHAPE_RUN = 4;
 
-    public static final float SQUASH = 0.6f;
-    public static final float HEX = 96f;
-    private static final float TILE = 192f;
-    private static final float TH = TILE * SQUASH;
+    public static final int KIND_ASHEN = 0, KIND_DESCENT = 1, KIND_CITY = 2,
+            KIND_COURTYARD = 3, KIND_RUN = 4;
 
-    public ArrayList<SceneActor> actors = new ArrayList<>();
-    public ArrayList<Prop> props = new ArrayList<>();
-    public ArrayList<Crack> cracks = new ArrayList<>();
-
-    private Bitmap bgBmp;
-    private Canvas bgCanvas;
-
-    private Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private Paint objPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private Paint shadowPaint = new Paint();
-    private Path path = new Path();
-    private Rect srcRect = new Rect();
-    private RectF dstRect = new RectF();
-    private ArrayList<Object> sortedList = new ArrayList<>();
-
-    public Frame[] propFrames; // injected by GameView
-
-    public float inkFade = 0f;
-    private int shapeType = SHAPE_FIELD;
-    private int groundColor = Color.BLACK;
-    private int builtW, builtH;
+    private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
 
     public static class Prop {
         public String type;
+        public int q, r;
         public float x, y;
-        public int frameIdx;
-        public Prop(String type, float x, float y, int frameIdx) {
-            this.type = type; this.x = x; this.y = y; this.frameIdx = frameIdx;
-        }
+        public Frame frame;
+        public float scale = 1f;
+        public boolean blocking;
+        public float drawY() { return y + 24f; }
     }
 
     public static class Crack {
-        public float x1, y1, x2, y2;
-        public Crack(float x1, float y1, float x2, float y2) {
-            this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
-        }
+        public int q1, r1, q2, r2;
     }
 
-    public void reset(int groundColor, String name) {
+    private final ArrayList<Prop> props = new ArrayList<>();
+    private final ArrayList<Crack> cracks = new ArrayList<>();
+    private boolean[] walk;
+    private int groundColor, sceneKind;
+    private String sceneName;
+    private Bitmap bg, fg;
+    private Canvas bgCanvas, fgCanvas;
+    private float worldMinX, worldMinY, worldMaxX, worldMaxY, pxPerWorld;
+    private final Matrix drawMatrix = new Matrix();
+    private final Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint fgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint groundPaint = new Paint();
+    private final Paint crackPaint = new Paint();
+    private final Paint lightPaint = new Paint();
+    private final Path crackPath = new Path();
+    private final Rect srcRect = new Rect();
+    private final RectF dstRect = new RectF();
+    private static Frame[] smallPropFrames, largePropFrames;
+    private final int[] hexOut = new int[2];
+
+    public SceneMap() {
+        bgPaint.setFilterBitmap(true);
+        fgPaint.setFilterBitmap(true);
+        crackPaint.setStyle(Paint.Style.STROKE);
+        crackPaint.setStrokeCap(Paint.Cap.ROUND);
+        crackPaint.setStrokeJoin(Paint.Join.ROUND);
+    }
+
+    public void begin(String name, int ground) {
         props.clear();
         cracks.clear();
-        actors.clear();
-        if (name.contains("Ashen")) shapeType = SHAPE_FIELD;
-        else if (name.contains("Descent")) shapeType = SHAPE_BRIDGE;
-        else if (name.contains("Falling")) shapeType = SHAPE_STREET;
+        walk = null;
+        sceneName = name;
+        groundColor = ground;
+        if (name.contains("Ashen")) sceneKind = KIND_ASHEN;
+        else if (name.contains("Descent")) sceneKind = KIND_DESCENT;
+        else if (name.contains("Falling") || name.contains("City")) sceneKind = KIND_CITY;
         else if (name.contains("Courtyard") || name.contains("Reunion")
-                || name.contains("Wave") || name.contains("Last Act")) shapeType = SHAPE_CAMP;
-        else if (name.contains("Run")) shapeType = SHAPE_RUN;
-        else shapeType = SHAPE_FIELD;
-        this.groundColor = groundColor;
+                || name.contains("Wave") || name.contains("Last Act")) sceneKind = KIND_COURTYARD;
+        else if (name.contains("Run")) sceneKind = KIND_RUN;
+        else sceneKind = KIND_ASHEN;
     }
 
-    private static float hexX(int q, int r) { return HEX * (float) Math.sqrt(3) * (q + r / 2f); }
-    private static float hexY(int r) { return HEX * 1.5f * r * SQUASH; }
-
-    public void addProp(String type, int q, int r) {
-        int idx = 0;
-        if (type.equals("spire")) idx = 0;
-        else if (type.equals("wall")) idx = 1;
-        else if (type.equals("rubble")) idx = 2;
-        else if (type.equals("bonepillar")) idx = 3;
-        else if (type.equals("bones")) idx = 4;
-        else if (type.equals("barricade")) idx = 5;
-        else if (type.equals("street")) idx = 6;
-        props.add(new Prop(type, hexX(q, r), hexY(r), idx));
+    public void crack(int q1, int r1, int q2, int r2) {
+        Crack c = new Crack();
+        c.q1 = q1; c.r1 = r1; c.q2 = q2; c.r2 = r2;
+        cracks.add(c);
     }
 
-    public void addCrack(int q1, int r1, int q2, int r2) {
-        cracks.add(new Crack(hexX(q1, r1), hexY(r1), hexX(q2, r2), hexY(r2)));
+    public void prop(String type, int q, int r) {
+        Prop p = new Prop();
+        p.type = type; p.q = q; p.r = r;
+        p.x = hexX(q, r); p.y = hexY(q, r);
+        p.frame = getPropFrame(type);
+        p.blocking = isBlocking(type);
+        if ("spire".equals(type) || "wall".equals(type) || "bonepillar".equals(type)) p.scale = 1.35f;
+        props.add(p);
     }
 
-    public void addActor(String id, String type, int q, int r, boolean hidden) {
-        actors.add(new SceneActor(id, type, hexX(q, r), hexY(r), q, r, hidden));
+    public void tick(float dt) {
+        if (walk == null && bg == null) compile();
     }
 
-    public SceneActor getActor(String id) {
-        for (int i = 0; i < actors.size(); i++) {
-            SceneActor a = actors.get(i);
-            if (a.id.equals(id)) return a;
-        }
-        return null;
+    private void compile() {
+        walk = buildWalkMask(sceneKind, props);
+        final int[] bounds = sceneBounds();
+        final int minQ = bounds[0], maxQ = bounds[1], minR = bounds[2], maxR = bounds[3];
+        float x0 = hexX(minQ, minR), x1 = hexX(minQ, maxR);
+        float x2 = hexX(maxQ, minR), x3 = hexX(maxQ, maxR);
+        worldMinX = Math.min(Math.min(x0, x1), Math.min(x2, x3)) - 70f;
+        worldMaxX = Math.max(Math.max(x0, x1), Math.max(x2, x3)) + 70f;
+        worldMinY = hexY(0, minR) - 70f;
+        worldMaxY = hexY(0, maxR) + 100f;
+        float density = 1f;
+        pxPerWorld = Math.max(0.30f, Math.min(0.75f, 0.50f * density));
+        int bw = Math.max(64, (int) ((worldMaxX - worldMinX) * pxPerWorld));
+        int bh = Math.max(64, (int) ((worldMaxY - worldMinY) * pxPerWorld));
+        if (bw > 1600) bw = 1600;
+        if (bh > 900) bh = 900;
+        if (bg != null) bg.recycle();
+        if (fg != null) fg.recycle();
+        bg = Bitmap.createBitmap(bw, bh, Bitmap.Config.RGB_565);
+        bgCanvas = new Canvas(bg);
+        bgCanvas.drawColor(groundColor);
+        drawGroundVariation(bgCanvas, groundColor, sceneName, minQ, maxQ, minR, maxR);
+        drawCracks(bgCanvas, minQ, maxQ, minR, maxR);
+        fg = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+        fgCanvas = new Canvas(fg);
+        drawLightOverlay(fgCanvas, bw, bh);
     }
 
-    public static boolean isEnemyActor(String type) {
-        return type.startsWith("t") || type.startsWith("i")
-                || type.startsWith("d") || type.startsWith("e");
-    }
-
-    public void clearEnemyActors() {
-        for (int i = actors.size() - 1; i >= 0; i--) {
-            if (isEnemyActor(actors.get(i).type)) actors.remove(i);
-        }
-    }
-
-    public boolean isWalkable(float x, float y) {
-        switch (shapeType) {
-            case SHAPE_FIELD: return Math.abs(x) < 1200 && Math.abs(y) < 800;
-            case SHAPE_BRIDGE: return Math.abs(x) < 1200 && Math.abs(y) < 300;
-            case SHAPE_STREET: return x > -400 && x < 1200 && Math.abs(y) < 400;
-            case SHAPE_CAMP: return (x * x + y * y) < 800 * 800;
-            case SHAPE_RUN: return Math.abs(x) < 1200 && Math.abs(y) < 250;
-        }
-        return true;
-    }
-
-    public void build(int W, int H, int quality) {
-        if (W < 16 || H < 16) return; // guard: size not known yet
-        if (bgBmp != null) { bgBmp.recycle(); bgBmp = null; }
-        builtW = W; builtH = H;
-        bgBmp = Bitmap.createBitmap(W / 2, H / 2, Bitmap.Config.RGB_565);
-        bgCanvas = new Canvas(bgBmp);
-
-        bgPaint.setShader(null);
-        bgPaint.setColor(0xFF000000 | (groundColor & 0xFFFFFF));
-        bgPaint.setStyle(Paint.Style.FILL);
-        bgCanvas.drawRect(0, 0, W / 2, H / 2, bgPaint);
-
-        bgPaint.setColor(0xFF140a14);
-        path.reset();
-        path.moveTo(0, H / 6f);
-        for (int i = 0; i <= 12; i++) {
-            float px = (i / 12f) * (W / 2);
-            float py = H / 6f + (i % 2 == 0 ? -25 : 25);
-            path.lineTo(px, py);
-        }
-        path.lineTo(W / 2, 0);
-        path.lineTo(0, 0);
-        path.close();
-        bgCanvas.drawPath(path, bgPaint);
-
-        if (quality > 0) {
-            RadialGradient vignette = new RadialGradient(W / 4f, H / 4f, W / 2f,
-                    new int[] { 0, 0x80000000 }, new float[] { 0f, 1f }, Shader.TileMode.CLAMP);
-            bgPaint.setShader(vignette);
-            bgCanvas.drawRect(0, 0, W / 2, H / 2, bgPaint);
-            bgPaint.setShader(null);
-        }
+    public boolean isWalkable(float wx, float wy) {
+        if (walk == null) return true;
+        worldToHex(wx, wy, hexOut);
+        int q = hexOut[0], r = hexOut[1];
+        int idx = (q + 64) + (r + 64) * 128;
+        if (idx < 0 || idx >= walk.length) return false;
+        return walk[idx];
     }
 
     public void draw(Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {
-        if (bgBmp != null) {
-            bgPaint.setFilterBitmap(true);
-            dstRect.set(0, 0, W, H);
-            cv.drawBitmap(bgBmp, null, dstRect, bgPaint);
-            bgPaint.setFilterBitmap(false);
-        }
-        objPaint.setStyle(Paint.Style.STROKE);
-        objPaint.setColor(0x64000000);
-        objPaint.setStrokeWidth(4 * zoom);
-        for (int i = 0; i < cracks.size(); i++) {
-            Crack c = cracks.get(i);
-            cv.drawLine(sx(c.x1, camX, zoom, W), sy(c.y1, camY, zoom, H),
-                        sx(c.x2, camX, zoom, W), sy(c.y2, camY, zoom, H), objPaint);
-        }
-        objPaint.setStyle(Paint.Style.FILL);
+        if (bg == null) return;
+        cv.save();
+        drawMatrix.reset();
+        drawMatrix.postScale(zoom / pxPerWorld, zoom / pxPerWorld);
+        drawMatrix.postTranslate((worldMinX - camX) * zoom + W / 2f,
+                (worldMinY - camY) * zoom + H / 2f);
+        cv.drawBitmap(bg, drawMatrix, bgPaint);
+        if (quality > 0 && fg != null) cv.drawBitmap(fg, drawMatrix, fgPaint);
+        cv.restore();
+        for (int i = 0; i < props.size(); i++) drawProp(cv, props.get(i), camX, camY, zoom, W, H);
     }
 
-    public ArrayList<Object> getSortedDrawables() {
-        sortedList.clear();
-        for (int i = 0; i < props.size(); i++) sortedList.add(props.get(i));
-        for (int i = 0; i < actors.size(); i++) {
-            SceneActor a = actors.get(i);
-            if (!a.hidden) sortedList.add(a);
-        }
-        for (int i = 0; i < sortedList.size(); i++) {
-            for (int j = i + 1; j < sortedList.size(); j++) {
-                if (drawableY(sortedList.get(j)) < drawableY(sortedList.get(i))) {
-                    Object tmp = sortedList.get(i);
-                    sortedList.set(i, sortedList.get(j));
-                    sortedList.set(j, tmp);
-                }
-            }
-        }
-        return sortedList;
-    }
-
-    public float drawableY(Object obj) {
-        if (obj instanceof Prop) return ((Prop) obj).y;
-        if (obj instanceof SceneActor) return ((SceneActor) obj).y;
-        return 0;
-    }
-
-    public void drawDrawable(Canvas cv, Object obj, float camX, float camY, float zoom, int W, int H, float t) {
-        if (obj instanceof Prop) drawProp(cv, (Prop) obj, camX, camY, zoom, W, H);
-        else if (obj instanceof SceneActor) drawActor(cv, (SceneActor) obj, camX, camY, zoom, W, H, t);
-    }
-
-    private static boolean isLarge(String type) {
-        return type.equals("spire") || type.equals("wall") || type.equals("bonepillar")
-                || type.equals("barricade") || type.equals("street");
-    }
+    public int propCount() { return props.size(); }
+    public Prop propAt(int i) { return props.get(i); }
 
     private void drawProp(Canvas cv, Prop p, float camX, float camY, float zoom, int W, int H) {
-        if (propFrames == null || propFrames.length == 0) return;
-        Frame f = propFrames[p.frameIdx % propFrames.length];
-        if (f == null || f.bmp == null || f.ch <= 0) return;
-
-        float sx = sx(p.x, camX, zoom, W);
-        float sy = sy(p.y, camY, zoom, H);
-
-        float targetH = isLarge(p.type) ? TH * 2.43f : TH * 1.0f;
-        float s = (targetH / f.ch) * zoom;
-        float dw = f.cw * s;
-        float dh = f.ch * s;
-
-        shadowPaint.setColor(0x60000000);
-        cv.drawCircle(sx, sy, dw * 0.28f, shadowPaint);
-
-        srcRect.set(f.left, f.top, f.left + f.cw, f.top + f.ch);
+        if (p.frame == null || p.frame.bmp == null) return;
+        float sx = (p.x - camX) * zoom + W / 2f;
+        float sy = (p.y - camY) * zoom + H / 2f;
+        float s = p.scale * zoom;
+        float dw = p.frame.cw * s, dh = p.frame.ch * s;
+        srcRect.set(p.frame.left, p.frame.top, p.frame.left + p.frame.cw, p.frame.top + p.frame.ch);
         dstRect.set(sx - dw / 2f, sy - dh, sx + dw / 2f, sy);
-        cv.drawBitmap(f.bmp, srcRect, dstRect, bgPaint);
+        cv.drawBitmap(p.frame.bmp, srcRect, dstRect, bgPaint);
     }
 
-    private void drawActor(Canvas cv, SceneActor a, float camX, float camY, float zoom, int W, int H, float t) {
-        float baseSy = sy(a.y, camY, zoom, H);
-        float sx = sx(a.x, camX, zoom, W);
-        float bob = (float) Math.sin(t * 2f + a.bobPhase) * 5f * zoom;
-        float sy = baseSy - bob;
+    private static boolean[] buildWalkMask(int kind, ArrayList<Prop> props) {
+        boolean[] mask = new boolean[128 * 128];
+        for (int r = -64; r < 64; r++) {
+            int base = (r + 64) * 128;
+            for (int q = -64; q < 64; q++) {
+                mask[base + q + 64] = shapeWalkable(q, r, kind);
+            }
+        }
+        for (int i = 0; i < props.size(); i++) {
+            Prop p = props.get(i);
+            if (!p.blocking) continue;
+            int idx = (p.q + 64) + (p.r + 64) * 128;
+            if (idx >= 0 && idx < mask.length) mask[idx] = false;
+            int idx2 = (p.q + 1 + 64) + (p.r + 64) * 128;
+            if (idx2 >= 0 && idx2 < mask.length) mask[idx2] = false;
+            int idx3 = (p.q - 1 + 64) + (p.r + 64) * 128;
+            if (idx3 >= 0 && idx3 < mask.length) mask[idx3] = false;
+        }
+        return mask;
+    }
 
-        shadowPaint.setColor(0x60000000);
-        cv.drawCircle(sx, baseSy, 18 * zoom, shadowPaint);
-
-        objPaint.setStyle(Paint.Style.FILL);
-        path.reset();
-        if (a.type.equals("vel")) {
-            objPaint.setColor(0xFFb07cff);
-            path.moveTo(sx, sy - 80 * zoom);
-            path.lineTo(sx - 20 * zoom, sy);
-            path.lineTo(sx + 20 * zoom, sy);
-            path.close();
-            cv.drawPath(path, objPaint);
-            objPaint.setStyle(Paint.Style.STROKE);
-            objPaint.setStrokeWidth(3 * zoom);
-            objPaint.setColor(0xFF34e3d6);
-            cv.drawPath(path, objPaint);
-            objPaint.setStyle(Paint.Style.FILL);
-        } else if (isEnemyActor(a.type) || a.type.equals("ws")) {
-            objPaint.setColor(a.type.equals("ws") ? 0xFFb7a6ab : 0xFFb3102a);
-            path.moveTo(sx, sy - 60 * zoom);
-            path.lineTo(sx - 15 * zoom, sy);
-            path.lineTo(sx + 15 * zoom, sy);
-            path.close();
-            cv.drawPath(path, objPaint);
-        } else {
-            objPaint.setColor(0xFFefe6dd);
-            path.moveTo(sx, sy - 70 * zoom);
-            path.lineTo(sx - 18 * zoom, sy);
-            path.lineTo(sx + 18 * zoom, sy);
-            path.close();
-            cv.drawPath(path, objPaint);
+    private static boolean shapeWalkable(int q, int r, int kind) {
+        switch (kind) {
+            case KIND_ASHEN: return Math.abs(q) <= 10 && Math.abs(r) <= 8 && Math.abs(q + r) <= 14;
+            case KIND_DESCENT: return q >= -8 && q <= 10 && r >= -2 && r <= 2;
+            case KIND_CITY: return q >= -6 && q <= 10 && r >= -5 && r <= 5;
+            case KIND_COURTYARD: return (q * q + q * r + r * r) <= 49;
+            case KIND_RUN: return q >= -4 && q <= 10 && r >= -1 && r <= 1;
+            default: return true;
         }
     }
 
-    public void drawObjective(Canvas cv, float objX, float objY, float camX, float camY, float zoom, int W, int H, float t) {
-        float sx = sx(objX, camX, zoom, W);
-        float sy = sy(objY, camY, zoom, H);
+    private int[] sceneBounds() {
+        int minQ = 1000, maxQ = -1000, minR = 1000, maxR = -1000;
+        for (Prop p : props) {
+            if (p.q < minQ) minQ = p.q;
+            if (p.q > maxQ) maxQ = p.q;
+            if (p.r < minR) minR = p.r;
+            if (p.r > maxR) maxR = p.r;
+        }
+        if (minQ == 1000) { minQ = -4; maxQ = 4; minR = -4; maxR = 4; }
+        switch (sceneKind) {
+            case KIND_ASHEN: minQ = Math.min(minQ, -10); maxQ = Math.max(maxQ, 10);
+                minR = Math.min(minR, -8); maxR = Math.max(maxR, 8); break;
+            case KIND_DESCENT: minQ = Math.min(minQ, -8); maxQ = Math.max(maxQ, 10);
+                minR = Math.min(minR, -2); maxR = Math.max(maxR, 2); break;
+            case KIND_CITY: minQ = Math.min(minQ, -6); maxQ = Math.max(maxQ, 10);
+                minR = Math.min(minR, -5); maxR = Math.max(maxR, 5); break;
+            case KIND_COURTYARD: minQ = Math.min(minQ, -8); maxQ = Math.max(maxQ, 8);
+                minR = Math.min(minR, -8); maxR = Math.max(maxR, 8); break;
+            case KIND_RUN: minQ = Math.min(minQ, -4); maxQ = Math.max(maxQ, 10);
+                minR = Math.min(minR, -1); maxR = Math.max(maxR, 1); break;
+        }
+        return new int[] { minQ, maxQ, minR, maxR };
+    }
 
-        if (sx < 50 || sx > W - 50 || sy < 50 || sy > H - 50) {
-            float cx = W / 2f, cy = H / 2f;
-            float angle = (float) Math.atan2(sy - cy, sx - cx);
-            float ax = cx + (float) Math.cos(angle) * (W / 3f);
-            float ay = cy + (float) Math.sin(angle) * (H / 3f);
-            cv.save();
-            cv.translate(ax, ay);
-            cv.rotate(angle * 180f / (float) Math.PI);
-            objPaint.setColor(0xFF34e3d6);
-            objPaint.setStyle(Paint.Style.FILL);
-            path.reset();
-            path.moveTo(14 * zoom, 0);
-            path.lineTo(-10 * zoom, -10 * zoom);
-            path.lineTo(-10 * zoom, 10 * zoom);
-            path.close();
-            cv.drawPath(path, objPaint);
-            cv.restore();
-        } else {
-            float pulse = 0.8f + 0.2f * (float) Math.sin(t * 4f);
-            objPaint.setStyle(Paint.Style.FILL);
-            objPaint.setColor(Color.argb((int) (150 * pulse), 0x34, 0xe3, 0xd6));
-            cv.drawCircle(sx, sy, 15 * zoom * pulse, objPaint);
-            objPaint.setColor(0xFF34e3d6);
-            objPaint.setStyle(Paint.Style.STROKE);
-            objPaint.setStrokeWidth(2 * zoom);
-            cv.drawCircle(sx, sy, 20 * zoom, objPaint);
-            objPaint.setStyle(Paint.Style.FILL);
-            objPaint.setColor(Color.argb(80, 0x34, 0xe3, 0xd6));
-            cv.drawRect(sx - 10 * zoom, sy - 200 * zoom, sx + 10 * zoom, sy, objPaint);
+    private void drawGroundVariation(Canvas canvas, int ground, String sceneName,
+                                     int minQ, int maxQ, int minR, int maxR) {
+        java.util.Random rnd = new java.util.Random(sceneName == null ? 7L : sceneName.hashCode());
+        groundPaint.setStyle(Paint.Style.FILL);
+        for (int i = 0; i < 16; i++) {
+            int q = minQ + rnd.nextInt(Math.max(1, maxQ - minQ + 1));
+            int r = minR + rnd.nextInt(Math.max(1, maxR - minR + 1));
+            float x = hexX(q, r), y = hexY(q, r);
+            float rad = 50f + rnd.nextFloat() * 140f;
+            int alpha = rnd.nextBoolean() ? 0x16 : 0x13;
+            int color = rnd.nextBoolean() ? 0x000000 : 0xffffff;
+            groundPaint.setColor(Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color)));
+            canvas.drawOval(worldToBitmapX(x) - rad, worldToBitmapY(y) - rad,
+                    worldToBitmapX(x) + rad, worldToBitmapY(y) + rad, groundPaint);
         }
     }
 
-    public void update(float dt) {
-        if (inkFade > 0) {
-            inkFade -= dt * 3f;
-            if (inkFade < 0) inkFade = 0;
+    private void drawCracks(Canvas canvas, int minQ, int maxQ, int minR, int maxR) {
+        crackPaint.setColor(0x99000000);
+        crackPaint.setStrokeWidth(2.5f * pxPerWorld);
+        for (Crack c : cracks) {
+            float sx = worldToBitmapX(hexX(c.q1, c.r1));
+            float sy = worldToBitmapY(hexY(c.q1, c.r1));
+            float ex = worldToBitmapX(hexX(c.q2, c.r2));
+            float ey = worldToBitmapY(hexY(c.q2, c.r2));
+            crackPath.reset();
+            crackPath.moveTo(sx, sy);
+            java.util.Random rnd = new java.util.Random((long) (c.q1 * 31 + c.r1 * 97 + c.q2 * 131 + c.r2 * 17));
+            float dx = ex - sx, dy = ey - sy;
+            float len = (float) Math.sqrt(dx * dx + dy * dy);
+            int steps = Math.max(4, (int) (len / (40f * pxPerWorld)));
+            for (int i = 1; i < steps; i++) {
+                float t = i / (float) steps;
+                float jx = sx + dx * t + (rnd.nextFloat() - 0.5f) * 18f * pxPerWorld;
+                float jy = sy + dy * t + (rnd.nextFloat() - 0.5f) * 18f * pxPerWorld;
+                crackPath.lineTo(jx, jy);
+            }
+            crackPath.lineTo(ex, ey);
+            canvas.drawPath(crackPath, crackPaint);
         }
-        for (int i = 0; i < actors.size(); i++) actors.get(i).update(dt);
     }
 
-    public void triggerTransition() { inkFade = 1f; }
+    private void drawLightOverlay(Canvas canvas, int bw, int bh) {
+        LinearGradient fog = new LinearGradient(0, 0, 0, bh,
+                new int[] { 0x00000000, 0x48000000, 0x00000000 },
+                new float[] { 0f, 0.55f, 1f }, Shader.TileMode.CLAMP);
+        lightPaint.setShader(fog);
+        canvas.drawRect(0, 0, bw, bh, lightPaint);
+        for (Prop p : props) {
+            int glow = glowColor(p.type);
+            if (glow == 0) continue;
+            float bx = worldToBitmapX(p.x), by = worldToBitmapY(p.y);
+            float radius = 120f * pxPerWorld;
+            if ("spire".equals(p.type) || "wall".equals(p.type)) radius *= 1.4f;
+            RadialGradient rg = new RadialGradient(bx, by, radius,
+                    new int[] { glow, glow & 0x00ffffff },
+                    new float[] { 0f, 1f }, Shader.TileMode.CLAMP);
+            lightPaint.setShader(rg);
+            canvas.drawCircle(bx, by, radius, lightPaint);
+        }
+        lightPaint.setShader(null);
+    }
 
-    public void drawInkFade(Canvas cv, int W, int H) {
-        if (inkFade > 0) {
-            objPaint.setColor(Color.argb((int) (inkFade * 255), 0, 0, 0));
-            objPaint.setStyle(Paint.Style.FILL);
-            cv.drawRect(0, 0, W, H, objPaint);
+    private static int glowColor(String type) {
+        switch (type) {
+            case "bonepillar": return 0x39b07cff;
+            case "bones": return 0x3934e3d6;
+            case "barricade": return 0x2cff7a1a;
+            case "rubble": return 0x24ff2747;
+            case "spire": return 0x30b3102a;
+            default: return 0;
         }
     }
 
-    private float sx(float wx, float camX, float zoom, int W) { return (wx - camX) * zoom + W / 2f; }
-    private float sy(float wy, float camY, float zoom, int H) { return (wy - camY) * zoom + H / 2f; }
+    private float worldToBitmapX(float wx) { return (wx - worldMinX) * pxPerWorld; }
+    private float worldToBitmapY(float wy) { return (wy - worldMinY) * pxPerWorld; }
+
+    private static Frame[] getSmallProps() {
+        if (smallPropFrames == null) smallPropFrames = Sprites.cutSheet("sprites/props.png", 2, 4, 4);
+        return smallPropFrames;
+    }
+
+    private static Frame[] getLargeProps() {
+        if (largePropFrames == null) largePropFrames = Sprites.cutSheet("sprites/props2.png", 2, 4, 4);
+        return largePropFrames;
+    }
+
+    private static Frame getPropFrame(String type) {
+        int idx;
+        switch (type) {
+            case "spire": idx = 0; break;
+            case "wall": idx = 1; break;
+            case "rubble": idx = 2; break;
+            case "bonepillar": idx = 3; break;
+            case "bones": idx = 4; break;
+            case "barricade": idx = 5; break;
+            case "street": idx = 6; break;
+            default: idx = 7; break;
+        }
+        if ("spire".equals(type) || "wall".equals(type) || "bonepillar".equals(type) || "barricade".equals(type)) {
+            Frame[] lp = getLargeProps();
+            return lp[idx % lp.length];
+        }
+        Frame[] sp = getSmallProps();
+        return sp[idx % sp.length];
+    }
+
+    private static boolean isBlocking(String type) {
+        switch (type) {
+            case "spire": case "wall": case "rubble": case "barricade":
+            case "bonepillar": case "bones": return true;
+            default: return false;
+        }
+    }
+
+    public static float hexX(int q, int r) { return HEX * SQRT3 * (q + r * 0.5f); }
+    public static float hexY(int q, int r) { return HEX * 1.5f * r * SQUASH; }
+
+    private static void worldToHex(float wx, float wy, int[] out) {
+        float rf = wy / (HEX * 1.5f * SQUASH);
+        float qf = wx / (HEX * SQRT3) - rf * 0.5f;
+        float zf = -qf - rf;
+        int rq = Math.round(qf), rr = Math.round(rf), rz = Math.round(zf);
+        float dq = Math.abs(rq - qf), dr = Math.abs(rr - rf), dz = Math.abs(rz - zf);
+        if (dq > dr && dq > dz) rq = -rr - rz;
+        else if (dr > dz) rr = -rq - rz;
+        else rz = -rq - rr;
+        out[0] = rq; out[1] = rr;
+    }
 }
