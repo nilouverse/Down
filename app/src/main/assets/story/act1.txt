@@ -1,293 +1,213 @@
-# ============ SCENE 1: THE ASHEN FIELD ============
-NAME The Ashen Field
-GROUND 140b16
-RESET
-CRACK -2 0 1 2
-CRACK 3 -1 5 1
-PLACE spire 5 -3
-PLACE wall -4 -2
-ACTOR nilou 0 0
-ACTOR ws 4 3 hidden
-SAY NilouZila They brought everything.
-SAY NilouZila Three legions. At least three. I can see the banners of Mordethail from here... and the Carrion Kings... and those—
-SAY NilouZila Those are the Thornborn. I thought Velkarya exterminated them centuries ago.
-ACTION flash2
-ACTION shake
-SAY NilouZila The eastern wall is down.
-SHOW ws
-WALK ws 1 1
-SAY ws Lieutenant! The front line has collapsed! They broke through the Dead Gate — the reanimators are dead — all of them—
-SAY NilouZila How many came through the gate?
-SAY ws We couldn't count. Hundreds. Maybe thousands. They're not stopping to fight — they're just pouring in and spreading.
-SAY NilouZila Where is the goddess?
-SAY ws She's at the center. The Courtyard of Bones. She's... she's holding the line alone.
-SAY ws Lieutenant... I saw her. She looks... wrong. Her form is slipping. I've never seen her like this.
-SAY NilouZila Go to the inner sanctum. Barricade yourself. If you have any dark nectar, drink it — it'll keep you moving.
-SAY ws What about you?
-SAY NilouZila I'm going to the courtyard.
-SAY ws That's suicide—
-SAY NilouZila Everything is suicide today. At least this way I choose where I die.
-EXIT ws 4 3
-SAY NilouZila I've served her for four hundred years. I didn't crawl through the Pit of Screaming souls, survive the Binding Trials, and kneel at her feet for four centuries just to watch her fall from a cliff.
-SAY NilouZila Let's go.
+# ACT ONE: THE LAST STAND OF VELKARYA
+# Continuous-map trigger script. Zones fire once (consumed) unless gated.
+# Coordinates are hex-grid (q r). Player starts at (0,0).
 
-# ============ SCENE 2: THE DESCENT ============
-NAME The Descent
-GROUND 120a14
-RESET
-CRACK -1 -2 2 3
-PLACE wall -3 -3
-PLACE rubble 4 2
-ACTOR nilou 0 0
-ACTOR t1 2 -1
-ACTOR t2 3 0
-ACTOR t3 2 1
-ACTOR t4 4 0
-ACTOR t5 3 2
+ZONE cliff_edge 0 0 5
+ON_ENTER cliff_edge
+SAY NilouZila They brought everything.
+SAY NilouZila Three legions. At least three. I can see the banners of Mordethail from here... and the Carrion Kings... and those-
+ACTION shake 400
+
+ZONE cliff_squint 3 2 2
+ON_ENTER cliff_squint
+SAY NilouZila Those are the Thornborn. I thought Velkarya exterminated them centuries ago.
+ACTION shake 900
+SAY NilouZila The eastern wall is down.
+
+ZONE soldier_report 6 5 4
+ON_ENTER soldier_report
+SPAWN wounded_soldier 7 6
+SAY Wounded Soldier Lieutenant! The front line has collapsed! They broke through the Dead Gate - the reanimators are dead - all of them-
+SAY NilouZila How many came through the gate?
+SAY Wounded Soldier We couldn't count. Hundreds. Maybe thousands. They're not stopping to fight - they're just pouring in and spreading.
+SAY NilouZila Where is the goddess?
+SAY Wounded Soldier She's at the center. The Courtyard of Bones. She's... she's holding the line alone.
+SAY Wounded Soldier Lieutenant... I saw her. She looks... wrong. Her form is slipping. I've never seen her like this.
+SAY NilouZila Go to the inner sanctum. Barricade yourself. If you have any dark nectar, drink it - it'll keep you moving.
+SAY Wounded Soldier What about you?
+SAY NilouZila I'm going to the courtyard.
+SAY Wounded Soldier That's suicide-
+SAY NilouZila Everything is suicide today. At least this way I choose where I die.
+DESPAWN wounded_soldier
+SAY NilouZila I've served her for four hundred years. I didn't crawl through the Pit of Screaming souls, survive the Binding Trials, and kneel at her feet for four centuries just to watch her fall from a cliff.
+ACTION flash 300
+SAY NilouZila Let's go.
+SETFLAG descent_open
+
+ZONE descent_ambush 20 -10 3
+GATE descent_ambush descent_open
+ON_ENTER descent_ambush
 SAY NilouZila Thornborn. Of course they survived. Cockroaches, all of them.
-SAY t1 Velkarya's bitch! Kill her!
-ACTION shake
+SPAWN thornborn 22 -10
+SPAWN thornborn 23 -9
+SPAWN thornborn 22 -8
+SPAWN thornborn 24 -10
+SPAWN thornborn 23 -11
+SAY Thornborn Scout Velkarya's bitch! Kill her!
 FIGHT 5
-ACTION slash 2 -1
-ACTION blood 2 -1
-HIDE t1
-ACTION slash 3 0
-ACTION blood 3 0
-HIDE t2
-SAY NilouZila Venom. Of course.
-ACTION slash 2 1
-ACTION blood 2 1
-HIDE t3
-ACTION slash 4 0
-ACTION blood 4 0
-HIDE t4
-ACTION slash 3 2
-ACTION blood 3 2
-HIDE t5
 SAY NilouZila Five down. Several thousand to go.
 SAY NilouZila Paralytic. Slow-acting, I think. I have maybe an hour before it reaches my spine.
 SAY NilouZila No time to worry about it.
-WALK nilou 6 0
+ACTION decal blood
+SETFLAG city_open
 
-# ============ SCENE 3: THE FALLING CITY ============
-NAME The Falling City
-GROUND 140b16
-RESET
-PLACE street 0 0
-PLACE barricade 3 -1
-PLACE bonepillar -3 -2
-ACTOR nilou 0 0
-ACTOR i1 3 -2
-ACTOR i2 4 -1
-ACTOR i3 4 -2
-ACTOR i4 5 -1
-ACTOR i5 5 -2
-ACTOR i6 6 -1
-SAY i1 A lieutenant! She wears the marks! Take her alive — Mordethail wants the officers breathing!
+ZONE city_barricade 44 6 5
+GATE city_barricade city_open
+ON_ENTER city_barricade
+SAY Carrion Infantry Leader A lieutenant! She wears the marks! Take her alive - Mordethail wants the officers breathing!
 SAY NilouZila Come and try.
+SPAWN infantry 42 4
+SPAWN infantry 43 5
+SPAWN infantry 43 7
+SPAWN infantry 44 3
+SPAWN infantry 45 8
+SPAWN infantry 46 5
+SPAWN beast 48 6
 SAY NilouZila Shield wall means they'll be tight. Tight means slow. Slow means I can be faster.
-SAY NilouZila But first — the beast.
-ACTION shake
-ACTION shake
-FIGHT 6
-ACTION slash 4 -1
-ACTION blood 4 -1
-SAY NilouZila Same trick twice? Really?
-ACTION flash2
-ACTION shake
-SAY NilouZila Oh, come on—
-ACTION slash 3 -2
-ACTION blood 3 -2
-HIDE i1
-ACTION slash 4 -2
-ACTION blood 4 -2
-HIDE i2
-ACTION slash 5 -1
-ACTION blood 5 -1
-HIDE i3
-ACTION slash 5 -2
-ACTION blood 5 -2
-HIDE i4
-ACTION slash 6 -1
-ACTION blood 6 -1
-HIDE i5
-HIDE i6
+SAY NilouZila But first - the beast.
+FIGHT 7
 SAY NilouZila Seven. That's seven. I need to keep moving.
 SAY NilouZila I'm coming, mistress.
+SETFLAG courtyard_open
 
-# ============ SCENE 4: THE COURTYARD OF BONES ============
-NAME The Courtyard of Bones
-GROUND 10081a
-RESET
-PLACE bonepillar -3 -2
-PLACE bonepillar 5 -3
-PLACE bones 2 2
-ACTOR nilou 0 0
-ACTOR vel 7 -2 hidden
+ZONE courtyard_arrival 62 4 6
+GATE courtyard_arrival courtyard_open
+ON_ENTER courtyard_arrival
 SAY NilouZila There she is. My goddess. Four hundred years, and she still takes my breath away.
 SAY NilouZila Even like this. Especially like this.
 SAY NilouZila Focus. Move.
-ACTOR d1 2 -1
-ACTOR d2 3 0
-ACTOR d3 2 1
-ACTOR d4 4 0
-FIGHT 4
-ACTION slash 2 -1
-ACTION blood 2 -1
-HIDE d1
-ACTION slash 3 0
-ACTION blood 3 0
-HIDE d2
-ACTION slash 2 1
-ACTION blood 2 1
-HIDE d3
-ACTION slash 4 0
-ACTION blood 4 0
-HIDE d4
+SPAWN skirmisher 64 2
+SPAWN skirmisher 66 3
+SPAWN brute 65 6
+SPAWN brute 67 5
+SPAWN caster 68 3
+SPAWN caster 68 5
 SAY NilouZila Well? Who's next?
-ACTION flash2
-ACTION shake
+FIGHT 12
 SAY NilouZila Twelve. That's... that's twelve in the courtyard alone. And there are hundreds more.
-SHOW vel
 SAY NilouZila Mistress!
-WALK nilou 5 -1
+SETFLAG reunion_open
 
-# ============ SCENE 5: REUNION AT THE CENTER ============
-NAME Reunion at the Center
-GROUND 10081a
-RESET
-PLACE bonepillar -3 -3
-PLACE bones 4 2
-ACTOR nilou 4 0
-ACTOR vel 5 -1
+ZONE reunion 66 4 3
+GATE reunion reunion_open
+ON_ENTER reunion
+SPAWN velkarya 67 4
 SAY NilouZila Mistress. I'm here.
-SAY vel You should have fled.
+SAY Velkarya NilouZila. You should have fled.
 SAY NilouZila I didn't come this far to flee.
-SAY vel You came this far to die with me?
+SAY Velkarya You came this far to die with me?
 SAY NilouZila If that's what it takes. But I'd prefer we both live.
 SAY NilouZila You're showing your true form.
-SAY vel I no longer have the strength to hide it.
-SAY NilouZila I've always known what you look like. Beneath the illusion. I've served you for four centuries — did you think I didn't know?
-SAY vel You knew.
+SAY Velkarya I no longer have the strength to hide it.
+SAY NilouZila I've always known what you look like. Beneath the illusion. I've served you for four centuries - did you think I didn't know?
+SAY Velkarya You knew.
 SAY NilouZila I knew. And I stayed.
-SAY vel Why?
+SAY Velkarya Why?
 SAY NilouZila Because you gave me purpose. I was nothing before you found me. A wraith crawling through the Pit, eating scraps, barely sentient. You pulled me out. You shaped me. You gave me a name.
-SAY vel I gave you a chain.
+SAY Velkarya I gave you a chain.
 SAY NilouZila You gave me a chain, yes. But the chain had weight. It meant I belonged to something. Someone.
-ACTION flash2
-ACTION shake
+ACTION shake 700
 SAY NilouZila We need to move. Now.
-SAY vel I cannot move. I've been holding this courtyard for three days, NilouZila. Three days without rest, without replenishment. Every enemy I destroy, two more take its place. My power is bleeding out of me like an open wound.
+SAY Velkarya I cannot move. I've been holding this courtyard for three days, NilouZila. Three days without rest, without replenishment. Every enemy I destroy, two more take its place. My power is bleeding out of me like an open wound.
 SAY NilouZila Then let me carry you.
-SAY vel You cannot carry a goddess.
+SAY Velkarya You cannot carry a goddess.
 SAY NilouZila Then let me hold the line while you rest.
-SAY vel You never did know when to stop.
+SAY Velkarya You never did know when to stop.
+SETFLAG second_wave_open
 
-# ============ SCENE 6: THE SECOND WAVE ============
-NAME The Second Wave
-GROUND 10081a
-RESET
-PLACE bonepillar -3 -2
-PLACE barricade 6 0
-ACTOR nilou 3 0
-ACTOR vel 4 -1
-ACTOR e1 5 0
-ACTOR e2 5 1
-ACTOR e3 6 0
+ZONE second_wave 66 4 3
+GATE second_wave second_wave_open
+ON_ENTER second_wave
 SAY NilouZila Three days. You held this courtyard for three days alone.
-SAY vel Go, NilouZila. While you still can.
+SAY Velkarya Go, NilouZila. While you still can.
 SAY NilouZila No.
-SAY vel That is an order.
+SAY Velkarya That is an order.
 SAY NilouZila Then punish me. If we survive this, punish me for a thousand years. I'll accept it. But I'm not leaving you here.
 SAY NilouZila COME ON! ALL OF YOU!
-ACTION shake
-FIGHT 3
-ACTION slash 5 0
-ACTION blood 5 0
+SPAWN elite 63 2
+SPAWN elite 63 6
+SPAWN elite 62 4
+SPAWN fodder 61 3
+SPAWN fodder 61 5
+SPAWN fodder 62 2
+SPAWN fodder 62 6
+FIGHT 7
+REINFORCE 20
 SAY NilouZila Enchanted weapons. Lovely.
-ACTION slash 5 1
-ACTION blood 5 1
 SAY NilouZila Two more. Just two more.
-ACTION shake
-ACTION blood 3 1
 SAY NilouZila Get up. Get UP.
-ACTION flash
-ACTION slash 6 0
-ACTION blood 6 0
-HIDE e1
-HIDE e2
-HIDE e3
+ACTION flash 600
+ACTION decal greenfire
 SAY NilouZila Mistress...
-SAY vel I told you to run.
+SAY Velkarya I told you to run.
 SAY NilouZila And I told you no.
+SETFLAG velkarya_final_open
 
-# ============ SCENE 7: VELKARYA'S LAST ACT ============
-NAME Velkarya's Last Act
-GROUND 10081a
-RESET
-PLACE bonepillar -2 -3
-PLACE bones 5 2
-ACTOR nilou 3 0
-ACTOR vel 4 -1
-SAY vel They're coming. All of them. I can feel them — Mordethail himself is approaching. He's brought his Phalanx of Ruin. Six hundred of his finest.
+ZONE velkarya_final 67 4 2
+GATE velkarya_final velkarya_final_open
+WAIT_FLAG courtyard_cleared
+ON_ENTER velkarya_final
+SAY Velkarya They're coming. All of them. I can feel them - Mordethail himself is approaching. He's brought his Phalanx of Ruin. Six hundred of his finest.
 SAY NilouZila Six hundred?
-SAY vel And behind them, every minor lord and gutter-fiend who ever feared me. They smell blood. My blood.
-SAY vel I am going to show them why they feared me.
-SAY NilouZila What are you—
-SAY vel I am going to release everything I have left. All of it. Every scrap of power I've accumulated over ten thousand years. In one moment.
+SAY Velkarya And behind them, every minor lord and gutter-fiend who ever feared me. They smell blood. My blood.
+SAY Velkarya I am going to show them why they feared me.
+SAY NilouZila What are you-
+SAY Velkarya I am going to release everything I have left. All of it. Every scrap of power I've accumulated over ten thousand years. In one moment.
 SAY NilouZila That will kill you.
-SAY vel Yes.
+SAY Velkarya Yes.
 SAY NilouZila No. There has to be another way.
-SAY vel There isn't. I've held this city for three days with the last threads of my power. What's coming will sweep through in minutes. When I fall — and I will fall — they will take my essence. My power. My knowledge. Everything I am will become Mordethail's prize.
-SAY vel I will not let that happen. I will burn so brightly that they will remember me for another ten thousand years. I will make them afraid again.
+SAY Velkarya There isn't. I've held this city for three days with the last threads of my power. What's coming will sweep through in minutes. When I fall - and I will fall - they will take my essence. My power. My knowledge. Everything I am will become Mordethail's prize.
+SAY Velkarya I will not let that happen. I will burn so brightly that they will remember me for another ten thousand years. I will make them afraid again.
 SAY NilouZila And what about me?
-SAY vel You will run.
-SAY NilouZila I won't—
-SAY vel You WILL. Because I am ordering it. Because it is the last thing I will ever ask of you. And because—
-SAY vel Because you deserve to live, NilouZila. You always did.
+SAY Velkarya You will run.
+SAY NilouZila I won't-
+SAY Velkarya You WILL. Because I am ordering it. Because it is the last thing I will ever ask of you. And because-
+SAY Velkarya Because you deserve to live, NilouZila. You always did.
 SAY NilouZila Don't do this. Don't you dare do this. I didn't serve you for four hundred years just to watch you burn yourself to nothing.
-SAY vel Four hundred years. And in all that time, you never once asked me for freedom.
+SAY Velkarya Four hundred years. And in all that time, you never once asked me for freedom.
 SAY NilouZila I didn't want freedom.
-SAY vel I know. That's what made you valuable.
-SAY vel And that's what makes this necessary.
-SAY vel I made you, NilouZila. From nothing. From the dark. I shaped you into something fierce and loyal and proud. I will not unmake that by letting you die here for a goddess who is already finished.
+SAY Velkarya I know. That's what made you valuable.
+SAY Velkarya And that's what makes this necessary.
+SAY Velkarya I made you, NilouZila. From nothing. From the dark. I shaped you into something fierce and loyal and proud. I will not unmake that by letting you die here for a goddess who is already finished.
 SAY NilouZila You're not finished.
-SAY vel I have been finished since the siege began. Everything since then has been... refusal. Stubbornness. Perhaps even pride.
-SAY vel I learned that from you, I think.
-ACTION shake
-SAY vel They're here.
-SAY vel I am going to channel every remaining ounce of my essence into a single detonation. It will destroy everything within the city walls — and possibly beyond. You need to be outside the walls when it happens.
+SAY Velkarya I have been finished since the siege began. Everything since then has been... refusal. Stubbornness. Perhaps even pride.
+SAY Velkarya I learned that from you, I think.
+ACTION shake 500
+SAY Velkarya They're here.
+SAY Velkarya I am going to channel every remaining ounce of my essence into a single detonation. It will destroy everything within the city walls - and possibly beyond. You need to be outside the walls when it happens.
 SAY NilouZila How long do I have?
-SAY vel Minutes. Perhaps less.
+SAY Velkarya Minutes. Perhaps less.
 SAY NilouZila That's not enough time to reach the outer gates.
-SAY vel There is a fracture point in the eastern wall. The section the war-beasts breached. If you move now — without stopping, without looking back — you can make it.
+SAY Velkarya There is a fracture point in the eastern wall. The section the war-beasts breached. If you move now - without stopping, without looking back - you can make it.
 SAY NilouZila Without looking back.
-SAY vel Without looking back.
+SAY Velkarya Without looking back.
 SAY NilouZila I don't want to go.
-SAY vel I know.
-SAY vel Live, NilouZila. Not for me. Not for revenge. For yourself. Find out who you are when you're not kneeling.
-SAY vel Now GO.
-SAY NilouZila I will remember you. Every day. For as long as I exist. I will remember you.
-SAY vel I know.
+SAY Velkarya I know.
+SAY Velkarya Live, NilouZila. Not for me. Not for revenge. For yourself. Find out who you are when you're not kneeling.
+SAY Velkarya Now GO.
+ACTION shake 1200
+SETFLAG run_open
 
-# ============ SCENE 8: THE RUN ============
-NAME The Run
-GROUND 0a0608
-RESET
-CRACK -3 -1 0 2
-CRACK 1 0 4 2
-CRACK -1 3 2 4
-PLACE rubble -4 2
-ACTOR nilou 0 0
-ACTION flash
-ACTION shake
+ZONE the_run 74 4 4
+GATE the_run run_open
+ON_ENTER the_run
 SAY NilouZila She's doing it. She's really doing it.
+ACTION flash 2000
+ACTION shake 1600
 SAY NilouZila No... no, no, no...
+ACTION shake 2200
 SAY NilouZila She's gone.
 SAY NilouZila She's really gone.
 SAY NilouZila I'm... free.
 SAY NilouZila She said to find out who I am when I'm not kneeling.
 SAY NilouZila I don't know.
+SETFLAG ending_open
+
+ZONE the_crater 84 4 6
+GATE the_crater ending_open
+ON_ENTER the_crater
+CAM_LOOK 88 4 6000
 SAY NilouZila I will remember you. I said I would. And I will.
 SAY NilouZila Every day. For as long as I exist.
-WALK nilou 5 1
+ACTION flash 4000
+VICTORY
