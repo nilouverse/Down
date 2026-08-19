@@ -34,6 +34,7 @@ public class StoryWorld {
     private StoryWorld(Context c, Sound s) {
         ctx = c.getApplicationContext();
         sound = s;
+        sceneMap.init(ctx);
         Thread loader = new Thread(new Runnable() { public void run() {
             parse();
             loaded = true;
