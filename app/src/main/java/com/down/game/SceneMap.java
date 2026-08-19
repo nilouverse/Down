@@ -1,5 +1,6 @@
 package com.down.game;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -53,6 +54,7 @@ public class SceneMap {
     private final RectF dstRect = new RectF();
     private static Frame[] smallPropFrames, largePropFrames;
     private final int[] hexOut = new int[2];
+    private Context ctx;
 
     public SceneMap() {
         bgPaint.setFilterBitmap(true);
@@ -60,6 +62,10 @@ public class SceneMap {
         crackPaint.setStyle(Paint.Style.STROKE);
         crackPaint.setStrokeCap(Paint.Cap.ROUND);
         crackPaint.setStrokeJoin(Paint.Join.ROUND);
+    }
+
+    public void init(Context c) {
+        ctx = c;
     }
 
     public void begin(String name, int ground) {
@@ -294,17 +300,41 @@ public class SceneMap {
     private float worldToBitmapX(float wx) { return (wx - worldMinX) * pxPerWorld; }
     private float worldToBitmapY(float wy) { return (wy - worldMinY) * pxPerWorld; }
 
-    private static Frame[] getSmallProps() {
-        if (smallPropFrames == null) smallPropFrames = Sprites.cutSheet("sprites/props.png", 2, 4, 4);
+    private Frame[] getSmallProps() {
+        if (smallPropFrames == null && ctx != null) {
+            java.util.List<Bitmap> bms = Sprites.trimBottom(
+                    Sprites.cutSheet(ctx, "sprites/props.png", 2, 4, 4), 0.9f);
+            smallPropFrames = new Frame[bms.size()];
+            for (int i = 0; i < bms.size(); i++) {
+                smallPropFrames[i] = wrapFrame(bms.get(i));
+            }
+        }
         return smallPropFrames;
     }
 
-    private static Frame[] getLargeProps() {
-        if (largePropFrames == null) largePropFrames = Sprites.cutSheet("sprites/props2.png", 2, 4, 4);
+    private Frame[] getLargeProps() {
+        if (largePropFrames == null && ctx != null) {
+            java.util.List<Bitmap> bms = Sprites.trimBottom(
+                    Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
+            largePropFrames = new Frame[bms.size()];
+            for (int i = 0; i < bms.size(); i++) {
+                largePropFrames[i] = wrapFrame(bms.get(i));
+            }
+        }
         return largePropFrames;
     }
 
-    private static Frame getPropFrame(String type) {
+    private static Frame wrapFrame(Bitmap b) {
+        Frame f = new Frame();
+        f.bmp = b;
+        f.top = 0; f.left = 0;
+        f.cw = b.getWidth(); f.ch = b.getHeight();
+        f.rgt = f.cw; f.ww = f.cw;
+        f.ref = f.ch;
+        return f;
+    }
+
+    private Frame getPropFrame(String type) {
         int idx;
         switch (type) {
             case "spire": idx = 0; break;
@@ -318,10 +348,10 @@ public class SceneMap {
         }
         if ("spire".equals(type) || "wall".equals(type) || "bonepillar".equals(type) || "barricade".equals(type)) {
             Frame[] lp = getLargeProps();
-            return lp[idx % lp.length];
+            return lp != null ? lp[idx % lp.length] : null;
         }
         Frame[] sp = getSmallProps();
-        return sp[idx % sp.length];
+        return sp != null ? sp[idx % sp.length] : null;
     }
 
     private static boolean isBlocking(String type) {
