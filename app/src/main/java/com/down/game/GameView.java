@@ -1,6 +1,5 @@
 package com.down.game;
 
-import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -59,7 +58,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static final String[] LOAD_LINES = {
             "tuning the strings…", "warming the tubes…", "dropping the needle…" };
 
-    // precomputed tinted hex bitmaps (B2) — palette of 5 colors used by rings
+    // precomputed tinted hex bitmaps (B2)
     private static final int[] HEX_PAL = { 0xAAefe6dd, 0xFFefe6dd, 0x14efe6dd, 0x22efe6dd, 0xFF34e3d6 };
     private Bitmap[] hexTinted;
 
@@ -83,6 +82,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     // camera zoom punch (D4)
     private float zoomPunch = 0f;
+
+    private String lastSceneName = "";
+    private float[] encX = new float[8];
+    private float[] encY = new float[8];
+    private int encounterN = 0;
 
     private static final int[][] ATK_SEQ = {
             { 0, 1, 2, 3, 4, 9, 5 },
@@ -120,6 +124,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private boolean moved, panning;
     private boolean pinching;
     private float pinchDist0, pinchZoom0;
+    private float pinchCX, pinchCY;
     private float velX, velY, flingX, flingY;
     private long lastMoveT;
 
@@ -158,7 +163,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private int phase = PH_PLAYER;
     private float phaseT = 0;
-    private int ei = 0;
 
     private final ArrayList<Enemy> enemies = new ArrayList<>();
     private final HashMap<Long, Integer> flow = new HashMap<>();
@@ -167,7 +171,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static class Dmg { float x, y, t; int val; int col; String txt; boolean active; }
     private final Dmg[] dmgPool = new Dmg[30];
 
-    private static class D { float y; int kind; Enemy en; Player pl; Bitmap pr; float ax, ay, s; }
+    private static class D { float y; int kind; Enemy en; Player pl; Bitmap pr; float ax, ay, s; Object obj; }
     private final ArrayList<D> drawList = new ArrayList<>();
     private final ArrayList<D> dPool = new ArrayList<>();
     private static final Comparator<D> BY_Y = new Comparator<D>() {
@@ -211,24 +215,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hapticTiered(1);
         }
     };
-
-    // E3: tiered haptics — 0 light, 1 medium, 2 heavy
-    private void hapticTiered(int tier) {
-        try {
-            if (Build.VERSION.SDK_INT >= 26) {
-                android.os.Vibrator v = (android.os.Vibrator)
-                        getContext().getSystemService(Context.VIBRATOR_SERVICE);
-                if (v == null) return;
-                long[] pat; int[] amp;
-                if (tier >= 2) { pat = new long[]{0, 55}; amp = new int[]{0, 255}; }
-                else if (tier == 1) { pat = new long[]{0, 30}; amp = new int[]{0, 160}; }
-                else              { pat = new long[]{0, 18}; amp = new int[]{0, 90}; }
-                v.vibrate(android.os.VibrationEffect.createWaveform(pat, amp, -1));
-            } else {
-                performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
-            }
-        } catch (Exception ignored) {}
-    }
 
     private final Hero[] roster = new Hero[] { new NilouZila(), new Vex() };
     private Bitmap menuBg, keyBmp, coinBmp;
@@ -375,6 +361,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 "fonts/InstrumentSerif-Italic.ttf"); } catch (Exception e) { fSerif = Typeface.DEFAULT; }
     }
 
+    private static Frame wrapFrame(Bitmap b) {
+        Frame f = new Frame();
+        f.bmp = b;
+        f.top = 0; f.left = 0;
+        f.cw = b.getWidth(); f.ch = b.getHeight();
+        f.rgt = f.cw; f.ww = f.cw;
+        f.ref = f.ch;
+        return f;
+    }
+
     private void applyAssets() {
         AssetBundle b = pending;
         pending = null;
@@ -383,10 +379,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         eIdleFr.addAll(b.eIdle); eGlideFr.addAll(b.eGlide); eAtkFr.addAll(b.eAtk);
         props = b.props; props2 = b.props2;
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
+
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
 
-        // B2: precompute palette of tinted hex bitmaps once (no more HashMap per frame)
+        // B2: precompute palette of tinted hex bitmaps once
         if (hexTinted == null && hexBmp != null) {
             hexTinted = new Bitmap[HEX_PAL.length];
             for (int i = 0; i < HEX_PAL.length; i++) {
@@ -459,6 +456,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         gameOverlay = Bitmap.createBitmap(w2, h2, Bitmap.Config.ARGB_8888);
         Canvas goc = new Canvas(gameOverlay);
+        goc.drawColor(0);
         p.setShader(new RadialGradient(w2 / 2f, h2 / 2f, Math.max(w2, h2) * 0.75f,
                 0x00000000, 0x6A000000, Shader.TileMode.CLAMP));
         goc.drawRect(0, 0, w2, h2, p);
@@ -479,7 +477,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
 
-        // E1: procedural parallax treeline strip, generated once per size change
+        // E1: procedural parallax treeline strip
         if (treeStrip == null || treeStrip.getWidth() != W) {
             if (treeStrip != null && !treeStrip.isRecycled()) treeStrip.recycle();
             int th = Math.max(40, H / 6);
@@ -487,21 +485,23 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             Canvas tc = new Canvas(treeStrip);
             Paint tp = new Paint();
             tp.setColor(0xFF040209);
-            Path tp_path = new Path();
-            tp_path.moveTo(0, th);
+            Path tpPath = new Path();
+            tpPath.moveTo(0, th);
             float px = 0;
             java.util.Random pr = new java.util.Random(42);
             while (px < W) {
                 float peakH = 8 + pr.nextInt(th - 12);
-                tp_path.lineTo(px, th - peakH);
+                tpPath.lineTo(px, th - peakH);
                 px += 6 + pr.nextInt(18);
-                tp_path.lineTo(px, th - 2 - pr.nextInt(8));
+                tpPath.lineTo(px, th - 2 - pr.nextInt(8));
                 px += 4 + pr.nextInt(12);
             }
-            tp_path.lineTo(W, th);
-            tp_path.close();
-            tc.drawPath(tp_path, tp);
+            tpPath.lineTo(W, th);
+            tpPath.close();
+            tc.drawPath(tpPath, tp);
         }
+
+        if (storyMode && story != null) sw().build(W, H, quality);
     }
 
     @Override
@@ -630,7 +630,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private boolean storyWalkHex(int q, int r) {
         if (!storyMode || story == null) return true;
         hexToWorld(q, r, HO_F);
-        return story.isWalkable(HO_F[0], HO_F[1]);
+        return StoryWorld.sceneWalkable(HO_F[0], HO_F[1]);
     }
 
     private boolean hexFree(int q, int r, Enemy self) {
@@ -715,6 +715,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Decal dcl : decalPool) dcl.active = false;
         for (Slash s : slashPool) s.active = false;
         camSnap = false;
+        encounterN = 0;
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
     }
@@ -952,6 +953,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 en.pathY[en.pathLen] = FW_A[1];
                 en.pathLen++;
             }
+            if (en.pathLen > 0) en.intent = 2;
             reserved.add(hexKey(cq, cr));
         } else {
             float dx = tgt.x - en.x, dy = tgt.y - en.y;
@@ -966,6 +968,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         en.pathX[en.pathLen] = FW_A[0];
                         en.pathY[en.pathLen] = FW_A[1];
                         en.pathLen++;
+                        en.intent = 2;
                         reserved.add(k);
                         break;
                     }
@@ -1030,6 +1033,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Slash s : slashPool) s.active = false;
         for (Decal dcl : decalPool) dcl.active = false;
         camSnap = false;
+        encounterN = 0;
         state = STATE_GAME;
         startPlayerTurn();
         story.start();
@@ -1087,21 +1091,35 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Decal dcl : decalPool) dcl.active = false;
         camSnap = false;
         enemies.clear();
-        for (int i = 0; i < n; i++) spawnStoryEnemy();
+
+        // M3 bridge: convert visible enemy actors into real enemies
+        int spawned = 0;
+        for (int i = 0; i < sw().getActors().size(); i++) {
+            SceneActor a = sw().getActors().get(i);
+            if (!a.hidden && StoryWorld.isEnemyActor(a.type)) {
+                Enemy e = new Enemy();
+                e.x = a.x; e.y = a.y;
+                enemies.add(e);
+                if (spawned < encX.length) { encX[spawned] = a.x; encY[spawned] = a.y; }
+                spawned++;
+            }
+        }
+        sw().clearEnemyActors();
+        encounterN = spawned;
+        if (enemies.isEmpty()) {
+            if (encounterN > 0) {
+                for (int i = 0; i < encounterN && i < encX.length; i++) {
+                    Enemy e = new Enemy();
+                    e.x = encX[i]; e.y = encY[i];
+                    enemies.add(e);
+                }
+            } else {
+                for (int i = 0; i < n; i++) spawnStoryEnemy();
+            }
+        }
+        fanDirty = true;
         state = STATE_GAME;
         startPlayerTurn();
-    }
-
-    private void processStoryAction(String act) {
-        if (act.startsWith("ACTION shake")) shakeT = 0.2f;
-        else if (act.startsWith("ACTION flash")) hurtT = 0.15f;
-        else if (act.startsWith("ACTION slash")) {
-            spawnSlash(player.x + player.facing * 60, player.y);
-            sound.play("hit");
-        }
-        else if (act.startsWith("ACTION blood")) {
-            spawnDecal(player.x + player.facing * 60, player.y);
-        }
     }
 
     private void spawnStoryEnemy() {
@@ -1110,13 +1128,60 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float d = HEX * (4 + (float) (Math.random() * 3));
             float x = player.x + (float) Math.cos(a) * d;
             float y = player.y + (float) Math.sin(a) * d;
-            if (!story.isWalkable(x, y)) continue;
+            if (!StoryWorld.sceneWalkable(x, y)) continue;
             worldToHex(x, y, IH_A);
             if (!hexFree(IH_A[0], IH_A[1], null)) continue;
             hexToWorld(IH_A[0], IH_A[1], FW_A);
             Enemy e = new Enemy();
             e.x = FW_A[0]; e.y = FW_A[1];
             enemies.add(e);
+            return;
+        }
+    }
+
+    private static int pi(String s) {
+        try { return Integer.parseInt(s); } catch (Exception e) { return 0; }
+    }
+
+    private StoryWorld storyWorld;
+    private StoryWorld sw() {
+        if (storyWorld == null) storyWorld = StoryWorld.get(getContext(), sound);
+        return storyWorld;
+    }
+    private int storyEnemiesAlive() {
+        return enemies == null ? 0 : enemies.size();
+    }
+    private void storySpawnEncounter() {
+        int n = sw().encounterCount();
+        for (int i = 0; i < n; i++) {
+            int[] h = sw().encounterHex(i);
+            float wx = SceneMap.hexX(h[0], h[1]);
+            float wy = SceneMap.hexY(h[0], h[1]);
+            Enemy e = new Enemy();
+            e.x = wx; e.y = wy;
+            enemies.add(e);
+        }
+        fanDirty = true;
+    }
+
+    private void processStoryAction(String act) {
+        if (sw().filterAction(act)) return;
+        if (act.startsWith("ACTION shake")) { shakeT = 0.2f; return; }
+        if (act.startsWith("ACTION flash")) { hurtT = 0.15f; return; }
+        if (act.startsWith("ACTION slash")) {
+            sw().resolveActionPoint(act, player.x + player.facing * 60, player.y);
+            spawnSlash(sw().pt[0], sw().pt[1]);
+            sound.play("hit");
+            return;
+        }
+        if (act.startsWith("ACTION blood")) {
+            sw().resolveActionPoint(act, player.x + player.facing * 60, player.y);
+            spawnDecal(sw().pt[0], sw().pt[1]);
+            return;
+        }
+        if (act.startsWith("SHOW ") || act.startsWith("HIDE ") || act.startsWith("WALK ")
+                || act.startsWith("EXIT ") || act.startsWith("ACTOR ")) {
+            sw().npcCommand(act);
             return;
         }
     }
@@ -1137,13 +1202,50 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (storyMode && story != null && state == STATE_GAME) {
             story.update(dt);
+            sw().update(dt);
             if (story.quitRequested || story.ended) {
                 story = null; storyMode = false; storyFight = false; state = STATE_MENU; return;
             }
             if (story.fightRequest > 0) beginStoryFight();
-            
+
             String act;
             while ((act = story.pollAction()) != null) processStoryAction(act);
+
+            sw().tick(story);
+
+            if (storyMode && story.fightRequest > 0) {
+                story.fightRequest = 0;
+                if (sw().openEncounter()) {
+                    storyFight = true;
+                    sound.play("turn");
+                    storySpawnEncounter();
+                }
+            }
+            if (storyFight && sw().encounterOpen()) {
+                if (storyEnemiesAlive() == 0) {
+                    storyFight = false;
+                    sw().closeEncounter(true);
+                    story.fightWon();
+                } else if (deadT > 0) {
+                    storyFight = false;
+                    shClearEnemies();
+                    sw().closeEncounter(false);
+                    story.fightLost();
+                    player.hp = 100;
+                    player.actionsLeft = 2;
+                    deadT = 0;
+                    phase = PH_PLAYER;
+                }
+            }
+
+            if (sw().takeSceneEvent()) {
+                shClearEnemies();
+                storyFight = false;
+                camX = sw().snapX;
+                camY = sw().snapY;
+                camSnap = true;
+                fanDirty = true;
+            }
 
             if (story.hasObjective && !player.isMoving()) {
                 worldToHex(player.x, player.y, IH_A);
@@ -1210,7 +1312,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         phaseT += dt;
         if (hurtT > 0) hurtT -= dt;
         float dockTarget = (phase == PH_PLAYER && deadT <= 0
-                && !(storyMode && !storyFight)) ? 1 : 0;
+                && !(storyMode && !storyFight && !sw().encounterLive())) ? 1 : 0;
         dockSlide += (dockTarget - dockSlide) * (1 - (float) Math.exp(-dt * 10));
         for (Player p : party) p.update(dt);
         if (zoomPunch > 0) zoomPunch = Math.max(0, zoomPunch - dt * 3f);
@@ -1229,9 +1331,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (exploreT > 6 || player.isMoving()) exploring = false;
         }
         float fx = player.x, fy = player.y;
-        if (phase == PH_ENEMY && ei < enemies.size()) {
-            Enemy ae = enemies.get(ei);
-            if (!ae.dead) {
+        if (phase == PH_ENEMY) {
+            Enemy ae = null;
+            for (Enemy en2 : enemies) {
+                if (!en2.dead && !en2.acted) { ae = en2; break; }
+            }
+            if (ae != null) {
                 worldToHex(player.x, player.y, IH_A);
                 worldToHex(ae.x, ae.y, IH_B);
                 if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= 8
@@ -1285,7 +1390,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             } else if (ev == Hero.EV_STRIKE) {
                 hitstopT = 0.05f;
                 shakeT = 0.15f;
-                zoomPunch = 0.06f; // D4: camera zoom punch
+                zoomPunch = 0.06f;
                 if (h.target != null && !h.target.dead) {
                     spawnSlash(h.target.x, h.target.y);
                     hurtEnemy(h.target, atk.dmg);
@@ -1298,7 +1403,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             } else if (ev == Hero.EV_AOE) {
                 spawnBlast(player.x, player.y);
                 shakeT = 0.15f;
-                zoomPunch = 0.10f; // D4: stronger punch on nova
+                zoomPunch = 0.10f;
                 worldToHex(player.x, player.y, IH_A);
                 for (Enemy en : enemies) {
                     if (en.dead) continue;
@@ -1364,7 +1469,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (active != null) {
                 if (!active.planned) {
                     planEnemy(active);
-                    // C2: compute intent telegraph for next-turn display
                     if (active.attacksPlanned > 0) active.intent = 1;
                     else if (active.pathLen > 0) active.intent = 2;
                 }
@@ -1386,7 +1490,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -10);
                         sound.play("hurt");
                         sound.play(tgt.hero.voice + "_hurt");
-                        hapticTiered(2); // E3: medium tap
+                        post(hapticRun);
                         if (tgt.hp <= 30 && !tgt.cried) {
                             tgt.cried = true;
                             sound.play(tgt.hero.voice + "_wounded");
@@ -1424,7 +1528,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (d.t > 0.8f) d.active = false;
         }
     }
-
     private void draw() {
         SurfaceHolder h = getHolder();
         if (!h.getSurface().isValid()) return;
@@ -1443,6 +1546,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private float sx(float wx) { return (wx - camX + shakeX) * (zoom + zoomPunch) + W / 2f; }
     private float sy(float wy) { return (wy - camY + shakeY) * (zoom + zoomPunch) + H / 2f; }
+
+    private Shader titleShader;
+    private int titleShaderW = -1, titleShaderH = -1;
 
     private void drawMenu(Canvas cv) {
         if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
@@ -1473,9 +1579,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setTextSize(ts);
         paint.setFakeBoldText(true);
         paint.setTypeface(fLogo);
-        paint.setShader(new LinearGradient(0, H * 0.30f - ts, 0, H * 0.30f + ts * 0.3f,
-                new int[] { 0xFFffffff, C_BONE, 0xFFd9c6bb, C_BRIGHT },
-                new float[] { 0f, 0.42f, 0.68f, 1f }, Shader.TileMode.CLAMP));
+        if (titleShader == null || titleShaderW != W || titleShaderH != H) {
+            titleShaderW = W; titleShaderH = H;
+            titleShader = new LinearGradient(0, H * 0.30f - ts, 0, H * 0.30f + ts * 0.3f,
+                    new int[] { 0xFFffffff, C_BONE, 0xFFd9c6bb, C_BRIGHT },
+                    new float[] { 0f, 0.42f, 0.68f, 1f }, Shader.TileMode.CLAMP);
+        }
+        paint.setShader(titleShader);
         cv.drawText("DOWN", W / 2f, H * 0.30f, paint);
         paint.setShader(null);
         paint.setFakeBoldText(false);
@@ -1682,7 +1792,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 int h = (px * 40503) ^ (py * 66827);
                 if (((h >>> 4) & 7) != 0) continue;
                 float cxw = px * TILE * 2 + TILE * (0.3f + ((h >>> 7) & 127) / 127f * 1.4f);
-                float cyw = py * TH * 2 + TH * (0.3f + ((h >>> 11) & 127) / 127f * 1.4f);
+                float cyw = py * TH * 2 + TH * (0.3f + ((h >>> 11) & 31) / 127f * 1.4f);
                 if (Math.abs(cyw / TH - roadCenterF(cxw / TILE)) < 1.0f) continue;
                 float rw = (50 + ((h >>> 15) & 63)) * zoom;
                 float rh = rw * SQUASH * (0.6f + ((h >>> 21) & 31) / 31f * 0.5f);
@@ -1744,6 +1854,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
 
+        if (storyMode) {
+            ArrayList<Object> sd = sw().getSortedDrawables();
+            for (int i = 0; i < sd.size(); i++) {
+                D d = obtainD();
+                d.kind = 3;
+                d.obj = sd.get(i);
+                d.y = sw().drawableY(sd.get(i));
+                drawList.add(d);
+            }
+        }
+
         for (Player pp : party) { D p = obtainD(); p.kind = 1; p.pl = pp; p.y = pp.y; drawList.add(p); }
         for (Enemy en : enemies) { D d = obtainD(); d.kind = 2; d.en = en; d.y = en.y; drawList.add(d); }
 
@@ -1751,7 +1872,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (D d : drawList) {
             if (d.kind == 0) drawProp(cv, d);
             else if (d.kind == 1) drawPlayer(cv, d.pl);
-            else drawEnemy(cv, d.en);
+            else if (d.kind == 2) drawEnemy(cv, d.en);
+            else sw().drawDrawable(cv, d.obj, camX, camY, zoom, W, H, loadT);
         }
     }
 
@@ -1764,7 +1886,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private int palIdx(int col) {
-        // snap to nearest palette entry — covers all 5 colors used by rings
         if (col == 0xAAefe6dd) return 0;
         if (col == 0xFFefe6dd) return 1;
         if (col == 0x14efe6dd) return 2;
@@ -1852,7 +1973,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (fanDirty || fanQ != IH_A[0] || fanR != IH_A[1] || fanMoveMax != player.hero.moveMax) {
             rebuildFan();
         }
-        // D5: subtle pulse
         int baseAlpha = 170 + (int) (85 * (float) Math.sin(loadT * 6f));
         paint.setAlpha(baseAlpha);
         for (int i = 0; i < fanN; i++) {
@@ -2096,7 +2216,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             rf.right = rf.left + bw * (en.hp / (float)en.maxHp);
             paint.setColor(C_BLOOD); cv.drawRoundRect(rf, 4, 4, paint);
 
-            // C2: intent telegraph — small glyph above the HP bar
+            // C2: intent telegraph
             if (en.intent == 1) {
                 paint.setColor(C_BRIGHT);
                 paint.setAlpha(200 + (int) (55 * (float) Math.sin(en.animT * 8f)));
@@ -2156,7 +2276,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float scale;
             if (d.t < 0.09f) {
                 float k2 = d.t / 0.09f;
-                scale = 1.3f - 0.3f * k2; // 1.3 → 1.0
+                scale = 1.3f - 0.3f * k2;
             } else {
                 scale = 1f;
             }
@@ -2176,22 +2296,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void drawGame(Canvas cv) {
         cv.drawColor(GROUND_COL);
 
-        drawGround(cv);
+        if (storyMode && story != null) {
+            sw().drawWorld(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, quality, loadT);
+        } else {
+            drawGround(cv);
+        }
 
         if (storyMode && story != null && story.hasObjective) {
             hexToWorld(story.objectiveQ, story.objectiveR, FW_A);
-            float ox = sx(FW_A[0]), oy = sy(FW_A[1]);
-            float pulse = 0.5f + 0.5f * (float) Math.sin(loadT * 4f);
-            paint.setColor(C_CYAN);
-            paint.setAlpha((int) (100 + 100 * pulse));
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(3 * zoom);
-            float hr = HEX * 1.2f * zoom * (1f + 0.1f * pulse);
-            rf.set(ox - hr, oy - hr * SQUASH, ox + hr, oy + hr * SQUASH);
-            cv.drawOval(rf, paint);
-            paint.setStyle(Paint.Style.FILL);
-            paint.setStrokeWidth(0);
-            paint.setAlpha(255);
+            sw().drawObjective(cv, FW_A[0], FW_A[1], camX, camY, zoom, W, H, loadT);
         }
 
         if (hexesShown) drawMoveFan(cv);
@@ -2213,7 +2326,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         drawSlashes(cv);
         drawDmgs(cv);
 
-        // E1: parallax treeline at 0.3× camera
+        // E1: parallax treeline at 0.3x camera
         if (treeStrip != null && quality > 0) {
             float par = camX * 0.3f;
             float ty = H - treeStrip.getHeight() * 1.1f;
@@ -2230,19 +2343,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (gameOverlay != null) {
             rf.set(0, 0, W, H);
             // E2: low-HP heartbeat pulse on the vignette
-            int ovA = 255;
             if (player != null && player.hp > 0 && player.hp <= 30) {
                 hbPulse += 1f/60f * 4f;
                 float beat = (float) Math.abs(Math.sin(hbPulse));
-                ovA = (int) (255 + 60 * beat);
                 paint.setColor(C_BRIGHT);
                 paint.setAlpha((int) (20 * beat));
                 cv.drawRect(0, 0, W, H, paint);
                 paint.setAlpha(255);
             }
-            paint.setAlpha(Math.min(ovA, 255));
             cv.drawBitmap(gameOverlay, null, rf, paint);
-            paint.setAlpha(255);
         }
 
         if (quality > 0) {
@@ -2283,7 +2392,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             cv.scale(bsc, bsc);
             cv.drawText(btxt, 0, 0, paint);
             float tw = paint.measureText(btxt) * 0.5f;
-            // animated EKG sweep
             float sweep = Math.min(1f, phaseT / 0.9f);
             cv.save();
             cv.clipRect(-tw - 10, -30, -tw - 10 + (tw * 2 + 80) * sweep, 30);
@@ -2312,6 +2420,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             cv.drawText("YOU DIED", W / 2f, H / 2f, paint);
             paint.setTextAlign(Paint.Align.LEFT);
         }
+
+        if (storyMode) sw().drawOver(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, quality, loadT);
     }
 
     private void layoutDock() {
@@ -2376,7 +2486,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 cv.save();
                 cv.translate(px, py);
                 cv.rotate(45);
-                cv.drawRect(-12, -12, 12, 12, paint);
+                cv.drawRect(-12, 12, 12, 12, paint);
                 cv.restore();
             }
         }
@@ -2466,7 +2576,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 if (pinchDist0 > 1) {
                     float newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
                             pinchZoom0 * pointerDist(e) / pinchDist0));
-                    // C4: anchor to pinch centroid so the world stays under your fingers
+                    // C4: anchor to pinch centroid
                     float cx = (e.getX(0) + e.getX(1)) * 0.5f;
                     float cy = (e.getY(0) + e.getY(1)) * 0.5f;
                     float wx = camX + (cx - W * 0.5f) / zoom;
@@ -2481,7 +2591,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float x = e.getX(), y = e.getY();
             if (!moved && Math.sqrt((x - downX) * (x - downX) + (y - downY) * (y - downY)) > 26) {
                 moved = true;
-                // C5: allow pan during enemy phase, but only if not on UI
                 panning = !uiZone(downX, downY);
                 lastPX = downX; lastPY = downY;
                 lastMoveT = e.getEventTime();
@@ -2533,6 +2642,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                             || attackRangeShown == i + 1)) {
                         attackRangeShown = (attackRangeShown == i + 1) ? 0 : i + 1;
                         hexesShown = false; targetEnemy = null;
+                        atkDirty = true;
                         sound.play("ui");
                     }
                     return true;
@@ -2560,6 +2670,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
             hexesShown = !hexesShown;
             attackRangeShown = 0;
+            fanDirty = true;
             return true;
         }
 
@@ -2567,6 +2678,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             sound.play(voice + "_select");
             hexesShown = !hexesShown;
             attackRangeShown = 0;
+            fanDirty = true;
             return true;
         }
 
@@ -2625,7 +2737,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
 
-        // C1: if we have a queued target and the player just arrived, accept it
+        // C1: consume buffered move if the hero just arrived
         if (player.qT > 0 && !player.isMoving() && !player.isAttacking() && player.actionsLeft > 0) {
             worldToHex(player.qX, player.qY, TW_A);
             worldToHex(player.x, player.y, TW_B);
@@ -2664,5 +2776,23 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hapticTiered(0); // E3: light tick
         }
         return true;
+    }
+
+    // E3: tiered haptics — 0 light, 1 medium, 2 heavy
+    private void hapticTiered(int tier) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                android.os.Vibrator v = (android.os.Vibrator)
+                        getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                if (v == null) return;
+                long[] pat; int[] amp;
+                if (tier >= 2) { pat = new long[]{0, 55}; amp = new int[]{0, 255}; }
+                else if (tier == 1) { pat = new long[]{0, 30}; amp = new int[]{0, 160}; }
+                else              { pat = new long[]{0, 18}; amp = new int[]{0, 90}; }
+                v.vibrate(android.os.VibrationEffect.createWaveform(pat, amp, -1));
+            } else {
+                performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+            }
+        } catch (Exception ignored) {}
     }
 }
