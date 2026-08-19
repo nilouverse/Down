@@ -25,28 +25,25 @@ public class Vex extends Hero {
         landDur = new float[] { 0.12f, 0.12f };
 
         attacks = new Attack[] {
-            // blink strike: crouch -> dash+shake -> vanish+slash on target -> reappear
             new Attack(1, 12, 0, 0, new Step[] {
-                new Step("atk", 0, 0.16f, EV_NONE),
-                new Step("glide", 1, 0.10f, EV_SHAKE),
-                new Step("atk", HIDDEN, 0.22f, EV_STRIKE),
-                new Step("atk", 4, 0.16f, EV_NONE),
-                new Step("atk", 5, 0.16f, EV_NONE),
+                new Step("atk", 0, 0.16f, EV_NONE, -25, 0),
+                new Step("glide", 1, 0.10f, EV_SHAKE, 40, 0),
+                new Step("atk", HIDDEN, 0.22f, EV_STRIKE, 90, 0),
+                new Step("atk", 4, 0.16f, EV_NONE, 40, 0),
+                new Step("atk", 5, 0.16f, EV_NONE, 0, 0),
             }),
-            // poisoned dart: single windup frame, target poisoned 5 x 4 enemy turns
             new Attack(4, 0, 20, 1, new Step[] {
-                new Step("atk", 0, 0.30f, EV_POISON),
+                new Step("atk", 0, 0.30f, EV_POISON, -10, 0),
             }),
-            // the dance: AoE radius 3, 30 dmg
             new Attack(3, 30, 60, 2, new Step[] {
-                new Step("atk", 5, 0.14f, EV_NONE),
-                new Step("atk", 1, 0.14f, EV_AOE),
-                new Step("atk", 3, 0.14f, EV_NONE),
-                new Step("atk", 2, 0.14f, EV_NONE),
-                new Step("atk", 4, 0.14f, EV_NONE),
-                new Step("atk", 1, 0.14f, EV_NONE),
-                new Step("atk", 2, 0.14f, EV_NONE),
-                new Step("atk", 0, 0.14f, EV_NONE),
+                new Step("atk", 5, 0.14f, EV_NONE, -15, 0),
+                new Step("atk", 1, 0.14f, EV_AOE, 20, 0),
+                new Step("atk", 3, 0.14f, EV_NONE, 10, 0),
+                new Step("atk", 2, 0.14f, EV_NONE, 0, 0),
+                new Step("atk", 4, 0.14f, EV_NONE, -10, 0),
+                new Step("atk", 1, 0.14f, EV_NONE, -20, 0),
+                new Step("atk", 2, 0.14f, EV_NONE, -10, 0),
+                new Step("atk", 0, 0.14f, EV_NONE, 0, 0),
             }),
         };
     }
