@@ -35,14 +35,44 @@ public class Sound {
                             .build())
                     .build();
 
-            String[] files = ctx.getAssets().list("sounds");
-            if (files == null) { initialized = true; return; }
+            // generic SFX live in sounds/
+            loadDir(ctx, "sounds", null);
 
+            // character voices live in speech/<voice>/ (vex, Nilou, ...)
+            try {
+                String[] voices = ctx.getAssets().list("speech");
+                if (voices != null) {
+                    for (String v : voices) {
+                        if (v == null || v.length() == 0) continue;
+                        loadDir(ctx, "speech/" + v,
+                                v.toLowerCase(java.util.Locale.US));
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            initialized = true;
+        } catch (Exception ignored) {
+            initialized = true;
+        }
+    }
+
+    /**
+     * Loads .ogg/.wav from a dir into the pool.
+     * Trailing digits are stripped (attack2.ogg -> attack), so any number of
+     * numbered variants pool under one key and one is picked at random.
+     * prefix != null turns "attack" into "<prefix>_attack".
+     */
+    private void loadDir(Context ctx, String dir, String prefix) {
+        try {
+            String[] files = ctx.getAssets().list(dir);
+            if (files == null) return;
             for (String file : files) {
                 if (file == null) continue;
-                if (!file.toLowerCase(java.util.Locale.US).endsWith(".ogg")) continue;
+                String low = file.toLowerCase(java.util.Locale.US);
+                if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
 
-                String base = file.substring(0, file.length() - 4);
+                int dot = file.lastIndexOf('.');
+                String base = file.substring(0, dot);
                 while (base.length() > 0
                        && Character.isDigit(base.charAt(base.length() - 1))) {
                     base = base.substring(0, base.length() - 1);
@@ -50,10 +80,11 @@ public class Sound {
                 if (base.length() == 0) continue;
 
                 String key = base.toLowerCase(java.util.Locale.US);
+                if (prefix != null) key = prefix + "_" + key;
 
                 AssetFileDescriptor afd = null;
                 try {
-                    afd = ctx.getAssets().openFd("sounds/" + file);
+                    afd = ctx.getAssets().openFd(dir + "/" + file);
                     int id = pool.load(afd, 1);
                     if (id != 0) {
                         ArrayList<Integer> list = ids.get(key);
@@ -70,10 +101,7 @@ public class Sound {
                     }
                 }
             }
-            initialized = true;
-        } catch (Exception ignored) {
-            initialized = true;
-        }
+        } catch (Exception ignored) {}
     }
 
     public void play(String name) {
