@@ -8,6 +8,7 @@ public class Player {
     public int facing = 1;
     public float bobTime = 0;
     public Hero hero;
+    public int actionsLeft = 2;
 
     public boolean isAttacking() { return hero != null && hero.attacking(); }
 
@@ -17,6 +18,8 @@ public class Player {
     }
 
     public void setTarget(float tx, float ty) { targetX = tx; targetY = ty; }
+
+    public void resetTurn() { actionsLeft = 2; }
 
     public void update(float dt) {
         bobTime += dt;
