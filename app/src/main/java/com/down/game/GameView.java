@@ -59,6 +59,31 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static final String[] LOAD_LINES = {
             "tuning the strings…", "warming the tubes…", "dropping the needle…" };
 
+    // precomputed tinted hex bitmaps (B2) — palette of 5 colors used by rings
+    private static final int[] HEX_PAL = { 0xAAefe6dd, 0xFFefe6dd, 0x14efe6dd, 0x22efe6dd, 0xFF34e3d6 };
+    private Bitmap[] hexTinted;
+
+    // cached move-fan / attack-range hex lists (B3)
+    private int fanQ, fanR;
+    private int[] fanQs = new int[64];
+    private int[] fanRs = new int[64];
+    private int fanN = 0;
+    private int fanMoveMax = -1;
+    private boolean fanDirty = true;
+    private int atkRangeQ, atkRangeR, atkRangeR2;
+    private int atkRangeKind;
+    private int[] atkQs = new int[64];
+    private int[] atkRs = new int[64];
+    private int atkN = 0;
+    private boolean atkDirty = true;
+
+    // parallax treeline strip (E1) + heartbeat tint (E2)
+    private Bitmap treeStrip;
+    private float hbPulse = 0f;
+
+    // camera zoom punch (D4)
+    private float zoomPunch = 0f;
+
     private static final int[][] ATK_SEQ = {
             { 0, 1, 2, 3, 4, 9, 5 },
             { 0, 1, 2, 9, 5 },
@@ -125,7 +150,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private boolean hexesShown = false;
     private int actionsLeft = 2;
     private int attackRangeShown = 0;
-    private int attackType = 1;
     private int mana = 100;
     private String voice = "nilou";
     private Enemy targetEnemy = null;
@@ -184,9 +208,27 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private int quality = 1;
     private final Runnable hapticRun = new Runnable() {
         public void run() {
-            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+            hapticTiered(1);
         }
     };
+
+    // E3: tiered haptics — 0 light, 1 medium, 2 heavy
+    private void hapticTiered(int tier) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                android.os.Vibrator v = (android.os.Vibrator)
+                        getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                if (v == null) return;
+                long[] pat; int[] amp;
+                if (tier >= 2) { pat = new long[]{0, 55}; amp = new int[]{0, 255}; }
+                else if (tier == 1) { pat = new long[]{0, 30}; amp = new int[]{0, 160}; }
+                else              { pat = new long[]{0, 18}; amp = new int[]{0, 90}; }
+                v.vibrate(android.os.VibrationEffect.createWaveform(pat, amp, -1));
+            } else {
+                performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+            }
+        } catch (Exception ignored) {}
+    }
 
     private final Hero[] roster = new Hero[] { new NilouZila(), new Vex() };
     private Bitmap menuBg, keyBmp, coinBmp;
@@ -217,16 +259,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         super(ctx);
         getHolder().addCallback(this);
         sound.init(ctx);
-        loadFonts();
-        try {
-            splatterBmp = BitmapFactory.decodeStream(
-                    ctx.getAssets().open("art/blood.webp"));
-        } catch (Exception e) { splatterBmp = null; }
+        // A3: fonts + splatter load off UI thread
 
         Thread loader = new Thread(new Runnable() { public void run() {
             android.os.Process.setThreadPriority(
                     android.os.Process.THREAD_PRIORITY_BACKGROUND);
             Context c = getContext();
+            loadFonts(c);
+            try {
+                splatterBmp = BitmapFactory.decodeStream(
+                        c.getAssets().open("art/blood.webp"));
+            } catch (Exception e) { splatterBmp = null; }
             AssetBundle b = new AssetBundle();
             b.frames = new HashMap<>();
             for (Hero h : roster) {
@@ -323,12 +366,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int hh) { surfaceAlive = true; }
     @Override public void surfaceDestroyed(SurfaceHolder holder) { surfaceAlive = false; }
 
-    private void loadFonts() {
-        try { fLogo = Typeface.createFromAsset(getContext().getAssets(),
+    private void loadFonts(Context c) {
+        try { fLogo = Typeface.createFromAsset(c.getAssets(),
                 "fonts/MetalMania-Regular.ttf"); } catch (Exception e) { fLogo = Typeface.DEFAULT; }
-        try { fBody = Typeface.createFromAsset(getContext().getAssets(),
+        try { fBody = Typeface.createFromAsset(c.getAssets(),
                 "fonts/SpaceGrotesk-Bold.ttf"); } catch (Exception e) { fBody = Typeface.DEFAULT_BOLD; }
-        try { fSerif = Typeface.createFromAsset(getContext().getAssets(),
+        try { fSerif = Typeface.createFromAsset(c.getAssets(),
                 "fonts/InstrumentSerif-Italic.ttf"); } catch (Exception e) { fSerif = Typeface.DEFAULT; }
     }
 
@@ -342,6 +385,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
+
+        // B2: precompute palette of tinted hex bitmaps once (no more HashMap per frame)
+        if (hexTinted == null && hexBmp != null) {
+            hexTinted = new Bitmap[HEX_PAL.length];
+            for (int i = 0; i < HEX_PAL.length; i++) {
+                hexTinted[i] = Sprites.tinted(hexBmp, HEX_PAL[i]);
+            }
+        }
+        fanDirty = true;
+        atkDirty = true;
     }
 
     private static Bitmap decodeSampled(Context c, String path, int max) {
@@ -425,6 +478,30 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 embers.add(em);
             }
         }
+
+        // E1: procedural parallax treeline strip, generated once per size change
+        if (treeStrip == null || treeStrip.getWidth() != W) {
+            if (treeStrip != null && !treeStrip.isRecycled()) treeStrip.recycle();
+            int th = Math.max(40, H / 6);
+            treeStrip = Bitmap.createBitmap(W, th, Bitmap.Config.ARGB_8888);
+            Canvas tc = new Canvas(treeStrip);
+            Paint tp = new Paint();
+            tp.setColor(0xFF040209);
+            Path tp_path = new Path();
+            tp_path.moveTo(0, th);
+            float px = 0;
+            java.util.Random pr = new java.util.Random(42);
+            while (px < W) {
+                float peakH = 8 + pr.nextInt(th - 12);
+                tp_path.lineTo(px, th - peakH);
+                px += 6 + pr.nextInt(18);
+                tp_path.lineTo(px, th - 2 - pr.nextInt(8));
+                px += 4 + pr.nextInt(12);
+            }
+            tp_path.lineTo(W, th);
+            tp_path.close();
+            tc.drawPath(tp_path, tp);
+        }
     }
 
     @Override
@@ -453,7 +530,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     try { Thread.sleep(sleepNs / 1000000,
                             (int) (sleepNs % 1000000)); } catch (Exception e) {}
                 }
-                while (System.nanoTime() - now < period) Thread.yield();
+                while (System.nanoTime() - now < period) {
+                    java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
+                }
             }
         }
     }
@@ -580,7 +659,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         attackRangeShown = 0;
         targetEnemy = null;
         hexesShown = false;
-        ei = 0;
+        fanDirty = true;
         mana = Math.min(100, mana + 25);
         if (!storyFight && !storyMode && enemies.size() < 5) spawnEnemy();
         sound.play(voice + "_turn");
@@ -588,8 +667,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void endPlayerTurn() {
         sound.play("turn");
-        phase = PH_ENEMY; phaseT = 0; ei = 0;
+        phase = PH_ENEMY; phaseT = 0;
         hexesShown = false; targetEnemy = null; attackRangeShown = 0;
+        fanDirty = true; atkDirty = true;
         for (Enemy en : enemies) en.resetTurn();
         for (Enemy en : enemies) {
             if (en.dead || en.poisonTurns <= 0) continue;
@@ -849,7 +929,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         worldToHex(tgt.x, tgt.y, IH_A);
         worldToHex(en.x, en.y, IH_B);
         int dist = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]);
-        if (dist <= 1) { en.attacksPlanned = 2; return; }
+        if (dist <= 1) { en.attacksPlanned = 2; en.intent = 1; return; }
         int steps = dist - 1; if (steps > 3) steps = 3;
         en.attacksPlanned = 1;
         if (dist > 4) { steps = dist - 1; if (steps > 6) steps = 6; en.attacksPlanned = 0; }
@@ -1083,6 +1163,20 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     resetFight();
                 }
             }
+            // C6: let FX keep ticking so particles don't freeze mid-air
+            for (Particle p : particlePool) {
+                if (!p.active) continue;
+                p.t += dt;
+                if (p.t >= p.life) { p.active = false; continue; }
+                p.vy += p.grav * dt;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+            }
+            for (Dmg d : dmgPool) if (d.active) { d.t += dt; if (d.t > 0.8f) d.active = false; }
+            for (Puff p : puffPool) if (p.active) { p.t += dt; if (p.t > 0.5f) p.active = false; }
+            for (Slash s : slashPool) if (s.active) { s.t += dt; if (s.t > 0.22f) s.active = false; }
+            for (Bolt b : boltPool) if (b.active) { b.t += dt; if (b.t >= 0.28f) b.active = false; }
+            for (Blast bl : blastPool) if (bl.active) { bl.t += dt; if (bl.t > 0.5f) bl.active = false; }
             return;
         }
 
@@ -1098,6 +1192,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 && !(storyMode && !storyFight)) ? 1 : 0;
         dockSlide += (dockTarget - dockSlide) * (1 - (float) Math.exp(-dt * 10));
         for (Player p : party) p.update(dt);
+        if (zoomPunch > 0) zoomPunch = Math.max(0, zoomPunch - dt * 3f);
 
         if (!panning && !player.isMoving() && (flingX != 0 || flingY != 0)) {
             camX += flingX * dt;
@@ -1143,6 +1238,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 if (en.deathT > 0.7f) {
                     spawnDeathParticles(en.x, en.y);
                     enemies.remove(i);
+                    fanDirty = true;
                     if (enemies.isEmpty()) {
                         if (storyFight) {
                             storyFight = false;
@@ -1168,6 +1264,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             } else if (ev == Hero.EV_STRIKE) {
                 hitstopT = 0.05f;
                 shakeT = 0.15f;
+                zoomPunch = 0.06f; // D4: camera zoom punch
                 if (h.target != null && !h.target.dead) {
                     spawnSlash(h.target.x, h.target.y);
                     hurtEnemy(h.target, atk.dmg);
@@ -1180,6 +1277,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             } else if (ev == Hero.EV_AOE) {
                 spawnBlast(player.x, player.y);
                 shakeT = 0.15f;
+                zoomPunch = 0.10f; // D4: stronger punch on nova
                 worldToHex(player.x, player.y, IH_A);
                 for (Enemy en : enemies) {
                     if (en.dead) continue;
@@ -1237,45 +1335,50 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (phase == PH_PLAYER) {
             // player turn waits for input
         } else {
-            if (ei < enemies.size()) {
-                Enemy en = enemies.get(ei);
-                if (en.dead) {
-                    ei++;
-                } else {
-                    if (!en.planned) planEnemy(en);
-                    Player tgt = nearestHero(en);
-                    worldToHex(tgt.x, tgt.y, IH_A);
-                    worldToHex(en.x, en.y, IH_B);
-                    boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
-                    boolean wasAttacking = en.attacking();
-                    int prevAttacksDone = en.attacksDone;
-                    en.turnUpdate(dt, tgt.x, tgt.y, adj);
-                    if ((!wasAttacking && en.attacking()) || (en.attacksDone > prevAttacksDone && en.attacking())) {
-                        sound.play(en.weapon == 1 ? "claw" : "swing");
-                    }
-                    if (en.attacking() && en.attackT > 0.45f && !en.struck) {
-                        en.struck = true;
-                        if (adj) {
-                            tgt.hp -= 10;
-                            hurtT = 0.3f;
-                            addDmg(tgt.x, tgt.y - PLAYER_H - 20, -10);
-                            sound.play("hurt");
-                            sound.play(tgt.hero.voice + "_hurt");
-                            post(hapticRun);
-                            if (tgt.hp <= 30 && !tgt.cried) {
-                                tgt.cried = true;
-                                sound.play(tgt.hero.voice + "_wounded");
-                            }
-                            boolean allDead = true;
-                            for (Player p : party) if (p.hp > 0) allDead = false;
-                            if (allDead) {
-                                deadT = 2f;
-                                sound.play(tgt.hero.voice + "_death");
-                            }
+            // A1: flag-based iteration — safe even if enemies are removed mid-loop
+            Enemy active = null;
+            for (Enemy en : enemies) {
+                if (!en.dead && !en.acted) { active = en; break; }
+            }
+            if (active != null) {
+                if (!active.planned) {
+                    planEnemy(active);
+                    // C2: compute intent telegraph for next-turn display
+                    if (active.attacksPlanned > 0) active.intent = 1;
+                    else if (active.pathLen > 0) active.intent = 2;
+                }
+                Player tgt = nearestHero(active);
+                worldToHex(tgt.x, tgt.y, IH_A);
+                worldToHex(active.x, active.y, IH_B);
+                boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
+                boolean wasAttacking = active.attacking();
+                int prevAttacksDone = active.attacksDone;
+                active.turnUpdate(dt, tgt.x, tgt.y, adj);
+                if ((!wasAttacking && active.attacking()) || (active.attacksDone > prevAttacksDone && active.attacking())) {
+                    sound.play(active.weapon == 1 ? "claw" : "swing");
+                }
+                if (active.attacking() && active.attackT > 0.45f && !active.struck) {
+                    active.struck = true;
+                    if (adj) {
+                        tgt.hp -= 10;
+                        hurtT = 0.3f;
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -10);
+                        sound.play("hurt");
+                        sound.play(tgt.hero.voice + "_hurt");
+                        hapticTiered(2); // E3: medium tap
+                        if (tgt.hp <= 30 && !tgt.cried) {
+                            tgt.cried = true;
+                            sound.play(tgt.hero.voice + "_wounded");
+                        }
+                        boolean allDead = true;
+                        for (Player p : party) if (p.hp > 0) allDead = false;
+                        if (allDead) {
+                            deadT = 2f;
+                            sound.play(tgt.hero.voice + "_death");
                         }
                     }
-                    if (en.act == 3) ei++;
                 }
+                if (active.act == 3) active.acted = true;
             } else {
                 startPlayerTurn();
             }
@@ -1317,8 +1420,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         h.unlockCanvasAndPost(cv);
     }
 
-    private float sx(float wx) { return (wx - camX + shakeX) * zoom + W / 2f; }
-    private float sy(float wy) { return (wy - camY + shakeY) * zoom + H / 2f; }
+    private float sx(float wx) { return (wx - camX + shakeX) * (zoom + zoomPunch) + W / 2f; }
+    private float sy(float wy) { return (wy - camY + shakeY) * (zoom + zoomPunch) + H / 2f; }
 
     private void drawMenu(Canvas cv) {
         if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
@@ -1639,11 +1742,22 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         cv.drawBitmap(d.pr, null, rf, paint);
     }
 
+    private int palIdx(int col) {
+        // snap to nearest palette entry — covers all 5 colors used by rings
+        if (col == 0xAAefe6dd) return 0;
+        if (col == 0xFFefe6dd) return 1;
+        if (col == 0x14efe6dd) return 2;
+        if (col == 0x22efe6dd) return 3;
+        if (col == 0xFF34e3d6) return 4;
+        return 0;
+    }
+
     private void drawHex(Canvas cv, float cx, float cy, int color, boolean filled) {
         float hr = HEX * 1.1f * zoom;
         rf.set(cx - hr, cy - hr * SQUASH, cx + hr, cy + hr * SQUASH);
-        cv.drawBitmap(Sprites.tinted(hexBmp, color), null, rf, paint);
-
+        if (hexTinted != null) {
+            cv.drawBitmap(hexTinted[palIdx(color)], null, rf, paint);
+        }
         if (filled) {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(2 * zoom);
@@ -1670,40 +1784,81 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setStrokeWidth(0);
     }
 
-    private void drawMoveFan(Canvas cv) {
-        if (player.hp <= 0 || player.actionsLeft <= 0 || player.isMoving()) return;
-        int mm = player.hero.moveMax;
+    private void rebuildFan() {
         worldToHex(player.x, player.y, IH_A);
-        for (int r = -mm; r <= mm; r++) {
-            for (int q = -mm; q <= mm; q++) {
-                int d = hexDist(IH_A[0], IH_A[1], IH_A[0] + q, IH_A[1] + r);
+        fanQ = IH_A[0]; fanR = IH_A[1];
+        fanMoveMax = player.hero.moveMax;
+        fanN = 0;
+        int mm = fanMoveMax;
+        for (int r = -mm; r <= mm && fanN < fanQs.length; r++) {
+            for (int q = -mm; q <= mm && fanN < fanQs.length; q++) {
+                int d = hexDist(fanQ, fanR, fanQ + q, fanR + r);
                 if (d < 1 || d > mm) continue;
-                if (!hexFree(IH_A[0] + q, IH_A[1] + r, null)) continue;
-                hexToWorld(IH_A[0] + q, IH_A[1] + r, FW_A);
-                drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xAAefe6dd, 0x14efe6dd);
+                if (!hexFree(fanQ + q, fanR + r, null)) continue;
+                fanQs[fanN] = fanQ + q;
+                fanRs[fanN] = fanR + r;
+                fanN++;
             }
         }
+        fanDirty = false;
+    }
+
+    private void rebuildAtk() {
+        worldToHex(player.x, player.y, IH_A);
+        atkRangeQ = IH_A[0]; atkRangeR = IH_A[1];
+        Hero.Attack atkSel = player.hero.attacks[attackRangeShown - 1];
+        atkRangeR2 = atkSel.range;
+        atkRangeKind = atkSel.kind;
+        atkN = 0;
+        int range = atkRangeR2;
+        boolean nova = atkRangeKind == 2;
+        for (int r = -range; r <= range && atkN < atkQs.length; r++) {
+            for (int q = -range; q <= range && atkN < atkQs.length; q++) {
+                int d = hexDist(atkRangeQ, atkRangeR, atkRangeQ + q, atkRangeR + r);
+                if (d > range) continue;
+                if (d < 1 && !nova) continue;
+                atkQs[atkN] = atkRangeQ + q;
+                atkRs[atkN] = atkRangeR + r;
+                atkN++;
+            }
+        }
+        atkDirty = false;
+    }
+
+    private void drawMoveFan(Canvas cv) {
+        if (player.hp <= 0 || player.actionsLeft <= 0 || player.isMoving()) return;
+        worldToHex(player.x, player.y, IH_A);
+        if (fanDirty || fanQ != IH_A[0] || fanR != IH_A[1] || fanMoveMax != player.hero.moveMax) {
+            rebuildFan();
+        }
+        // D5: subtle pulse
+        int baseAlpha = 170 + (int) (85 * (float) Math.sin(loadT * 6f));
+        paint.setAlpha(baseAlpha);
+        for (int i = 0; i < fanN; i++) {
+            hexToWorld(fanQs[i], fanRs[i], FW_A);
+            drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xAAefe6dd, 0x14efe6dd);
+        }
+        paint.setAlpha(255);
     }
 
     private void drawAttackRange(Canvas cv) {
-        Hero.Attack atkSel = player.hero.attacks[attackRangeShown - 1];
-        int range = atkSel.range;
-        boolean nova = atkSel.kind == 2;
         worldToHex(player.x, player.y, IH_A);
-        for (int r = -range; r <= range; r++) {
-            for (int q = -range; q <= range; q++) {
-                int d = hexDist(IH_A[0], IH_A[1], IH_A[0] + q, IH_A[1] + r);
-                if (d > range) continue;
-                if (d < 1 && !nova) continue;
-                hexToWorld(IH_A[0] + q, IH_A[1] + r, FW_A);
-                drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xAAefe6dd, 0x14efe6dd);
-            }
+        if (atkDirty || atkRangeQ != IH_A[0] || atkRangeR != IH_A[1]
+                || atkRangeR2 != player.hero.attacks[attackRangeShown - 1].range) {
+            rebuildAtk();
         }
-        if (!nova) {
+        int baseAlpha = 170 + (int) (85 * (float) Math.sin(loadT * 6f));
+        paint.setAlpha(baseAlpha);
+        for (int i = 0; i < atkN; i++) {
+            hexToWorld(atkQs[i], atkRs[i], FW_A);
+            drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xAAefe6dd, 0x14efe6dd);
+        }
+        paint.setAlpha(255);
+        if (atkRangeKind != 2) {
             for (Enemy en : enemies) {
                 if (en.dead) continue;
                 worldToHex(en.x, en.y, IH_B);
-                if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= range) {
+                if (hexDist(atkRangeQ, atkRangeR, IH_B[0], IH_B[1]) <= atkRangeR2) {
                     hexToWorld(IH_B[0], IH_B[1], FW_A);
                     drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xFFefe6dd, 0x22efe6dd);
                 }
@@ -1763,11 +1918,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             cv.drawCircle(sx(p.x), sy(p.y), (4 + k * 6) * zoom, paint);
         }
         paint.setAlpha(255);
-    }
-
-    private static float blendCurve(float frac) {
-        float k = (frac - 0.65f) / 0.35f;
-        return k < 0 ? 0 : (k > 1 ? 1 : k);
     }
 
     private void drawFrame(Canvas cv, Frame f, int alpha) {
@@ -1844,11 +1994,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
         rf.right = rf.left + bw * (Math.max(0, pl.hp) / 100f);
         paint.setColor(C_BLOOD); cv.drawRoundRect(rf, 4, 4, paint);
-
-        rf.set(sx(pl.x) - bw/2, top + 11, sx(pl.x) + bw/2, top + 11 + bh);
-        paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
-        rf.right = rf.left + bw * (mana / 100f);
-        paint.setColor(C_VIOLET); cv.drawRoundRect(rf, 4, 4, paint);
     }
 
     private Frame pickEnemyFrame(Enemy en) {
@@ -1874,6 +2019,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return null;
     }
 
+    private int enemyGroup(Enemy en) {
+        if (en.attacking()) return 10;
+        if (en.floater.state == 0) return 0;
+        return 1 + en.floater.state;
+    }
+
     private void drawEnemy(Canvas cv, Enemy en) {
         float x = sx(en.x), y = sy(en.y + en.floater.visualY) + FOOT_DROP * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
@@ -1884,30 +2035,29 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         cv.drawBitmap(shadowBmp, null, rf, paint);
         paint.setAlpha(255);
 
-        Frame fr = pickEnemyFrame(en);
+        // D1: seamless crossfade via enemy's present()
+        en.present(pickEnemyFrame(en), enemyGroup(en), 1f/60f);
+
         Paint p = (en.hitFlash > 0) ? tintPaint : paint;
         cv.save();
         cv.translate(x, y);
         if (en.facing < 0) cv.scale(-1, 1);
         if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
-        if (en.dead) p.setAlpha((int) (255 * (1 - en.deathT / 0.7f)));
-        if (fr != null) {
-            float s = ENEMY_H * zoom / fr.ref;
-            if (fr.vCrop) {
-                frameSrc.set(0, fr.top, fr.bmp.getWidth(), fr.top + fr.ch);
-                rf.set(-fr.bmp.getWidth() * s / 2f, -fr.ch * s, fr.bmp.getWidth() * s / 2f, 0);
-            } else if (fr.cCenter) {
-                int wl = Math.max(0, fr.rgt - fr.ww);
-                int wr = fr.rgt;
-                frameSrc.set(wl, fr.top, wr, fr.top + fr.ch);
-                float right = fr.ww * s / 2f;
-                rf.set(right - (wr - wl) * s, -fr.ch * s, right, 0);
-            } else {
-                frameSrc.set(0, 0, fr.bmp.getWidth(), fr.bmp.getHeight());
-                rf.set(-fr.bmp.getWidth() * s / 2f, -fr.bmp.getHeight() * s,
-                        fr.bmp.getWidth() * s / 2f, 0);
+        // E4: death squash-then-sink
+        if (en.dead) {
+            float dk = en.deathT / 0.7f;
+            float sinkY = dk * 28f * zoom;
+            float sqY = 1f - dk * 0.35f;
+            cv.translate(0, sinkY);
+            cv.scale(1f + dk * 0.08f, sqY);
+            p.setAlpha((int) (255 * (1 - dk)));
+        }
+        if (en.curF != null) {
+            drawFrame(cv, en.curF, p.getAlpha());
+            if (en.prevF != null && en.fadeT < 1f) {
+                int prevAlpha = (int) ((1f - en.fadeT) * p.getAlpha());
+                drawFrame(cv, en.prevF, prevAlpha);
             }
-            cv.drawBitmap(fr.bmp, frameSrc, rf, p);
         } else {
             p.setColor(0xFFaa2233);
             rf.set(-30 * zoom, -ENEMY_H * 0.8f * zoom, 30 * zoom, 0);
@@ -1923,6 +2073,30 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
             rf.right = rf.left + bw * (en.hp / (float)en.maxHp);
             paint.setColor(C_BLOOD); cv.drawRoundRect(rf, 4, 4, paint);
+
+            // C2: intent telegraph — small glyph above the HP bar
+            if (en.intent == 1) {
+                paint.setColor(C_BRIGHT);
+                paint.setAlpha(200 + (int) (55 * (float) Math.sin(en.animT * 8f)));
+                float ix = x, iy = top - 14 * zoom;
+                float s = 6 * zoom;
+                cv.save();
+                cv.translate(ix, iy);
+                cv.rotate(45);
+                cv.drawRect(-s, -s, s, s, paint);
+                cv.restore();
+                paint.setAlpha(255);
+            } else if (en.intent == 2) {
+                paint.setColor(C_BONE_DIM);
+                paint.setAlpha(170);
+                float ix = x, iy = top - 14 * zoom;
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(1.5f * zoom);
+                cv.drawCircle(ix, iy, 5 * zoom, paint);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setStrokeWidth(0);
+                paint.setAlpha(255);
+            }
         }
     }
 
@@ -1949,7 +2123,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void drawDmgs(Canvas cv) {
         paint.setTypeface(fBody);
-        paint.setTextSize(34);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setFakeBoldText(true);
         for (Dmg d : dmgPool) {
@@ -1957,7 +2130,21 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float k = d.t / 0.8f;
             paint.setAlpha((int) (255 * (1 - k)));
             paint.setColor(d.col != 0 ? d.col : (d.val < 0 ? C_BRIGHT : C_BONE));
-            cv.drawText(d.txt, sx(d.x), sy(d.y) - k * 80, paint);
+            // D2: scale-pop overshoot on spawn
+            float scale;
+            if (d.t < 0.09f) {
+                float k2 = d.t / 0.09f;
+                scale = 1.3f - 0.3f * k2; // 1.3 → 1.0
+            } else {
+                scale = 1f;
+            }
+            float tx = sx(d.x), ty = sy(d.y) - k * 80;
+            cv.save();
+            cv.translate(tx, ty);
+            cv.scale(scale, scale);
+            paint.setTextSize(34);
+            cv.drawText(d.txt, 0, 0, paint);
+            cv.restore();
         }
         paint.setFakeBoldText(false);
         paint.setAlpha(255);
@@ -1989,8 +2176,36 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         drawSlashes(cv);
         drawDmgs(cv);
 
+        // E1: parallax treeline at 0.3× camera
+        if (treeStrip != null && quality > 0) {
+            float par = camX * 0.3f;
+            float ty = H - treeStrip.getHeight() * 1.1f;
+            int tw = treeStrip.getWidth();
+            float off = ((par % tw) + tw) % tw;
+            paint.setAlpha(180);
+            rf.set(-off, ty, -off + tw, ty + treeStrip.getHeight());
+            cv.drawBitmap(treeStrip, null, rf, paint);
+            rf.set(-off + tw, ty, -off + 2 * tw, ty + treeStrip.getHeight());
+            cv.drawBitmap(treeStrip, null, rf, paint);
+            paint.setAlpha(255);
+        }
+
         if (gameOverlay != null) {
-            rf.set(0, 0, W, H); cv.drawBitmap(gameOverlay, null, rf, paint);
+            rf.set(0, 0, W, H);
+            // E2: low-HP heartbeat pulse on the vignette
+            int ovA = 255;
+            if (player != null && player.hp > 0 && player.hp <= 30) {
+                hbPulse += 1f/60f * 4f;
+                float beat = (float) Math.abs(Math.sin(hbPulse));
+                ovA = (int) (255 + 60 * beat);
+                paint.setColor(C_BRIGHT);
+                paint.setAlpha((int) (20 * beat));
+                cv.drawRect(0, 0, W, H, paint);
+                paint.setAlpha(255);
+            }
+            paint.setAlpha(Math.min(ovA, 255));
+            cv.drawBitmap(gameOverlay, null, rf, paint);
+            paint.setAlpha(255);
         }
 
         if (quality > 0) {
@@ -2017,14 +2232,38 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (phaseT < 1.2f) {
             int a = phaseT < 0.9f ? 220 : (int) ((1.2f - phaseT) / 0.3f * 220);
             paint.setAlpha(a);
+            // D3: overshoot scale-in on the banner
+            float bsc = phaseT < 0.12f
+                    ? (1.15f - 0.15f * (phaseT / 0.12f))
+                    : 1f;
             paint.setTextSize(64);
             paint.setTypeface(fLogo);
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setColor(phase == PH_PLAYER ? C_MAGENTA : C_BRIGHT);
             String btxt = phase == PH_PLAYER ? "YOUR TURN" : "ENEMY TURN";
-            cv.drawText(btxt, W / 2f, H * 0.3f, paint);
-            float tw = paint.measureText(btxt);
-            drawEkg(cv, W / 2f + tw / 2 + 18, H * 0.3f - 20, a);
+            cv.save();
+            cv.translate(W / 2f, H * 0.3f);
+            cv.scale(bsc, bsc);
+            cv.drawText(btxt, 0, 0, paint);
+            float tw = paint.measureText(btxt) * 0.5f;
+            // animated EKG sweep
+            float sweep = Math.min(1f, phaseT / 0.9f);
+            cv.save();
+            cv.clipRect(-tw - 10, -30, -tw - 10 + (tw * 2 + 80) * sweep, 30);
+            ekgPath.reset();
+            ekgPath.moveTo(tw + 18, -20);
+            ekgPath.lineTo(tw + 34, -20);
+            ekgPath.lineTo(tw + 38, -26);
+            ekgPath.lineTo(tw + 44, -7);
+            ekgPath.lineTo(tw + 48, -27);
+            ekgPath.lineTo(tw + 76, -20);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2);
+            cv.drawPath(ekgPath, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(0);
+            cv.restore();
+            cv.restore();
             paint.setTypeface(fBody);
             paint.setAlpha(255);
             paint.setTextAlign(Paint.Align.LEFT);
@@ -2153,7 +2392,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (state == STATE_MENU) return onMenuTouch(e);
         if (state == STATE_SELECT) return onSelectTouch(e);
         if (state == STATE_CHAPTER) return onChapterTouch(e);
-        if (deadT > 0 || phase != PH_PLAYER) return true;
+        if (deadT > 0) return true;
+        // C5: input blocked during enemy phase, but panning allowed via the path below
+        boolean enemyPhase = (phase != PH_PLAYER);
         if (storyMode && story != null && story.dialogUp) {
             if (e.getActionMasked() == MotionEvent.ACTION_UP) story.tap();
             return true;
@@ -2186,8 +2427,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (act == MotionEvent.ACTION_MOVE) {
             if (pinching && e.getPointerCount() >= 2) {
                 if (pinchDist0 > 1) {
-                    zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
+                    float newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
                             pinchZoom0 * pointerDist(e) / pinchDist0));
+                    // C4: anchor to pinch centroid so the world stays under your fingers
+                    float cx = (e.getX(0) + e.getX(1)) * 0.5f;
+                    float cy = (e.getY(0) + e.getY(1)) * 0.5f;
+                    float wx = camX + (cx - W * 0.5f) / zoom;
+                    float wy = camY + (cy - H * 0.5f) / zoom;
+                    zoom = newZoom;
+                    camX = wx - (cx - W * 0.5f) / zoom;
+                    camY = wy - (cy - H * 0.5f) / zoom;
                 }
                 return true;
             }
@@ -2195,6 +2444,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             float x = e.getX(), y = e.getY();
             if (!moved && Math.sqrt((x - downX) * (x - downX) + (y - downY) * (y - downY)) > 26) {
                 moved = true;
+                // C5: allow pan during enemy phase, but only if not on UI
                 panning = !uiZone(downX, downY);
                 lastPX = downX; lastPY = downY;
                 lastMoveT = e.getEventTime();
@@ -2229,6 +2479,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
         panning = false;
+
+        if (enemyPhase) return true; // C5: block gameplay taps during enemy phase
 
         menuPress = 0;
         if (phase == PH_PLAYER && dockSlide > 0.9f) {
@@ -2338,15 +2590,43 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
 
-        if (hexesShown && dTap >= 1 && dTap <= player.hero.moveMax
+        // C1: if we have a queued target and the player just arrived, accept it
+        if (player.qT > 0 && !player.isMoving() && !player.isAttacking() && player.actionsLeft > 0) {
+            worldToHex(player.qX, player.qY, TW_A);
+            worldToHex(player.x, player.y, TW_B);
+            int dQ = hexDist(TW_B[0], TW_B[1], TW_A[0], TW_A[1]);
+            if (dQ >= 1 && dQ <= player.hero.moveMax && hexFree(TW_A[0], TW_A[1], null)) {
+                player.setTarget(player.qX, player.qY);
+                player.actionsLeft--;
+                player.clearQueue();
+                fanDirty = true;
+                runeX = player.qX; runeY = player.qY; runeT = 0;
+                sound.play("step");
+                sound.play(voice + "_move");
+                hapticTiered(0);
+                return true;
+            } else {
+                player.clearQueue();
+            }
+        }
+
+        if (dTap >= 1 && dTap <= player.hero.moveMax
                 && hexFree(TW_A[0], TW_A[1], null) && player.actionsLeft > 0) {
             hexToWorld(TW_A[0], TW_A[1], TW_F);
+            if (player.isMoving() && hexesShown) {
+                // C1: queue the move while hero is still walking
+                player.queueTarget(TW_F[0], TW_F[1]);
+                hexesShown = false;
+                return true;
+            }
             player.setTarget(TW_F[0], TW_F[1]);
             player.actionsLeft--;
             hexesShown = false;
+            fanDirty = true;
             runeX = TW_F[0]; runeY = TW_F[1]; runeT = 0;
             sound.play("step");
             sound.play(voice + "_move");
+            hapticTiered(0); // E3: light tick
         }
         return true;
     }
