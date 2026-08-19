@@ -7,7 +7,7 @@ CRACK 3 -1 5 1
 PLACE spire 5 -3
 PLACE wall -4 -2
 ACTOR nilou 0 0
-ACTOR ws soldier 4 3 hidden #b7a6ab
+ACTOR ws 4 3 hidden
 SAY NilouZila They brought everything.
 SAY NilouZila Three legions. At least three. I can see the banners of Mordethail from here... and the Carrion Kings... and those—
 SAY NilouZila Those are the Thornborn. I thought Velkarya exterminated them centuries ago.
@@ -39,11 +39,11 @@ CRACK -1 -2 2 3
 PLACE wall -3 -3
 PLACE rubble 4 2
 ACTOR nilou 0 0
-ACTOR t1 soldier 2 -1 #ff7a1a
-ACTOR t2 soldier 3 0 #ff7a1a
-ACTOR t3 soldier 2 1 #ff7a1a
-ACTOR t4 soldier 4 0 #ff7a1a
-ACTOR t5 soldier 3 2 #ff7a1a
+ACTOR t1 2 -1
+ACTOR t2 3 0
+ACTOR t3 2 1
+ACTOR t4 4 0
+ACTOR t5 3 2
 SAY NilouZila Thornborn. Of course they survived. Cockroaches, all of them.
 SAY t1 Velkarya's bitch! Kill her!
 ACTION shake
@@ -76,12 +76,12 @@ PLACE street 0 0
 PLACE barricade 3 -1
 PLACE bonepillar -3 -2
 ACTOR nilou 0 0
-ACTOR i1 soldier 3 -2 #b3102a
-ACTOR i2 soldier 4 -1 #b3102a
-ACTOR i3 soldier 4 -2 #b3102a
-ACTOR i4 soldier 5 -1 #b3102a
-ACTOR i5 soldier 5 -2 #b3102a
-ACTOR i6 soldier 6 -1 #b3102a
+ACTOR i1 3 -2
+ACTOR i2 4 -1
+ACTOR i3 4 -2
+ACTOR i4 5 -1
+ACTOR i5 5 -2
+ACTOR i6 6 -1
 SAY i1 A lieutenant! She wears the marks! Take her alive — Mordethail wants the officers breathing!
 SAY NilouZila Come and try.
 SAY NilouZila Shield wall means they'll be tight. Tight means slow. Slow means I can be faster.
@@ -121,14 +121,14 @@ PLACE bonepillar -3 -2
 PLACE bonepillar 5 -3
 PLACE bones 2 2
 ACTOR nilou 0 0
-ACTOR vel velkarya 7 -2 hidden
+ACTOR vel 7 -2 hidden
 SAY NilouZila There she is. My goddess. Four hundred years, and she still takes my breath away.
 SAY NilouZila Even like this. Especially like this.
 SAY NilouZila Focus. Move.
-ACTOR d1 soldier 2 -1 #ff7a1a
-ACTOR d2 soldier 3 0 #b3102a
-ACTOR d3 soldier 2 1 #b07cff
-ACTOR d4 soldier 4 0 #ff7a1a
+ACTOR d1 2 -1
+ACTOR d2 3 0
+ACTOR d3 2 1
+ACTOR d4 4 0
 ACTION slash 2 -1
 ACTION blood 2 -1
 HIDE d1
@@ -156,7 +156,7 @@ RESET
 PLACE bonepillar -3 -3
 PLACE bones 4 2
 ACTOR nilou 4 0
-ACTOR vel velkarya 5 -1 #34e3d6
+ACTOR vel 5 -1
 SAY NilouZila Mistress. I'm here.
 SAY vel NilouZila. You should have fled.
 SAY NilouZila I didn't come this far to flee.
@@ -187,10 +187,10 @@ RESET
 PLACE bonepillar -3 -2
 PLACE barricade 6 0
 ACTOR nilou 3 0
-ACTOR vel velkarya 4 -1 #34e3d6
-ACTOR e1 soldier 5 0 #b07cff
-ACTOR e2 soldier 5 1 #b07cff
-ACTOR e3 soldier 6 0 #b07cff
+ACTOR vel 4 -1
+ACTOR e1 5 0
+ACTOR e2 5 1
+ACTOR e3 6 0
 SAY NilouZila Three days. You held this courtyard for three days alone.
 SAY vel Go, NilouZila. While you still can.
 SAY NilouZila No.
@@ -224,7 +224,7 @@ RESET
 PLACE bonepillar -2 -3
 PLACE bones 5 2
 ACTOR nilou 3 0
-ACTOR vel velkarya 4 -1 #34e3d6
+ACTOR vel 4 -1
 SAY vel They're coming. All of them. I can feel them — Mordethail himself is approaching. He's brought his Phalanx of Ruin. Six hundred of his finest.
 SAY NilouZila Six hundred?
 SAY vel And behind them, every minor lord and gutter-fiend who ever feared me. They smell blood. My blood.
