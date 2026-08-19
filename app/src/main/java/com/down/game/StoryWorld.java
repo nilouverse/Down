@@ -1,245 +1,221 @@
 package com.down.game;
 
 import android.content.Context;
-import android.graphics.Canvas;
-import android.graphics.Color;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 
-public class StoryWorld {
+public final class StoryWorld {
+    private static StoryWorld inst;
+    public static StoryWorld get(Context ctx, Sound snd) {
+        if (inst == null) inst = new StoryWorld(ctx, snd);
+        return inst;
+    }
 
-    private static StoryWorld instance;
+    private static final int MAX_ZONES = 32;
+    private final String[] zoneName = new String[MAX_ZONES];
+    private final int[] zoneQ = new int[MAX_ZONES];
+    private final int[] zoneR = new int[MAX_ZONES];
+    private final int[] zoneR2 = new int[MAX_ZONES];
+    private final int[] zoneState = new int[MAX_ZONES];
+    private final String[] zoneGate = new String[MAX_ZONES];
+    private final String[] zoneWait = new String[MAX_ZONES];
+    private final List<String>[] zoneScript = new ArrayList[MAX_ZONES];
+    private int zoneCount = 0;
+
+    private final List<String> evQueue = new ArrayList<>(64);
+    private boolean evActive = false;
+
+    private final HashMap<String, Boolean> flags = new HashMap<>(24);
+
+    private boolean encounterLive = false;
+    private int reinforceKills = -1;
+    private int reinforceTarget = 0;
+    private int pendingWave = 0;
+    private final int[][] waveSpawnHexes = { {64,1},{68,1},{70,4},{68,7},{64,7},{63,4} };
+    private final int[][] fodderHexes   = { {61,2},{61,6},{63,1},{63,7},{66,0},{68,8} };
+
     private final Context ctx;
-    private final Sound sound;
-    private final SceneMap sceneMap = new SceneMap();
-    private final StoryActors actors = new StoryActors();
-
-    private boolean loaded;
-    private String currentScene;
-    private float fadeT;
-    private float animClock;
-
-    private final ArrayList<Beat> beats = new ArrayList<>();
-    private int bi;
-    private String lastSpeaker, lastText;
-    private boolean encounterOpen, encounterWon;
-    private int encounterN;
-    private final int[][] encounterHex = new int[8][2];
-    private boolean sceneEvent;
-    public float snapX, snapY;
+    private final Sound snd;
+    public SceneMap map;
+    public StoryActors actors;
+    public GameView gv;
+    private int lastPQ = Integer.MIN_VALUE, lastPR = Integer.MIN_VALUE;
+    private boolean victory = false;
 
     public final float[] pt = new float[2];
 
-    private StoryWorld(Context c, Sound s) {
-        ctx = c.getApplicationContext();
-        sound = s;
-        sceneMap.init(ctx);
-        Thread loader = new Thread(new Runnable() { public void run() {
-            parse();
-            loaded = true;
-        } }, "NV-storyworld");
-        loader.setPriority(Thread.NORM_PRIORITY - 1);
-        loader.start();
+    private StoryWorld(Context ctx, Sound snd) {
+        this.ctx = ctx.getApplicationContext();
+        this.snd = snd;
+        parse("act1.txt");
     }
 
-    public static StoryWorld get(Context c, Sound s) {
-        if (instance == null) instance = new StoryWorld(c, s);
-        return instance;
+    public void attach(SceneMap map, StoryActors actors, GameView gv) {
+        this.map = map; this.actors = actors; this.gv = gv;
     }
 
-    public static boolean sceneWalkable(float x, float y) {
-        return instance == null || instance.sceneMap == null || !instance.loaded
-                ? true : instance.sceneMap.isWalkable(x, y);
-    }
-
-    private static class Beat {
-        int type; // 0=SAY, 1=ACTION/NPC, 2=SCENE
-        String who, text, cmd, arg;
-        int n;
-    }
-
-    private void parse() {
+    private void parse(String file) {
         try {
-            BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/act1.txt")));
-            String line;
+            BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/" + file)));
+            String line; String curZone = null;
+            List<String> sink = null;
             while ((line = r.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
-                String[] p = line.split(" ", 2);
-                String cmd = p[0], arg = p.length > 1 ? p[1] : "";
-                Beat b = new Beat();
-                if (cmd.equals("NAME")) { b.type = 2; b.cmd = "NAME"; b.arg = arg; }
-                else if (cmd.equals("GROUND")) { b.type = 2; b.cmd = "GROUND"; b.arg = arg; }
-                else if (cmd.equals("SAY")) {
-                    String[] p2 = arg.split(" ", 2);
-                    b.type = 0; b.who = p2[0]; b.text = p2.length > 1 ? p2[1] : "";
+                if (line.startsWith("ZONE ")) {
+                    String[] p = line.split(" ");
+                    int i = zoneCount++;
+                    zoneName[i] = p[1];
+                    zoneQ[i] = Integer.parseInt(p[2]);
+                    zoneR[i] = Integer.parseInt(p[3]);
+                    int rad = Integer.parseInt(p[4]);
+                    zoneR2[i] = rad * rad;
+                    zoneState[i] = 0;
+                    zoneScript[i] = new ArrayList<>(24);
+                    curZone = p[1]; sink = zoneScript[i];
+                } else if (line.startsWith("GATE ")) {
+                    String[] p = line.split(" ");
+                    int idx = findZone(p[1]);
+                    if (idx >= 0) { zoneState[idx] = 3; zoneGate[idx] = p[2]; }
+                } else if (line.startsWith("WAIT_FLAG ")) {
+                    String[] p = line.split(" ");
+                    int idx = findZone(curZone != null ? curZone : "");
+                    if (idx >= 0) zoneWait[idx] = p[1];
+                } else if (line.startsWith("ON_ENTER ")) {
+                    int idx = findZone(line.split(" ")[1]);
+                    sink = idx >= 0 ? zoneScript[idx] : null;
+                } else if (sink != null) {
+                    sink.add(line);
                 }
-                else if (cmd.equals("ACTION") || cmd.equals("SHOW") || cmd.equals("HIDE")
-                        || cmd.equals("EXIT") || cmd.equals("ACTOR") || cmd.equals("PLACE")
-                        || cmd.equals("CRACK") || cmd.equals("RESET")) {
-                    b.type = 1; b.cmd = cmd; b.arg = arg;
-                }
-                else if (cmd.equals("FIGHT")) { b.type = 1; b.cmd = "FIGHT"; b.n = Integer.parseInt(arg); }
-                else if (cmd.equals("WALK")) { b.type = 1; b.cmd = "WALK"; b.arg = arg; }
-                beats.add(b);
             }
+            r.close();
         } catch (Exception e) {}
     }
 
-    public void tick(Story story) {
-        if (!loaded || story == null) return;
-        float dt = 1f / 60f;
-        animClock += dt;
-        if (fadeT > 0) fadeT = Math.max(0, fadeT - dt * 3f);
-
-        if (story.titleT > 0 && story.titleT < 0.1f && !story.title.equals(currentScene)) {
-            currentScene = story.title;
-            sceneMap.begin(currentScene, story.groundColor);
-            actors.reset();
-            bi = 0;
-            lastSpeaker = null;
-            lastText = null;
-            encounterOpen = false;
-            encounterWon = false;
-            fadeT = 1f;
-            sceneEvent = true;
-            snapX = story.hasObjective ? SceneMap.hexX(story.objectiveQ, story.objectiveR) : 0;
-            snapY = story.hasObjective ? SceneMap.hexY(story.objectiveQ, story.objectiveR) : 0;
-            if (sound != null) sound.play("ui");
-        }
-
-        while (bi < beats.size()) {
-            Beat b = beats.get(bi);
-            if (b.type == 2) {
-                bi++;
-                if (b.cmd.equals("NAME")) sceneMap.begin(b.arg, story.groundColor);
-                continue;
-            }
-            if (b.type == 0) {
-                if (story.dialogUp && b.who.equals(story.speaker) && story.text.startsWith(b.text)) {
-                    bi++;
-                    lastSpeaker = b.who;
-                    lastText = b.text;
-                } else break;
-            } else {
-                bi++;
-                if (b.cmd.equals("PLACE")) {
-                    String[] t = b.arg.split(" ");
-                    if (t.length >= 3) sceneMap.prop(t[0], Integer.parseInt(t[1]), Integer.parseInt(t[2]));
-                } else if (b.cmd.equals("CRACK")) {
-                    String[] t = b.arg.split(" ");
-                    if (t.length >= 4) sceneMap.crack(Integer.parseInt(t[0]), Integer.parseInt(t[1]),
-                            Integer.parseInt(t[2]), Integer.parseInt(t[3]));
-                } else if (b.cmd.equals("ACTOR")) {
-                    String[] t = b.arg.split(" ");
-                    if (t.length >= 3) {
-                        boolean hidden = t.length >= 4 && "hidden".equals(t[3]);
-                        actors.add(t[0], Integer.parseInt(t[1]), Integer.parseInt(t[2]), hidden);
-                    }
-                } else if (b.cmd.equals("FIGHT")) {
-                    story.fightRequest = b.n;
-                    break;
-                }
-            }
-        }
-        actors.update(dt);
-        sceneMap.tick(dt);
+    private int findZone(String n) {
+        for (int i = 0; i < zoneCount; i++) if (zoneName[i].equals(n)) return i;
+        return -1;
     }
 
-    public boolean filterAction(String act) {
-        if (!encounterOpen) return false;
-        if (act.startsWith("ACTION slash") || act.startsWith("ACTION blood") || act.startsWith("HIDE ")) {
-            return encounterWon;
-        }
-        return false;
-    }
-
-    public void resolveActionPoint(String act, float fx, float fy) {
-        pt[0] = fx; pt[1] = fy;
-        for (int i = act.length() - 1, j = 0; i >= 0; i--) {
-            char c = act.charAt(i);
-            if (c == ' ') j++;
-            if (j == 2) {
-                String[] p = act.substring(i + 1).split(" ");
-                if (p.length >= 2) {
-                    try {
-                        int q = Integer.parseInt(p[0]), r = Integer.parseInt(p[1]);
-                        StoryActor a = actors.getAt(q, r);
-                        if (a != null) { pt[0] = a.x; pt[1] = a.y; return; }
-                        pt[0] = SceneMap.hexX(q, r);
-                        pt[1] = SceneMap.hexY(q, r);
-                    } catch (Exception e) {}
-                }
-                break;
+    public void onPlayerHexChanged(int q, int r) {
+        if (q == lastPQ && r == lastPR) return;
+        lastPQ = q; lastPR = r;
+        if (evActive) return;
+        for (int i = 0; i < zoneCount; i++) {
+            if (zoneState[i] != 0) continue;
+            int dq = q - zoneQ[i], dr = r - zoneR[i];
+            if (dq * dq + dr * dr <= zoneR2[i]) {
+                if (zoneWait[i] != null && !flag(zoneWait[i])) continue;
+                zoneState[i] = 1;
+                evQueue.clear();
+                evQueue.addAll(zoneScript[i]);
+                evActive = true;
+                return;
             }
         }
     }
 
-    public void npcCommand(String act) {
-        if (act.startsWith("SHOW ")) actors.show(act.substring(5).trim());
-        else if (act.startsWith("HIDE ")) actors.hide(act.substring(5).trim());
-        else if (act.startsWith("WALK ")) {
-            String[] t = act.substring(5).split(" ");
-            if (t.length >= 3) actors.walkTo(t[0], Integer.parseInt(t[1]), Integer.parseInt(t[2]));
+    public void update() {
+        if (victory || !evActive) return;
+        if (gv != null && gv.isDialogBlocking()) return;
+        if (evQueue.isEmpty()) { evActive = false; return; }
+        String cmd = evQueue.remove(0);
+        exec(cmd);
+    }
+
+    private void exec(String cmd) {
+        if (cmd.startsWith("SAY ")) {
+            int sp = cmd.indexOf(' ', 4);
+            gv.showDialog(cmd.substring(4, sp), cmd.substring(sp + 1));
+        } else if (cmd.startsWith("SPAWN ")) {
+            String[] p = cmd.split(" ");
+            actors.spawn(p[1], Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+        } else if (cmd.startsWith("DESPAWN ")) {
+            actors.despawn(cmd.split(" ")[1]);
+        } else if (cmd.startsWith("FIGHT ")) {
+            int n = Integer.parseInt(cmd.split(" ")[1]);
+            if (n > 6) pendingWave = n - 6;
+            startEncounter();
+        } else if (cmd.startsWith("REINFORCE ")) {
+            reinforceKills = 0;
+            reinforceTarget = Integer.parseInt(cmd.split(" ")[1]);
+        } else if (cmd.startsWith("ACTION ")) {
+            String[] p = cmd.split(" ");
+            runAction(p[1], p.length > 2 ? Integer.parseInt(p[2]) : 0);
+        } else if (cmd.startsWith("SETFLAG ")) {
+            setFlag(cmd.split(" ")[1]);
+        } else if (cmd.startsWith("CAM_LOOK ")) {
+            String[] p = cmd.split(" ");
+            gv.scriptCamLook(Integer.parseInt(p[1]), Integer.parseInt(p[2]),
+                    p.length > 3 ? Integer.parseInt(p[3]) : 3000);
+        } else if (cmd.startsWith("VICTORY")) {
+            victory = true;
+            gv.onActComplete();
         }
-        else if (act.startsWith("EXIT ")) {
-            String[] t = act.substring(5).split(" ");
-            if (t.length >= 3) actors.exitTo(t[0], Integer.parseInt(t[1]), Integer.parseInt(t[2]));
+    }
+
+    private void runAction(String name, int ms) {
+        if (gv == null) return;
+        if (name.equals("shake")) gv.fxShake(ms);
+        else if (name.equals("flash")) gv.fxFlash(ms);
+        else if (name.equals("decal")) gv.fxDecal("blood");
+    }
+
+    private void startEncounter() {
+        encounterLive = true;
+        actors.hideStandins();
+        gv.stageEncounterFromActors();
+    }
+
+    public void onEnemyDeath() {
+        if (reinforceKills >= 0 && reinforceKills < reinforceTarget) {
+            reinforceKills++;
+            if (gv.enemiesAlive() < 7) {
+                int[] h = fodderHexes[reinforceKills % fodderHexes.length];
+                gv.spawnReinforcement("fodder", h[0], h[1]);
+            }
         }
-        else if (act.startsWith("ACTOR ")) {
-            String[] t = act.substring(6).split(" ");
-            if (t.length >= 3) {
-                boolean hidden = t.length >= 4 && "hidden".equals(t[3]);
-                actors.add(t[0], Integer.parseInt(t[1]), Integer.parseInt(t[2]), hidden);
+        if (reinforceKills >= reinforceTarget && reinforceTarget > 0) {
+            setFlag("courtyard_cleared");
+            reinforceKills = -1;
+        }
+    }
+
+    public void onEnemyCountLow(int alive) {
+        if (pendingWave > 0 && alive <= 2) {
+            pendingWave = 0;
+            for (int i = 0; i < 6; i++) {
+                int[] h = waveSpawnHexes[i];
+                gv.spawnReinforcement("skirmisher", h[0], h[1]);
             }
         }
     }
 
-    public boolean openEncounter() {
-        if (encounterOpen) return false;
-        encounterOpen = true;
-        encounterWon = false;
-        encounterN = 0;
-        for (int i = 0; i < actors.size(); i++) {
-            StoryActor a = actors.get(i);
-            if (!a.hidden && a.isEnemy()) {
-                if (encounterN < encounterHex.length) {
-                    encounterHex[encounterN][0] = a.q;
-                    encounterHex[encounterN][1] = a.r;
-                    encounterN++;
-                }
-                actors.hide(a.name);
-            }
-        }
-        return encounterN > 0;
+    public void endEncounter() {
+        encounterLive = false;
+        if (gv != null) gv.refreshDock();
     }
 
-    public void closeEncounter(boolean won) {
-        encounterOpen = false;
-        encounterWon = won;
+    public boolean encounterLive() { return encounterLive; }
+    public boolean isVictory() { return victory; }
+    public boolean flag(String f) {
+        Boolean b = flags.get(f); return b != null && b;
     }
-
-    public boolean encounterOpen() { return encounterOpen; }
-    public boolean encounterLive() { return encounterOpen && !encounterWon; }
-    public int encounterCount() { return encounterN; }
-    public int[] encounterHex(int i) { return encounterHex[i]; }
-
-    public boolean takeSceneEvent() {
-        if (sceneEvent) { sceneEvent = false; return true; }
-        return false;
-    }
-
-    public void drawWorld(Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {
-        if (!loaded || currentScene == null) return;
-        sceneMap.draw(cv, camX, camY, zoom, W, H, quality, animClock);
-        actors.draw(cv, camX, camY, zoom, W, H, animClock);
-    }
-
-    public void drawOver(Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {
-        if (!loaded || currentScene == null) return;
-        if (fadeT > 0) {
-            cv.drawColor(Color.argb((int)(fadeT * 255), 0, 0, 0));
+    public void setFlag(String f) {
+        flags.put(f, Boolean.TRUE);
+        for (int i = 0; i < zoneCount; i++) {
+            if (zoneState[i] == 3 && f.equals(zoneGate[i])) zoneState[i] = 0;
         }
     }
+    
+    public boolean filterAction(String act) { return false; }
+    public void npcCommand(String act) {}
+    public void resolveActionPoint(String act, float fx, float fy) { pt[0] = fx; pt[1] = fy; }
+    public void drawWorld(android.graphics.Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {
+        if (map != null) map.draw(cv, camX, camY, zoom, W, H);
+    }
+    public void drawOver(android.graphics.Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {}
 }
