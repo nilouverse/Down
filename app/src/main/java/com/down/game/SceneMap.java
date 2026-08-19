@@ -3,377 +3,317 @@ package com.down.game;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.LinearGradient;
-import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.RadialGradient;
 import android.graphics.Rect;
-import android.graphics.RectF;
-import android.graphics.Shader;
-import java.util.ArrayList;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.ShortBuffer;
+import java.util.Arrays;
 
-public class SceneMap {
+public final class SceneMap {
+    public static final float HEX = 96f;
+    public static final float SQUASH = 0.6f;
+    public static final float BAKE = 2f;
+    public static final int CHUNK_PX = 1024;
+    public static final int SRC = CHUNK_PX / (int) BAKE;
 
-    public static final int KIND_ASHEN = 0, KIND_DESCENT = 1, KIND_CITY = 2,
-            KIND_COURTYARD = 3, KIND_RUN = 4;
+    public static final int MIN_Q = -32, MAX_Q = 96;
+    public static final int MIN_R = -24, MAX_R = 24;
+    public static final int W_Q = MAX_Q - MIN_Q + 1;
+    public static final int W_R = MAX_R - MIN_R + 1;
 
-    private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
+    private static final short C_ASH  = rgb565(38, 33, 36);
+    private static final short C_ASH2 = rgb565(52, 44, 48);
+    private static final short C_ROCK = rgb565(26, 22, 26);
+    private static final short C_PATH = rgb565(58, 48, 44);
+    private static final short C_STRT = rgb565(46, 42, 46);
+    private static final short C_WALL = rgb565(20, 18, 22);
+    private static final short C_BONE = rgb565(196, 188, 168);
+    private static final short C_BONE2= rgb565(158, 148, 130);
+    private static final short C_VOID = rgb565(8, 7, 10);
+    private static final short C_GLASS= rgb565(30, 46, 38);
 
-    public static class Prop {
-        public String type;
-        public int q, r;
-        public float x, y;
-        public Frame frame;
-        public float scale = 1f;
-        public boolean blocking;
-        public float drawY() { return y + 24f; }
-    }
+    private final boolean[] walkable;
+    private final Bitmap[] chunkBits;
+    private final int[] chunkKeys;
+    private final long[] chunkUsed;
+    private long frameStamp;
 
-    public static class Crack {
-        public int q1, r1, q2, r2;
-    }
+    private final Rect srcR = new Rect();
+    private final Rect dstR = new Rect();
+    private final Paint bmpPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint glowPaint = new Paint();
 
-    private final ArrayList<Prop> props = new ArrayList<>();
-    private final ArrayList<Crack> cracks = new ArrayList<>();
-    private boolean[] walk;
-    private int groundColor, sceneKind;
-    private String sceneName;
-    private Bitmap bg, fg;
-    private Canvas bgCanvas, fgCanvas;
-    private float worldMinX, worldMinY, worldMaxX, worldMaxY, pxPerWorld;
-    private final Matrix drawMatrix = new Matrix();
-    private final Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final Paint fgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final Paint groundPaint = new Paint();
-    private final Paint crackPaint = new Paint();
-    private final Paint lightPaint = new Paint();
-    private final Path crackPath = new Path();
-    private final Rect srcRect = new Rect();
-    private final RectF dstRect = new RectF();
-    private static Frame[] smallPropFrames, largePropFrames;
-    private final int[] hexOut = new int[2];
-    private Context ctx;
+    private boolean quality = true;
+    private Bitmap craterGlow;
+    private boolean craterVisible = false;
+    private final int[] noiseSeed = new int[256];
 
-    public SceneMap() {
-        bgPaint.setFilterBitmap(true);
-        fgPaint.setFilterBitmap(true);
-        crackPaint.setStyle(Paint.Style.STROKE);
-        crackPaint.setStrokeCap(Paint.Cap.ROUND);
-        crackPaint.setStrokeJoin(Paint.Join.ROUND);
-    }
+    private volatile int bakeReqCX = Integer.MIN_VALUE, bakeReqCY = Integer.MIN_VALUE;
+    private Thread baker;
 
-    public void init(Context c) {
-        ctx = c;
-    }
+    public SceneMap(Context ctx, boolean quality) {
+        this.quality = quality;
+        this.walkable = new boolean[W_Q * W_R];
+        buildWalkability();
 
-    public void begin(String name, int ground) {
-        props.clear();
-        cracks.clear();
-        walk = null;
-        sceneName = name;
-        groundColor = ground;
-        if (name.contains("Ashen")) sceneKind = KIND_ASHEN;
-        else if (name.contains("Descent")) sceneKind = KIND_DESCENT;
-        else if (name.contains("Falling") || name.contains("City")) sceneKind = KIND_CITY;
-        else if (name.contains("Courtyard") || name.contains("Reunion")
-                || name.contains("Wave") || name.contains("Last Act")) sceneKind = KIND_COURTYARD;
-        else if (name.contains("Run")) sceneKind = KIND_RUN;
-        else sceneKind = KIND_ASHEN;
-    }
+        int cap = 12;
+        chunkBits = new Bitmap[cap];
+        chunkKeys = new int[cap];
+        chunkUsed = new long[cap];
+        Arrays.fill(chunkKeys, Integer.MIN_VALUE);
 
-    public void crack(int q1, int r1, int q2, int r2) {
-        Crack c = new Crack();
-        c.q1 = q1; c.r1 = r1; c.q2 = q2; c.r2 = r2;
-        cracks.add(c);
-    }
-
-    public void prop(String type, int q, int r) {
-        Prop p = new Prop();
-        p.type = type; p.q = q; p.r = r;
-        p.x = hexX(q, r); p.y = hexY(q, r);
-        p.frame = getPropFrame(type);
-        p.blocking = isBlocking(type);
-        if ("spire".equals(type) || "wall".equals(type) || "bonepillar".equals(type)) p.scale = 1.35f;
-        props.add(p);
-    }
-
-    public void tick(float dt) {
-        if (walk == null && bg == null) compile();
-    }
-
-    private void compile() {
-        walk = buildWalkMask(sceneKind, props);
-        final int[] bounds = sceneBounds();
-        final int minQ = bounds[0], maxQ = bounds[1], minR = bounds[2], maxR = bounds[3];
-        float x0 = hexX(minQ, minR), x1 = hexX(minQ, maxR);
-        float x2 = hexX(maxQ, minR), x3 = hexX(maxQ, maxR);
-        worldMinX = Math.min(Math.min(x0, x1), Math.min(x2, x3)) - 70f;
-        worldMaxX = Math.max(Math.max(x0, x1), Math.max(x2, x3)) + 70f;
-        worldMinY = hexY(0, minR) - 70f;
-        worldMaxY = hexY(0, maxR) + 100f;
-        float density = 1f;
-        pxPerWorld = Math.max(0.30f, Math.min(0.75f, 0.50f * density));
-        int bw = Math.max(64, (int) ((worldMaxX - worldMinX) * pxPerWorld));
-        int bh = Math.max(64, (int) ((worldMaxY - worldMinY) * pxPerWorld));
-        if (bw > 1600) bw = 1600;
-        if (bh > 900) bh = 900;
-        if (bg != null) bg.recycle();
-        if (fg != null) fg.recycle();
-        bg = Bitmap.createBitmap(bw, bh, Bitmap.Config.RGB_565);
-        bgCanvas = new Canvas(bg);
-        bgCanvas.drawColor(groundColor);
-        drawGroundVariation(bgCanvas, groundColor, sceneName, minQ, maxQ, minR, maxR);
-        drawCracks(bgCanvas, minQ, maxQ, minR, maxR);
-        fg = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
-        fgCanvas = new Canvas(fg);
-        drawLightOverlay(fgCanvas, bw, bh);
-    }
-
-    public boolean isWalkable(float wx, float wy) {
-        if (walk == null) return true;
-        worldToHex(wx, wy, hexOut);
-        int q = hexOut[0], r = hexOut[1];
-        int idx = (q + 64) + (r + 64) * 128;
-        if (idx < 0 || idx >= walk.length) return false;
-        return walk[idx];
-    }
-
-    public void draw(Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {
-        if (bg == null) return;
-        cv.save();
-        drawMatrix.reset();
-        drawMatrix.postScale(zoom / pxPerWorld, zoom / pxPerWorld);
-        drawMatrix.postTranslate((worldMinX - camX) * zoom + W / 2f,
-                (worldMinY - camY) * zoom + H / 2f);
-        cv.drawBitmap(bg, drawMatrix, bgPaint);
-        if (quality > 0 && fg != null) cv.drawBitmap(fg, drawMatrix, fgPaint);
-        cv.restore();
-        for (int i = 0; i < props.size(); i++) drawProp(cv, props.get(i), camX, camY, zoom, W, H);
-    }
-
-    public int propCount() { return props.size(); }
-    public Prop propAt(int i) { return props.get(i); }
-
-    private void drawProp(Canvas cv, Prop p, float camX, float camY, float zoom, int W, int H) {
-        if (p.frame == null || p.frame.bmp == null) return;
-        float sx = (p.x - camX) * zoom + W / 2f;
-        float sy = (p.y - camY) * zoom + H / 2f;
-        float s = p.scale * zoom;
-        float dw = p.frame.cw * s, dh = p.frame.ch * s;
-        srcRect.set(p.frame.left, p.frame.top, p.frame.left + p.frame.cw, p.frame.top + p.frame.ch);
-        dstRect.set(sx - dw / 2f, sy - dh, sx + dw / 2f, sy);
-        cv.drawBitmap(p.frame.bmp, srcRect, dstRect, bgPaint);
-    }
-
-    private static boolean[] buildWalkMask(int kind, ArrayList<Prop> props) {
-        boolean[] mask = new boolean[128 * 128];
-        for (int r = -64; r < 64; r++) {
-            int base = (r + 64) * 128;
-            for (int q = -64; q < 64; q++) {
-                mask[base + q + 64] = shapeWalkable(q, r, kind);
-            }
+        long s = 0x9E3779B97F4A7C15L;
+        for (int i = 0; i < 256; i++) {
+            s ^= s << 13; s ^= s >>> 7; s ^= s << 17;
+            noiseSeed[i] = (int) (s & 0x7FFFFFFF);
         }
-        for (int i = 0; i < props.size(); i++) {
-            Prop p = props.get(i);
-            if (!p.blocking) continue;
-            int idx = (p.q + 64) + (p.r + 64) * 128;
-            if (idx >= 0 && idx < mask.length) mask[idx] = false;
-            int idx2 = (p.q + 1 + 64) + (p.r + 64) * 128;
-            if (idx2 >= 0 && idx2 < mask.length) mask[idx2] = false;
-            int idx3 = (p.q - 1 + 64) + (p.r + 64) * 128;
-            if (idx3 >= 0 && idx3 < mask.length) mask[idx3] = false;
-        }
-        return mask;
+        bakeCraterGlow();
+        startBaker();
     }
 
-    private static boolean shapeWalkable(int q, int r, int kind) {
-        switch (kind) {
-            case KIND_ASHEN: return Math.abs(q) <= 10 && Math.abs(r) <= 8 && Math.abs(q + r) <= 14;
-            case KIND_DESCENT: return q >= -8 && q <= 10 && r >= -2 && r <= 2;
-            case KIND_CITY: return q >= -6 && q <= 10 && r >= -5 && r <= 5;
-            case KIND_COURTYARD: return (q * q + q * r + r * r) <= 49;
-            case KIND_RUN: return q >= -4 && q <= 10 && r >= -1 && r <= 1;
-            default: return true;
-        }
+    private static short rgb565(int r, int g, int b) {
+        return (short) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
     }
 
-    private int[] sceneBounds() {
-        int minQ = 1000, maxQ = -1000, minR = 1000, maxR = -1000;
-        for (Prop p : props) {
-            if (p.q < minQ) minQ = p.q;
-            if (p.q > maxQ) maxQ = p.q;
-            if (p.r < minR) minR = p.r;
-            if (p.r > maxR) maxR = p.r;
-        }
-        if (minQ == 1000) { minQ = -4; maxQ = 4; minR = -4; maxR = 4; }
-        switch (sceneKind) {
-            case KIND_ASHEN: minQ = Math.min(minQ, -10); maxQ = Math.max(maxQ, 10);
-                minR = Math.min(minR, -8); maxR = Math.max(maxR, 8); break;
-            case KIND_DESCENT: minQ = Math.min(minQ, -8); maxQ = Math.max(maxQ, 10);
-                minR = Math.min(minR, -2); maxR = Math.max(maxR, 2); break;
-            case KIND_CITY: minQ = Math.min(minQ, -6); maxQ = Math.max(maxQ, 10);
-                minR = Math.min(minR, -5); maxR = Math.max(maxR, 5); break;
-            case KIND_COURTYARD: minQ = Math.min(minQ, -8); maxQ = Math.max(maxQ, 8);
-                minR = Math.min(minR, -8); maxR = Math.max(maxR, 8); break;
-            case KIND_RUN: minQ = Math.min(minQ, -4); maxQ = Math.max(maxQ, 10);
-                minR = Math.min(minR, -1); maxR = Math.max(maxR, 1); break;
-        }
-        return new int[] { minQ, maxQ, minR, maxR };
+    // Matches GameView's exact Flat-Top squashed hex math
+    public static void hexToWorld(int q, int r, float[] out) {
+        out[0] = HEX * (float) Math.sqrt(3) * (q + r / 2f);
+        out[1] = HEX * 1.5f * r * SQUASH;
     }
 
-    private void drawGroundVariation(Canvas canvas, int ground, String sceneName,
-                                     int minQ, int maxQ, int minR, int maxR) {
-        java.util.Random rnd = new java.util.Random(sceneName == null ? 7L : sceneName.hashCode());
-        groundPaint.setStyle(Paint.Style.FILL);
-        for (int i = 0; i < 16; i++) {
-            int q = minQ + rnd.nextInt(Math.max(1, maxQ - minQ + 1));
-            int r = minR + rnd.nextInt(Math.max(1, maxR - minR + 1));
-            float x = hexX(q, r), y = hexY(q, r);
-            float rad = 50f + rnd.nextFloat() * 140f;
-            int alpha = rnd.nextBoolean() ? 0x16 : 0x13;
-            int color = rnd.nextBoolean() ? 0x000000 : 0xffffff;
-            groundPaint.setColor(Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color)));
-            canvas.drawOval(worldToBitmapX(x) - rad, worldToBitmapY(y) - rad,
-                    worldToBitmapX(x) + rad, worldToBitmapY(y) + rad, groundPaint);
-        }
-    }
-
-    private void drawCracks(Canvas canvas, int minQ, int maxQ, int minR, int maxR) {
-        crackPaint.setColor(0x99000000);
-        crackPaint.setStrokeWidth(2.5f * pxPerWorld);
-        for (Crack c : cracks) {
-            float sx = worldToBitmapX(hexX(c.q1, c.r1));
-            float sy = worldToBitmapY(hexY(c.q1, c.r1));
-            float ex = worldToBitmapX(hexX(c.q2, c.r2));
-            float ey = worldToBitmapY(hexY(c.q2, c.r2));
-            crackPath.reset();
-            crackPath.moveTo(sx, sy);
-            java.util.Random rnd = new java.util.Random((long) (c.q1 * 31 + c.r1 * 97 + c.q2 * 131 + c.r2 * 17));
-            float dx = ex - sx, dy = ey - sy;
-            float len = (float) Math.sqrt(dx * dx + dy * dy);
-            int steps = Math.max(4, (int) (len / (40f * pxPerWorld)));
-            for (int i = 1; i < steps; i++) {
-                float t = i / (float) steps;
-                float jx = sx + dx * t + (rnd.nextFloat() - 0.5f) * 18f * pxPerWorld;
-                float jy = sy + dy * t + (rnd.nextFloat() - 0.5f) * 18f * pxPerWorld;
-                crackPath.lineTo(jx, jy);
-            }
-            crackPath.lineTo(ex, ey);
-            canvas.drawPath(crackPath, crackPaint);
-        }
-    }
-
-    private void drawLightOverlay(Canvas canvas, int bw, int bh) {
-        LinearGradient fog = new LinearGradient(0, 0, 0, bh,
-                new int[] { 0x00000000, 0x48000000, 0x00000000 },
-                new float[] { 0f, 0.55f, 1f }, Shader.TileMode.CLAMP);
-        lightPaint.setShader(fog);
-        canvas.drawRect(0, 0, bw, bh, lightPaint);
-        for (Prop p : props) {
-            int glow = glowColor(p.type);
-            if (glow == 0) continue;
-            float bx = worldToBitmapX(p.x), by = worldToBitmapY(p.y);
-            float radius = 120f * pxPerWorld;
-            if ("spire".equals(p.type) || "wall".equals(p.type)) radius *= 1.4f;
-            RadialGradient rg = new RadialGradient(bx, by, radius,
-                    new int[] { glow, glow & 0x00ffffff },
-                    new float[] { 0f, 1f }, Shader.TileMode.CLAMP);
-            lightPaint.setShader(rg);
-            canvas.drawCircle(bx, by, radius, lightPaint);
-        }
-        lightPaint.setShader(null);
-    }
-
-    private static int glowColor(String type) {
-        switch (type) {
-            case "bonepillar": return 0x39b07cff;
-            case "bones": return 0x3934e3d6;
-            case "barricade": return 0x2cff7a1a;
-            case "rubble": return 0x24ff2747;
-            case "spire": return 0x30b3102a;
-            default: return 0;
-        }
-    }
-
-    private float worldToBitmapX(float wx) { return (wx - worldMinX) * pxPerWorld; }
-    private float worldToBitmapY(float wy) { return (wy - worldMinY) * pxPerWorld; }
-
-    private Frame[] getSmallProps() {
-        if (smallPropFrames == null && ctx != null) {
-            java.util.List<Bitmap> bms = Sprites.trimBottom(
-                    Sprites.cutSheet(ctx, "sprites/props.png", 2, 4, 4), 0.9f);
-            smallPropFrames = new Frame[bms.size()];
-            for (int i = 0; i < bms.size(); i++) {
-                smallPropFrames[i] = wrapFrame(bms.get(i));
-            }
-        }
-        return smallPropFrames;
-    }
-
-    private Frame[] getLargeProps() {
-        if (largePropFrames == null && ctx != null) {
-            java.util.List<Bitmap> bms = Sprites.trimBottom(
-                    Sprites.cutSheet(ctx, "sprites/props2.png", 2, 4, 4), 0.9f);
-            largePropFrames = new Frame[bms.size()];
-            for (int i = 0; i < bms.size(); i++) {
-                largePropFrames[i] = wrapFrame(bms.get(i));
-            }
-        }
-        return largePropFrames;
-    }
-
-    private static Frame wrapFrame(Bitmap b) {
-        Frame f = new Frame();
-        f.bmp = b;
-        f.top = 0; f.left = 0;
-        f.cw = b.getWidth(); f.ch = b.getHeight();
-        f.rgt = f.cw; f.ww = f.cw;
-        f.ref = f.ch;
-        return f;
-    }
-
-    private Frame getPropFrame(String type) {
-        int idx;
-        switch (type) {
-            case "spire": idx = 0; break;
-            case "wall": idx = 1; break;
-            case "rubble": idx = 2; break;
-            case "bonepillar": idx = 3; break;
-            case "bones": idx = 4; break;
-            case "barricade": idx = 5; break;
-            case "street": idx = 6; break;
-            default: idx = 7; break;
-        }
-        if ("spire".equals(type) || "wall".equals(type) || "bonepillar".equals(type) || "barricade".equals(type)) {
-            Frame[] lp = getLargeProps();
-            return lp != null ? lp[idx % lp.length] : null;
-        }
-        Frame[] sp = getSmallProps();
-        return sp != null ? sp[idx % sp.length] : null;
-    }
-
-    private static boolean isBlocking(String type) {
-        switch (type) {
-            case "spire": case "wall": case "rubble": case "barricade":
-            case "bonepillar": case "bones": return true;
-            default: return false;
-        }
-    }
-
-    public static float hexX(int q, int r) { return HEX * SQRT3 * (q + r * 0.5f); }
-    public static float hexY(int q, int r) { return HEX * 1.5f * r * SQUASH; }
-
-    private static void worldToHex(float wx, float wy, int[] out) {
-        float rf = wy / (HEX * 1.5f * SQUASH);
-        float qf = wx / (HEX * SQRT3) - rf * 0.5f;
-        float zf = -qf - rf;
-        int rq = Math.round(qf), rr = Math.round(rf), rz = Math.round(zf);
-        float dq = Math.abs(rq - qf), dr = Math.abs(rr - rf), dz = Math.abs(rz - zf);
-        if (dq > dr && dq > dz) rq = -rr - rz;
-        else if (dr > dz) rr = -rq - rz;
-        else rz = -rq - rr;
+    public static void worldToHex(float x, float y, int[] out) {
+        float hy = y / SQUASH;
+        float qf = ((float) Math.sqrt(3) / 3f * x - 1f / 3f * hy) / HEX;
+        float rf2 = (2f / 3f * hy) / HEX;
+        float sf = -qf - rf2;
+        int rq = Math.round(qf), rr = Math.round(rf2), rs = Math.round(sf);
+        float dq = Math.abs(rq - qf), dr = Math.abs(rr - rf2), ds = Math.abs(rs - sf);
+        if (dq > dr && dq > ds) rq = -rr - rs;
+        else if (dr > ds) rr = -rq - rs;
         out[0] = rq; out[1] = rr;
+    }
+
+    private void buildWalkability() {
+        for (int r = MIN_R; r <= MAX_R; r++) {
+            for (int q = MIN_Q; q <= MAX_Q; q++) {
+                boolean w = false;
+                if (q <= 10) {
+                    w = r >= -4 && r <= 12;
+                } else if (q <= 36) {
+                    float t = (q - 10) / 26f;
+                    float cr = 2 + t * -16f;
+                    w = Math.abs(r - cr) <= (2.6f - t * 0.8f);
+                } else if (q <= 60) {
+                    boolean street = (r >= -6 && r <= 12) &&
+                            ((r % 5 == 0) || (q % 6 == 0) || insidePlaza(q, r));
+                    w = street && !insideRubble(q, r);
+                } else if (q <= 78) {
+                    float dx = (q - 66) / 10f, dy = (r - 4) / 8f;
+                    w = (dx * dx + dy * dy) <= 1f || (q >= 56 && q <= 78 && r >= 2 && r <= 6);
+                } else {
+                    w = r >= -2 && r <= 10;
+                }
+                walkable[(r - MIN_R) * W_Q + (q - MIN_Q)] = w;
+            }
+        }
+    }
+
+    private static boolean insidePlaza(int q, int r) {
+        return q >= 44 && q <= 50 && r >= 2 && r <= 8;
+    }
+    private static boolean insideRubble(int q, int r) {
+        return (q >= 40 && q <= 41 && r >= 0 && r <= 3)
+            || (q >= 46 && q <= 47 && r >= 9 && r <= 11)
+            || (q >= 53 && q <= 54 && r >= -2 && r <= 1);
+    }
+
+    public boolean walk(int q, int r) {
+        if (q < MIN_Q || q > MAX_Q || r < MIN_R || r > MAX_R) return false;
+        return walkable[(r - MIN_R) * W_Q + (q - MIN_Q)];
+    }
+
+    public boolean walkWorld(float wx, float wy) {
+        int[] out = new int[2];
+        worldToHex(wx, wy, out);
+        return walk(out[0], out[1]);
+    }
+
+    private void startBaker() {
+        baker = new Thread(new Runnable() { public void run() {
+            while (!Thread.interrupted()) {
+                int cx, cy;
+                synchronized (SceneMap.this) {
+                    cx = bakeReqCX; cy = bakeReqCY;
+                    if (cx == Integer.MIN_VALUE) {
+                        try { SceneMap.this.wait(200); } catch (InterruptedException e) { return; }
+                        continue;
+                    }
+                    bakeReqCX = Integer.MIN_VALUE;
+                }
+                bakeChunk(cx, cy);
+            }
+        }}, "map-baker");
+        baker.setDaemon(true);
+        baker.start();
+    }
+
+    private void bakeChunk(int cx, int cy) {
+        Bitmap bmp = null;
+        int slot = -1;
+        for (int i = 0; i < chunkBits.length; i++) {
+            if (chunkKeys[i] == Integer.MIN_VALUE) { slot = i; break; }
+        }
+        if (slot < 0) {
+            long best = Long.MAX_VALUE;
+            for (int i = 0; i < chunkUsed.length; i++)
+                if (chunkUsed[i] < best) { best = chunkUsed[i]; slot = i; }
+            bmp = chunkBits[slot];
+        }
+        if (bmp == null) {
+            bmp = Bitmap.createBitmap(SRC, SRC, Bitmap.Config.RGB_565);
+            chunkBits[slot] = bmp;
+        }
+        short[] px = new short[SRC * SRC];
+        float baseWx = cx * CHUNK_PX;
+        float baseWy = cy * CHUNK_PX;
+        float[] hw = new float[2];
+        int[] hq = new int[2];
+        for (int y = 0; y < SRC; y++) {
+            float wy = baseWy + (y + 0.5f) * BAKE;
+            for (int x = 0; x < SRC; x++) {
+                float wx = baseWx + (x + 0.5f) * BAKE;
+                px[y * SRC + x] = samplePixel(wx, wy, hq, hw);
+            }
+        }
+        ShortBuffer sb = ByteBuffer.allocateDirect(px.length * 2)
+                .order(ByteOrder.nativeOrder()).asShortBuffer();
+        sb.put(px).position(0);
+        bmp.copyPixelsFromBuffer(sb);
+        chunkKeys[slot] = cy * 4096 + cx; 
+        chunkUsed[slot] = ++frameStamp;
+    }
+
+    private short samplePixel(float wx, float wy, int[] hq, float[] hw) {
+        worldToHex(wx, wy, hq);
+        int q = hq[0], r = hq[1];
+        if (q < MIN_Q || q > MAX_Q || r < MIN_R || r > MAX_R) return C_VOID;
+
+        if (q <= 10) {
+            if (r < -4) return C_VOID;
+            if (quality && valueNoise(wx, wy, 97) > 0.82f) return C_ROCK;
+            return ((q + r) & 3) == 0 ? C_ASH2 : C_ASH;
+        } else if (q <= 36) {
+            float t = (q - 10) / 26f;
+            float c = 2 + t * -16f;
+            if (Math.abs(r - c) <= (2.6f - t * 0.8f)) {
+                if (quality && valueNoise(wx, wy, 31) > 0.7f) return C_ROCK;
+                return ((q + r) & 1) == 0 ? C_PATH : C_ASH2;
+            }
+            return r > c ? C_ROCK : C_VOID;
+        } else if (q <= 60) {
+            boolean street = (r >= -6 && r <= 12) && ((r % 5 == 0) || (q % 6 == 0) || insidePlaza(q, r));
+            if (street && !insideRubble(q, r)) {
+                return (((int)(wx / 16) + (int)(wy / 16)) & 1) == 0 ? C_STRT : C_ASH2;
+            } else if (insideRubble(q, r)) {
+                return C_ROCK;
+            }
+            return ((q ^ r) & 7) < 5 ? C_WALL : C_ROCK;
+        } else if (q <= 78) {
+            float dx = (q - 66) / 10f, dy = (r - 4) / 8f;
+            boolean in = (dx * dx + dy * dy) <= 1f;
+            if (in) {
+                if (quality && valueNoise(wx, wy, 77) > 0.86f) return C_BONE2;
+                return ((q + r) & 3) == 0 ? C_BONE2 : C_BONE;
+            }
+            return (r >= 2 && r <= 6) ? C_STRT : C_ROCK;
+        } else {
+            if (q > 82 && quality && valueNoise(wx, wy, 13) > 0.88f) return C_GLASS;
+            return ((q + r) & 7) == 0 ? C_GLASS : C_VOID;
+        }
+    }
+
+    private float valueNoise(float x, float y, int salt) {
+        int xi = (int) Math.floor(x / 16f), yi = (int) Math.floor(y / 16f);
+        int n = noiseSeed[((xi * 7 + yi * 13 + salt) & 255)];
+        return ((n >>> 8) & 1023) / 1023f;
+    }
+
+    public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        int x0 = (int) Math.floor((camX - vw / (2f * zoom)) / CHUNK_PX) - 1;
+        int x1 = (int) Math.floor((camX + vw / (2f * zoom)) / CHUNK_PX) + 1;
+        int y0 = (int) Math.floor((camY - vh / (2f * zoom)) / CHUNK_PX) - 1;
+        int y1 = (int) Math.floor((camY + vh / (2f * zoom)) / CHUNK_PX) + 1;
+
+        for (int cy = y0; cy <= y1; cy++) {
+            for (int cx = x0; cx <= x1; cx++) {
+                Bitmap b = acquire(cx, cy);
+                if (b == null) continue;
+                srcR.set(0, 0, SRC, SRC);
+                dstR.set(
+                    (int) ((cx * CHUNK_PX - camX) * zoom + vw / 2f),
+                    (int) ((cy * CHUNK_PX - camY) * zoom + vh / 2f),
+                    (int) ((cx * CHUNK_PX + CHUNK_PX - camX) * zoom + vw / 2f),
+                    (int) ((cy * CHUNK_PX + CHUNK_PX - camY) * zoom + vh / 2f));
+                c.drawBitmap(b, srcR, dstR, bmpPaint);
+            }
+        }
+        if (craterVisible) {
+            float[] hw = new float[2];
+            hexToWorld(88, 4, hw);
+            float gx = hw[0], gy = hw[1];
+            dstR.set((int) ((gx - 500 - camX) * zoom + vw / 2f),
+                     (int) ((gy - 500 - camY) * zoom + vh / 2f),
+                     (int) ((gx + 500 - camX) * zoom + vw / 2f),
+                     (int) ((gy + 500 - camY) * zoom + vh / 2f));
+            c.drawBitmap(craterGlow, null, dstR, glowPaint);
+        }
+    }
+
+    private Bitmap acquire(int cx, int cy) {
+        int key = cy * 4096 + cx;
+        for (int i = 0; i < chunkKeys.length; i++) {
+            if (chunkKeys[i] == key) { chunkUsed[i] = ++frameStamp; return chunkBits[i]; }
+        }
+        requestBake(cx, cy);
+        return null;
+    }
+
+    private void requestBake(int cx, int cy) {
+        synchronized (this) {
+            if (bakeReqCX == Integer.MIN_VALUE) {
+                bakeReqCX = cx; bakeReqCY = cy;
+                this.notify();
+            }
+        }
+    }
+
+    public void setCraterVisible(boolean v) { craterVisible = v; }
+
+    private void bakeCraterGlow() {
+        int r = 128;
+        craterGlow = Bitmap.createBitmap(r * 2, r * 2, Bitmap.Config.RGB_565);
+        short[] px = new short[r * r * 4];
+        for (int y = 0; y < r * 2; y++)
+            for (int x = 0; x < r * 2; x++) {
+                float dx = (x - r) / (float) r, dy = (y - r) / (float) r;
+                float d = dx * dx + dy * dy;
+                int a = d < 1f ? (int) ((1f - d) * 140f) : 0;
+                px[y * r * 2 + x] = rgb565(a / 3, a, a / 5);
+            }
+        ShortBuffer sb = ByteBuffer.allocateDirect(px.length * 2)
+                .order(ByteOrder.nativeOrder()).asShortBuffer();
+        sb.put(px).position(0);
+        craterGlow.copyPixelsFromBuffer(sb);
+        glowPaint.setAlpha(160);
+        glowPaint.setFilterBitmap(true);
+    }
+
+    public void dispose() {
+        if (baker != null) baker.interrupt();
+        for (int i = 0; i < chunkBits.length; i++) {
+            if (chunkBits[i] != null) { chunkBits[i].recycle(); chunkBits[i] = null; chunkKeys[i] = Integer.MIN_VALUE; }
+        }
+        if (craterGlow != null) { craterGlow.recycle(); craterGlow = null; }
     }
 }
