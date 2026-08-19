@@ -85,10 +85,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private float zoomPunch = 0f;
 
     private String lastSceneName = "";
-    private boolean skipCluster = false;
-    private float[] encX = new float[8];
-    private float[] encY = new float[8];
-    private int encounterN = 0;
+    public SceneMap map;
+    public StoryActors actors;
+    private float camLookX, camLookY, camLookT;
 
     private static final int[][] ATK_SEQ = {
             { 0, 1, 2, 3, 4, 9, 5 },
@@ -715,7 +714,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Decal dcl : decalPool) dcl.active = false;
         for (Slash s : slashPool) s.active = false;
         camSnap = false;
-        encounterN = 0;
         for (int i = 0; i < 3; i++) spawnEnemy();
         startPlayerTurn();
     }
@@ -921,6 +919,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             sound.play("death");
             sound.play(en.gender == 1 ? "female_death" : "male_death");
             sound.play(voice + "_kill");
+            if (storyMode) {
+                sw().onEnemyDeath();
+                sw().onEnemyCountLow(enemies.size() - 1);
+            }
         }
     }
 
@@ -1012,6 +1014,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         story = new Story(this);
         storyMode = true;
         storyFight = false;
+        if (map == null) {
+            map = new SceneMap(getContext(), quality > 0);
+            actors = new StoryActors();
+        }
+        sw().attach(map, actors, this);
+        sw().restoreState();
 
         party.clear();
         Player a = new Player(); a.hero = roster[0];
@@ -1033,7 +1041,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Slash s : slashPool) s.active = false;
         for (Decal dcl : decalPool) dcl.active = false;
         camSnap = false;
-        encounterN = 0;
         state = STATE_GAME;
         startPlayerTurn();
         story.start();
@@ -1126,24 +1133,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private int storyEnemiesAlive() {
         return enemies == null ? 0 : enemies.size();
     }
-    private void storySpawnEncounter() {
-        int n = sw().encounterCount();
-        for (int i = 0; i < n; i++) {
-            int[] h = sw().encounterHex(i);
-            float wx = SceneMap.hexX(h[0], h[1]);
-            float wy = SceneMap.hexY(h[0], h[1]);
-            Enemy e = new Enemy();
-            e.x = wx; e.y = wy;
-            enemies.add(e);
-        }
-        fanDirty = true;
-    }
 
     private void processStoryAction(String act) {
-        if (skipCluster && (act.startsWith("ACTION slash") || act.startsWith("ACTION blood")
-                || act.startsWith("HIDE "))) return;
-        if (act.startsWith("SCENE ") || act.startsWith("SHOW ") || act.startsWith("WALK "))
-            skipCluster = false;
         if (act.startsWith("ACTION shake")) { shakeT = 0.2f; return; }
         if (act.startsWith("ACTION flash")) { hurtT = 0.15f; return; }
         if (act.startsWith("ACTION slash")) {
@@ -1184,49 +1175,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 story = null; storyMode = false; storyFight = false; state = STATE_MENU; return;
             }
 
-            String act;
-            while ((act = story.pollAction()) != null) processStoryAction(act);
+            int[] ph = new int[2];
+            worldToHex(player.x, player.y, ph);
+            sw().onPlayerHexChanged(ph[0], ph[1]);
 
-            sw().tick(story);
-
-            if (storyMode && story.fightRequest > 0) {
-                story.fightRequest = 0;
-                if (sw().openEncounter()) {
-                    storyFight = true;
-                    sound.play("turn");
-                    storySpawnEncounter();
-                }
-            }
-            if (storyFight) {
-                if (storyEnemiesAlive() == 0) {
-                    storyFight = false;
-                    skipCluster = true;
-                    hexesShown = false;
-                    attackRangeShown = 0;
-                    targetEnemy = null;
-                    sw().closeEncounter(true);
-                    story.fightWon();
-                } else if (deadT > 0 && deadT < 1.2f) {
-                    deadT = 0;
-                    for (Player p : party) { p.hp = 100; p.cried = false; p.actionsLeft = 2; }
-                    enemies.clear();
-                    for (int i = 0; i < sw().encounterCount(); i++) {
-                        int[] h = sw().encounterHex(i);
-                        Enemy e = new Enemy();
-                        e.x = SceneMap.hexX(h[0], h[1]);
-                        e.y = SceneMap.hexY(h[0], h[1]);
-                        enemies.add(e);
-                    }
-                    fanDirty = true;
-                    phase = PH_PLAYER;
-                    startPlayerTurn();
-                }
-            }
+            sw().update();
 
             if (sw().takeSceneEvent()) {
                 shClearEnemies();
                 storyFight = false;
-                skipCluster = false;
                 camX = sw().snapX;
                 camY = sw().snapY;
                 camSnap = true;
@@ -1334,8 +1291,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
         if (!exploring && H > 0) {
             float k = 1 - (float) Math.exp(-dt * 8);
-            camX += (fx - camX) * k;
-            camY += ((fy - (H * 0.28f) / zoom) - camY) * k;
+            float tx = fx, ty = fy - (H * 0.28f) / zoom;
+            if (camLookT > 0) {
+                camLookT -= dt;
+                tx = camLookX;
+                ty = camLookY - (H * 0.28f) / zoom;
+            }
+            camX += (tx - camX) * k;
+            camY += (ty - camY) * k;
         }
         runeT += dt;
 
@@ -1351,9 +1314,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     spawnDeathParticles(en.x, en.y);
                     enemies.remove(i);
                     fanDirty = true;
-                    if (enemies.isEmpty() && !storyFight) {
-                        sound.play(voice + "_victory");
-                        emberBurst();
+                    if (enemies.isEmpty()) {
+                        if (storyFight) {
+                            storyFight = false;
+                            hexesShown = false;
+                            attackRangeShown = 0;
+                            targetEnemy = null;
+                            sw().endEncounter();
+                        } else {
+                            sound.play(voice + "_victory");
+                            emberBurst();
+                        }
                     }
                 }
             }
@@ -2366,6 +2337,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (storyMode && story != null) {
             story.drawDialog(cv, W, H, paint, fBody);
             story.drawTitle(cv, W, H, paint, fLogo);
+            story.drawHud(cv, W, H, paint, fBody, fLogo);
         }
 
         if (hurtT > 0) {
@@ -2775,6 +2747,41 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hapticTiered(0); // E3: light tick
         }
         return true;
+    }
+
+    // =====================================================================
+    // CONTINUOUS-MAP BRIDGE — invoked by StoryWorld
+    // =====================================================================
+    public boolean isDialogBlocking() { return story != null && story.dialogUp; }
+    public void showDialog(String speaker, String text) {
+        if (story == null) return;
+        story.speaker = speaker; story.text = text;
+        story.dialogUp = true; story.tw = 0; story.mode = Story.MODE_DIALOG;
+    }
+    public void onProgressFlag(String flag) { if (story != null) story.onProgressFlag(flag); }
+    public void scriptCamLook(int q, int r, int ms) {
+        float[] hw = new float[2];
+        SceneMap.hexToWorld(q, r, hw);
+        camLookX = hw[0]; camLookY = hw[1];
+        camLookT = ms / 1000f;
+    }
+    public void fxShake(int ms) { shakeT = Math.max(shakeT, ms / 1000f); }
+    public void fxFlash(int ms) { hurtT = Math.max(hurtT, ms / 1000f); }
+    public void fxDecal(String kind) { spawnDecal(player.x + player.facing * 40, player.y); }
+    public int enemiesAlive() {
+        int n = 0; for (Enemy e : enemies) if (!e.dead) n++; return n;
+    }
+    public void spawnReinforcement(String type, int q, int r) {
+        float[] hw = new float[2];
+        SceneMap.hexToWorld(q, r, hw);
+        Enemy e = new Enemy();
+        e.x = hw[0]; e.y = hw[1];
+        enemies.add(e);
+    }
+    public void refreshDock() { fanDirty = true; }
+    public void noteWave() { if (story != null) story.flashNote("More are coming..."); }
+    public void onActComplete() {
+        if (story != null) story.showActCard("END OF ACT ONE");
     }
 
     // E3: tiered haptics — 0 light, 1 medium, 2 heavy
