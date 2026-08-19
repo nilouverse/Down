@@ -23,11 +23,9 @@ public class Sound {
     private final Object lock = new Object();
     private final Random rnd = new Random();
 
-    // base key -> all variant asset paths (vex_attack -> [..ogg, ..2.ogg, ..3.ogg])
     private final HashMap<String, ArrayList<String>> sfxPaths = new HashMap<>();
     private final HashMap<String, ArrayList<String>> voicePaths = new HashMap<>();
 
-    // base key -> loaded SoundPool ids
     private final HashMap<String, ArrayList<Integer>> sfxLoaded = new HashMap<>();
     private final HashMap<Integer, String> loadIdToKey = new HashMap<>();
     private final HashSet<String> loadingPaths = new HashSet<>();
@@ -35,8 +33,8 @@ public class Sound {
     private final HashSet<String> pendingKeys = new HashSet<>();
     private final HashSet<String> checkedKeys = new HashSet<>();
 
-    // voice channel: one MediaPlayer, queued, never overlaps
-    private MediaPlayer voicePlayer;
+    private MediaPlayer voiceA, voiceB;
+    private MediaPlayer activeVoice;
     private final Queue<String> voiceQueue = new LinkedList<>();
     private String currentVoiceKey = null;
     private volatile boolean voicePreparing = false;
@@ -125,7 +123,8 @@ public class Sound {
                 if (shouldPlay && status == 0) {
                     SoundPool p = pool;
                     if (p != null) {
-                        p.play(sampleId, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
+                        float vol = isVoicePlaying() ? 0.3f : 1.0f;
+                        p.play(sampleId, vol, vol, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
                     }
                 }
             }
@@ -180,7 +179,10 @@ public class Sound {
         else playSfx(key);
     }
 
-    // SFX: always immediate, random variant
+    private boolean isVoicePlaying() {
+        return activeVoice != null && (activeVoice.isPlaying() || voicePreparing);
+    }
+
     private void playSfx(String key) {
         SoundPool p = pool;
         if (p == null) return;
@@ -190,7 +192,8 @@ public class Sound {
             if (l != null && !l.isEmpty()) id = l.get(rnd.nextInt(l.size()));
         }
         if (id != 0) {
-            p.play(id, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
+            float vol = isVoicePlaying() ? 0.3f : 1.0f;
+            p.play(id, vol, vol, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
             return;
         }
         synchronized (lock) {
@@ -201,7 +204,6 @@ public class Sound {
         loadSfxKey(key);
     }
 
-    // Voices: queued behind voices only, deduped, random variant
     private void playVoice(String key) {
         synchronized (lock) {
             if (key.equals(currentVoiceKey) || voiceQueue.contains(key)) return;
@@ -214,7 +216,7 @@ public class Sound {
         String key;
         synchronized (lock) {
             if (voiceQueue.isEmpty()) return;
-            if (voicePlayer != null && (voicePlayer.isPlaying() || voicePreparing)) return;
+            if (isVoicePlaying()) return;
             key = voiceQueue.poll();
             currentVoiceKey = key;
             voicePreparing = true;
@@ -227,22 +229,29 @@ public class Sound {
         }
         String path = paths.get(rnd.nextInt(paths.size()));
 
-        if (voicePlayer == null) {
-            voicePlayer = new MediaPlayer();
-            voicePlayer.setOnCompletionListener(mp -> { voiceDone(); processVoiceQueue(); });
-            voicePlayer.setOnErrorListener((mp, w, x) -> { voiceDone(); processVoiceQueue(); return true; });
+        MediaPlayer prep = (activeVoice == voiceA) ? voiceB : voiceA;
+        if (prep == null) {
+            prep = new MediaPlayer();
+            prep.setOnCompletionListener(mp -> { voiceDone(); processVoiceQueue(); });
+            prep.setOnErrorListener((mp, w, x) -> { voiceDone(); processVoiceQueue(); return true; });
+            if (voiceA == null) voiceA = prep; else voiceB = prep;
         } else {
-            voicePlayer.reset();
+            prep.reset();
         }
+        
+        final MediaPlayer currentPrep = prep;
         try {
             AssetFileDescriptor afd = context.getAssets().openFd(path);
-            voicePlayer.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            currentPrep.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
             afd.close();
-            voicePlayer.setOnPreparedListener(mp -> {
-                synchronized (lock) { voicePreparing = false; }
+            currentPrep.setOnPreparedListener(mp -> {
+                synchronized (lock) { 
+                    voicePreparing = false; 
+                    activeVoice = mp;
+                }
                 mp.start();
             });
-            voicePlayer.prepareAsync();
+            currentPrep.prepareAsync();
         } catch (Exception e) {
             voiceDone();
             processVoiceQueue();
@@ -259,16 +268,16 @@ public class Sound {
     public void stopAll() {
         SoundPool p = pool;
         if (p != null) p.autoPause();
-        if (voicePlayer != null && voicePlayer.isPlaying()) {
-            try { voicePlayer.pause(); } catch (Exception ignored) {}
+        if (activeVoice != null && activeVoice.isPlaying()) {
+            try { activeVoice.pause(); } catch (Exception ignored) {}
         }
     }
 
     public void resumeAll() {
         SoundPool p = pool;
         if (p != null) p.autoResume();
-        if (voicePlayer != null && !voicePlayer.isPlaying() && currentVoiceKey != null) {
-            try { voicePlayer.start(); } catch (Exception ignored) {}
+        if (activeVoice != null && !activeVoice.isPlaying() && currentVoiceKey != null) {
+            try { activeVoice.start(); } catch (Exception ignored) {}
         }
     }
 
@@ -278,10 +287,9 @@ public class Sound {
         if (p != null) {
             try { p.release(); } catch (Exception ignored) {}
         }
-        if (voicePlayer != null) {
-            try { voicePlayer.stop(); voicePlayer.release(); } catch (Exception ignored) {}
-            voicePlayer = null;
-        }
+        if (voiceA != null) { try { voiceA.stop(); voiceA.release(); } catch (Exception ignored) {} voiceA = null; }
+        if (voiceB != null) { try { voiceB.stop(); voiceB.release(); } catch (Exception ignored) {} voiceB = null; }
+        activeVoice = null;
         synchronized (lock) {
             voiceQueue.clear();
             currentVoiceKey = null;
