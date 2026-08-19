@@ -82,8 +82,8 @@ public final class StoryWorld {
                     if (idx >= 0) { zoneState[idx] = 3; zoneGate[idx] = p[2]; }
                 } else if (line.startsWith("WAIT_FLAG ")) {
                     String[] p = line.split(" ");
-                    int idx = findZone(curZone != null ? curZone : "");
-                    if (idx >= 0) zoneWait[idx] = p[1];
+                    int idx = findZone(p[1]);
+                    if (idx >= 0) zoneWait[idx] = p[2];
                 } else if (line.startsWith("ON_ENTER ")) {
                     int idx = findZone(line.split(" ")[1]);
                     sink = idx >= 0 ? zoneScript[idx] : null;
@@ -103,10 +103,14 @@ public final class StoryWorld {
     public void onPlayerHexChanged(int q, int r) {
         if (q == lastPQ && r == lastPR) return;
         lastPQ = q; lastPR = r;
-        if (evActive) return;
+        rescanCurrentHex();
+    }
+
+    private void rescanCurrentHex() {
+        if (evActive || lastPQ == Integer.MIN_VALUE) return;
         for (int i = 0; i < zoneCount; i++) {
             if (zoneState[i] != 0) continue;
-            int dq = q - zoneQ[i], dr = r - zoneR[i];
+            int dq = lastPQ - zoneQ[i], dr = lastPR - zoneR[i];
             if (dq * dq + dr * dr <= zoneR2[i]) {
                 if (zoneWait[i] != null && !flag(zoneWait[i])) continue;
                 zoneState[i] = 1;
@@ -120,10 +124,14 @@ public final class StoryWorld {
 
     public void update() {
         if (victory || !evActive) return;
+        if (encounterLive) return;
         if (gv != null && gv.isDialogBlocking()) return;
-        if (evQueue.isEmpty()) { evActive = false; return; }
-        String cmd = evQueue.remove(0);
-        exec(cmd);
+        if (evQueue.isEmpty()) {
+            evActive = false;
+            rescanCurrentHex();
+            return;
+        }
+        exec(evQueue.remove(0));
     }
 
     private void exec(String cmd) {
@@ -137,14 +145,18 @@ public final class StoryWorld {
             actors.despawn(cmd.split(" ")[1]);
         } else if (cmd.startsWith("FIGHT ")) {
             int n = Integer.parseInt(cmd.split(" ")[1]);
-            if (n > 6) pendingWave = n - 6;
+            if (n > 8) pendingWave = n - 6;
             startEncounter();
         } else if (cmd.startsWith("REINFORCE ")) {
             reinforceKills = 0;
             reinforceTarget = Integer.parseInt(cmd.split(" ")[1]);
         } else if (cmd.startsWith("ACTION ")) {
             String[] p = cmd.split(" ");
-            runAction(p[1], p.length > 2 ? Integer.parseInt(p[2]) : 0);
+            if (p[1].equals("decal")) {
+                if (gv != null) gv.fxDecal(p.length > 2 ? p[2] : "blood");
+            } else {
+                runAction(p[1], p.length > 2 ? Integer.parseInt(p[2]) : 0);
+            }
         } else if (cmd.startsWith("SETFLAG ")) {
             setFlag(cmd.split(" ")[1]);
         } else if (cmd.startsWith("CAM_LOOK ")) {
@@ -161,13 +173,19 @@ public final class StoryWorld {
         if (gv == null) return;
         if (name.equals("shake")) gv.fxShake(ms);
         else if (name.equals("flash")) gv.fxFlash(ms);
-        else if (name.equals("decal")) gv.fxDecal("blood");
     }
 
     private void startEncounter() {
         encounterLive = true;
-        actors.hideStandins();
-        gv.stageEncounterFromActors();
+        if (actors != null && gv != null) {
+            for (int i = 0; i < actors.size(); i++) {
+                StoryActor a = actors.get(i);
+                if (a.isEnemy() && !a.hidden) {
+                    a.hidden = true;
+                    gv.spawnReinforcement(a.type, a.q, a.r);
+                }
+            }
+        }
     }
 
     public void onEnemyDeath() {
@@ -187,9 +205,12 @@ public final class StoryWorld {
     public void onEnemyCountLow(int alive) {
         if (pendingWave > 0 && alive <= 2) {
             pendingWave = 0;
-            for (int i = 0; i < 6; i++) {
-                int[] h = waveSpawnHexes[i];
-                gv.spawnReinforcement("skirmisher", h[0], h[1]);
+            if (gv != null) {
+                gv.noteWave();
+                for (int i = 0; i < 6; i++) {
+                    int[] h = waveSpawnHexes[i];
+                    gv.spawnReinforcement("skirmisher", h[0], h[1]);
+                }
             }
         }
     }
@@ -209,7 +230,16 @@ public final class StoryWorld {
         for (int i = 0; i < zoneCount; i++) {
             if (zoneState[i] == 3 && f.equals(zoneGate[i])) zoneState[i] = 0;
         }
+        if (f.equals("ending_open") && map != null) map.setCraterVisible(true);
+        if (gv != null) gv.onProgressFlag(f);
     }
+    
+    public int remainingReinforcements() {
+        return reinforceKills >= 0 ? reinforceTarget - reinforceKills : -1;
+    }
+
+    public void saveState() {}
+    public void restoreState() {}
     
     public boolean filterAction(String act) { return false; }
     public void npcCommand(String act) {}
