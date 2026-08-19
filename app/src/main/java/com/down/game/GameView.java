@@ -1189,24 +1189,23 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             sw().tick(story);
 
             if (storyMode && story.fightRequest > 0) {
-                int n = story.fightRequest;
                 story.fightRequest = 0;
                 if (sw().openEncounter()) {
                     storyFight = true;
                     sound.play("turn");
                     storySpawnEncounter();
-                } else {
-                    storyFight = true;
-                    for (int i = 0; i < n; i++) spawnStoryEnemy();
                 }
             }
             if (storyFight) {
                 if (storyEnemiesAlive() == 0) {
                     storyFight = false;
                     skipCluster = true;
+                    hexesShown = false;
+                    attackRangeShown = 0;
+                    targetEnemy = null;
                     sw().closeEncounter(true);
                     story.fightWon();
-                } else if (deadT > 0) {
+                } else if (deadT > 0 && deadT < 1.2f) {
                     deadT = 0;
                     for (Player p : party) { p.hp = 100; p.cried = false; p.actionsLeft = 2; }
                     enemies.clear();
@@ -1351,17 +1350,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     spawnDeathParticles(en.x, en.y);
                     enemies.remove(i);
                     fanDirty = true;
-                    if (enemies.isEmpty()) {
-                        if (storyFight) {
-                            storyFight = false;
-                            hexesShown = false;
-                            attackRangeShown = 0;
-                            targetEnemy = null;
-                            story.fightWon();
-                        } else {
-                            sound.play(voice + "_victory");
-                            emberBurst();
-                        }
+                    if (enemies.isEmpty() && !storyFight) {
+                        sound.play(voice + "_victory");
+                        emberBurst();
                     }
                 }
             }
