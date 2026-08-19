@@ -3,12 +3,15 @@ package com.down.game;
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.media.SoundPool;
 import android.os.Build;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Random;
 
 public class Sound {
@@ -32,13 +35,18 @@ public class Sound {
     private final Object lock = new Object();
     private final Random rnd = new Random();
 
-    // Pools of variants: "vex_kill" -> [id1, id2, id3]
     private final HashMap<String, ArrayList<Integer>> loaded = new HashMap<>();
     private final HashMap<Integer, String> loadIdToName = new HashMap<>();
     private final HashSet<String> loading = new HashSet<>();
     private final HashSet<String> failed = new HashSet<>();
     private final HashSet<String> pending = new HashSet<>();
     private final HashSet<String> checkedBases = new HashSet<>();
+
+    // Voice queue system
+    private MediaPlayer voicePlayer;
+    private final Queue<String> voiceQueue = new LinkedList<>();
+    private String currentVoice = null;
+    private volatile boolean isPreparing = false;
 
     private Context context;
     private SoundPool pool;
@@ -47,6 +55,14 @@ public class Sound {
         int i = name.length();
         while (i > 0 && Character.isDigit(name.charAt(i - 1))) i--;
         return i == name.length() ? name : name.substring(0, i);
+    }
+
+    private boolean isHeroVoice(String name) {
+        if (name == null) return false;
+        for (String hero : HERO_FOLDERS) {
+            if (name.startsWith(hero + "_")) return true;
+        }
+        return false;
     }
 
     public void init(Context ctx) {
@@ -124,8 +140,79 @@ public class Sound {
     }
 
     public void play(String name) {
+        if (name == null) return;
+        if (isHeroVoice(name)) {
+            playVoice(name);
+        } else {
+            playSfx(name);
+        }
+    }
+
+    private void playVoice(String name) {
+        synchronized (lock) {
+            // Deduplicate: if it's already playing or in the queue, ignore it.
+            // This perfectly solves the "killing 3 enemies at once" AOE spam.
+            if (name.equals(currentVoice) || voiceQueue.contains(name)) return;
+            voiceQueue.add(name);
+        }
+        processVoiceQueue();
+    }
+
+    private void processVoiceQueue() {
+        String toPlay = null;
+        synchronized (lock) {
+            if (voiceQueue.isEmpty()) return;
+            if (voicePlayer != null && (voicePlayer.isPlaying() || isPreparing)) return;
+            
+            toPlay = voiceQueue.poll();
+            currentVoice = toPlay;
+            isPreparing = true;
+        }
+        
+        if (voicePlayer == null) {
+            voicePlayer = new MediaPlayer();
+            voicePlayer.setOnCompletionListener(mp -> {
+                synchronized (lock) { 
+                    currentVoice = null; 
+                    isPreparing = false;
+                }
+                processVoiceQueue();
+            });
+            voicePlayer.setOnErrorListener((mp, what, extra) -> {
+                synchronized (lock) { 
+                    currentVoice = null; 
+                    isPreparing = false;
+                }
+                processVoiceQueue();
+                return true;
+            });
+        } else {
+            voicePlayer.reset();
+        }
+
+        try {
+            String path = resolveSoundPath(toPlay);
+            AssetFileDescriptor afd = context.getAssets().openFd(path);
+            voicePlayer.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            afd.close();
+            
+            voicePlayer.setOnPreparedListener(mp -> {
+                synchronized (lock) { isPreparing = false; }
+                mp.start();
+            });
+            voicePlayer.prepareAsync();
+        } catch (Exception e) {
+            synchronized (lock) { 
+                currentVoice = null; 
+                isPreparing = false;
+            }
+            processVoiceQueue();
+        }
+    }
+
+    private void playSfx(String name) {
         SoundPool p = pool;
-        if (p == null || name == null) return;
+        if (p == null) return;
 
         String key = baseKey(name);
         int id = 0;
@@ -143,9 +230,8 @@ public class Sound {
             return;
         }
 
-        // Not loaded yet. Try to load variants if we haven't checked this base key before.
         synchronized (lock) {
-            if (checkedBases.contains(key)) return; // Already tried, files just don't exist
+            if (checkedBases.contains(key)) return;
             checkedBases.add(key);
             pending.add(key);
         }
@@ -205,11 +291,17 @@ public class Sound {
     public void stopAll() {
         SoundPool p = pool;
         if (p != null) p.autoPause();
+        if (voicePlayer != null && voicePlayer.isPlaying()) {
+            try { voicePlayer.pause(); } catch (Exception ignored) {}
+        }
     }
 
     public void resumeAll() {
         SoundPool p = pool;
         if (p != null) p.autoResume();
+        if (voicePlayer != null && !voicePlayer.isPlaying() && currentVoice != null) {
+            try { voicePlayer.start(); } catch (Exception ignored) {}
+        }
     }
 
     public void destroy() {
@@ -218,7 +310,17 @@ public class Sound {
         if (p != null) {
             try { p.release(); } catch (Exception ignored) {}
         }
+        if (voicePlayer != null) {
+            try { 
+                voicePlayer.stop();
+                voicePlayer.release(); 
+            } catch (Exception ignored) {}
+            voicePlayer = null;
+        }
         synchronized (lock) {
+            voiceQueue.clear();
+            currentVoice = null;
+            isPreparing = false;
             loaded.clear();
             loadIdToName.clear();
             loading.clear();
