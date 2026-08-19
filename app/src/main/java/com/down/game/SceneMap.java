@@ -47,7 +47,11 @@ public final class SceneMap {
     private boolean quality = true;
     private Bitmap craterGlow;
     private boolean craterVisible = false;
+    
     private final int[] noiseSeed = new int[256];
+    private final short[] bakeScratch = new short[SRC * SRC];
+    private final ShortBuffer bakeBuf = ByteBuffer.allocateDirect(SRC * SRC * 2)
+            .order(ByteOrder.nativeOrder()).asShortBuffer();
 
     private volatile int bakeReqCX = Integer.MIN_VALUE, bakeReqCY = Integer.MIN_VALUE;
     private Thread baker;
@@ -76,7 +80,6 @@ public final class SceneMap {
         return (short) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
     }
 
-    // Matches GameView's exact Flat-Top squashed hex math
     public static void hexToWorld(int q, int r, float[] out) {
         out[0] = HEX * (float) Math.sqrt(3) * (q + r / 2f);
         out[1] = HEX * 1.5f * r * SQUASH;
@@ -100,10 +103,10 @@ public final class SceneMap {
                 boolean w = false;
                 if (q <= 10) {
                     w = r >= -4 && r <= 12;
-                } else if (q <= 36) {
-                    float t = (q - 10) / 26f;
-                    float cr = 2 + t * -16f;
-                    w = Math.abs(r - cr) <= (2.6f - t * 0.8f);
+                } else if (q >= 11 && q <= 36) {
+                    float t = (q - 11) / 25f;
+                    float cr = 2 - 7f * t;
+                    w = Math.abs(r - cr) <= (2.6f - 0.8f * t);
                 } else if (q <= 60) {
                     boolean street = (r >= -6 && r <= 12) &&
                             ((r % 5 == 0) || (q % 6 == 0) || insidePlaza(q, r));
@@ -125,6 +128,7 @@ public final class SceneMap {
     private static boolean insideRubble(int q, int r) {
         return (q >= 40 && q <= 41 && r >= 0 && r <= 3)
             || (q >= 46 && q <= 47 && r >= 9 && r <= 11)
+            || (q >= 52 && q <= 53 && r >= -6 && r <= -1)
             || (q >= 53 && q <= 54 && r >= -2 && r <= 1);
     }
 
@@ -174,7 +178,7 @@ public final class SceneMap {
             bmp = Bitmap.createBitmap(SRC, SRC, Bitmap.Config.RGB_565);
             chunkBits[slot] = bmp;
         }
-        short[] px = new short[SRC * SRC];
+        short[] px = bakeScratch;
         float baseWx = cx * CHUNK_PX;
         float baseWy = cy * CHUNK_PX;
         float[] hw = new float[2];
@@ -186,12 +190,14 @@ public final class SceneMap {
                 px[y * SRC + x] = samplePixel(wx, wy, hq, hw);
             }
         }
-        ShortBuffer sb = ByteBuffer.allocateDirect(px.length * 2)
-                .order(ByteOrder.nativeOrder()).asShortBuffer();
-        sb.put(px).position(0);
-        bmp.copyPixelsFromBuffer(sb);
-        chunkKeys[slot] = cy * 4096 + cx; 
-        chunkUsed[slot] = ++frameStamp;
+        bakeBuf.clear();
+        bakeBuf.put(px).position(0);
+        bmp.copyPixelsFromBuffer(bakeBuf);
+        
+        synchronized (this) {
+            chunkKeys[slot] = cy * 4096 + cx; 
+            chunkUsed[slot] = ++frameStamp;
+        }
     }
 
     private short samplePixel(float wx, float wy, int[] hq, float[] hw) {
@@ -204,9 +210,9 @@ public final class SceneMap {
             if (quality && valueNoise(wx, wy, 97) > 0.82f) return C_ROCK;
             return ((q + r) & 3) == 0 ? C_ASH2 : C_ASH;
         } else if (q <= 36) {
-            float t = (q - 10) / 26f;
-            float c = 2 + t * -16f;
-            if (Math.abs(r - c) <= (2.6f - t * 0.8f)) {
+            float t = (q - 11) / 25f;
+            float c = 2 - 7f * t;
+            if (Math.abs(r - c) <= (2.6f - 0.8f * t)) {
                 if (quality && valueNoise(wx, wy, 31) > 0.7f) return C_ROCK;
                 return ((q + r) & 1) == 0 ? C_PATH : C_ASH2;
             }
@@ -310,7 +316,7 @@ public final class SceneMap {
     }
 
     public void dispose() {
-        if (baker != null) baker.interrupt();
+        if (baker != null) { baker.interrupt(); baker = null; }
         for (int i = 0; i < chunkBits.length; i++) {
             if (chunkBits[i] != null) { chunkBits[i].recycle(); chunkBits[i] = null; chunkKeys[i] = Integer.MIN_VALUE; }
         }
