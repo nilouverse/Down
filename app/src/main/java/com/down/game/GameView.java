@@ -84,6 +84,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private float zoomPunch = 0f;
 
     private String lastSceneName = "";
+    private boolean skipCluster = false;
     private float[] encX = new float[8];
     private float[] encY = new float[8];
     private int encounterN = 0;
@@ -500,8 +501,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             tpPath.close();
             tc.drawPath(tpPath, tp);
         }
-
-        if (storyMode && story != null) sw().build(W, H, quality);
     }
 
     @Override
@@ -1091,32 +1090,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Decal dcl : decalPool) dcl.active = false;
         camSnap = false;
         enemies.clear();
-
-        // M3 bridge: convert visible enemy actors into real enemies
-        int spawned = 0;
-        for (int i = 0; i < sw().getActors().size(); i++) {
-            SceneActor a = sw().getActors().get(i);
-            if (!a.hidden && StoryWorld.isEnemyActor(a.type)) {
-                Enemy e = new Enemy();
-                e.x = a.x; e.y = a.y;
-                enemies.add(e);
-                if (spawned < encX.length) { encX[spawned] = a.x; encY[spawned] = a.y; }
-                spawned++;
-            }
-        }
-        sw().clearEnemyActors();
-        encounterN = spawned;
-        if (enemies.isEmpty()) {
-            if (encounterN > 0) {
-                for (int i = 0; i < encounterN && i < encX.length; i++) {
-                    Enemy e = new Enemy();
-                    e.x = encX[i]; e.y = encY[i];
-                    enemies.add(e);
-                }
-            } else {
-                for (int i = 0; i < n; i++) spawnStoryEnemy();
-            }
-        }
+        for (int i = 0; i < n; i++) spawnStoryEnemy();
         fanDirty = true;
         state = STATE_GAME;
         startPlayerTurn();
@@ -1165,7 +1139,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void processStoryAction(String act) {
-        if (sw().filterAction(act)) return;
+        if (skipCluster && (act.startsWith("ACTION slash") || act.startsWith("ACTION blood")
+                || act.startsWith("HIDE "))) return;
+        if (act.startsWith("SCENE ") || act.startsWith("SHOW ") || act.startsWith("WALK "))
+            skipCluster = false;
         if (act.startsWith("ACTION shake")) { shakeT = 0.2f; return; }
         if (act.startsWith("ACTION flash")) { hurtT = 0.15f; return; }
         if (act.startsWith("ACTION slash")) {
@@ -1202,11 +1179,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (storyMode && story != null && state == STATE_GAME) {
             story.update(dt);
-            sw().update(dt);
             if (story.quitRequested || story.ended) {
                 story = null; storyMode = false; storyFight = false; state = STATE_MENU; return;
             }
-            if (story.fightRequest > 0) beginStoryFight();
 
             String act;
             while ((act = story.pollAction()) != null) processStoryAction(act);
@@ -1214,33 +1189,44 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             sw().tick(story);
 
             if (storyMode && story.fightRequest > 0) {
+                int n = story.fightRequest;
                 story.fightRequest = 0;
                 if (sw().openEncounter()) {
                     storyFight = true;
                     sound.play("turn");
                     storySpawnEncounter();
+                } else {
+                    storyFight = true;
+                    for (int i = 0; i < n; i++) spawnStoryEnemy();
                 }
             }
-            if (storyFight && sw().encounterOpen()) {
+            if (storyFight) {
                 if (storyEnemiesAlive() == 0) {
                     storyFight = false;
+                    skipCluster = true;
                     sw().closeEncounter(true);
                     story.fightWon();
                 } else if (deadT > 0) {
-                    storyFight = false;
-                    shClearEnemies();
-                    sw().closeEncounter(false);
-                    story.fightLost();
-                    player.hp = 100;
-                    player.actionsLeft = 2;
                     deadT = 0;
+                    for (Player p : party) { p.hp = 100; p.cried = false; p.actionsLeft = 2; }
+                    enemies.clear();
+                    for (int i = 0; i < sw().encounterCount(); i++) {
+                        int[] h = sw().encounterHex(i);
+                        Enemy e = new Enemy();
+                        e.x = SceneMap.hexX(h[0], h[1]);
+                        e.y = SceneMap.hexY(h[0], h[1]);
+                        enemies.add(e);
+                    }
+                    fanDirty = true;
                     phase = PH_PLAYER;
+                    startPlayerTurn();
                 }
             }
 
             if (sw().takeSceneEvent()) {
                 shClearEnemies();
                 storyFight = false;
+                skipCluster = false;
                 camX = sw().snapX;
                 camY = sw().snapY;
                 camSnap = true;
@@ -1854,17 +1840,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
 
-        if (storyMode) {
-            ArrayList<Object> sd = sw().getSortedDrawables();
-            for (int i = 0; i < sd.size(); i++) {
-                D d = obtainD();
-                d.kind = 3;
-                d.obj = sd.get(i);
-                d.y = sw().drawableY(sd.get(i));
-                drawList.add(d);
-            }
-        }
-
         for (Player pp : party) { D p = obtainD(); p.kind = 1; p.pl = pp; p.y = pp.y; drawList.add(p); }
         for (Enemy en : enemies) { D d = obtainD(); d.kind = 2; d.en = en; d.y = en.y; drawList.add(d); }
 
@@ -1872,8 +1847,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (D d : drawList) {
             if (d.kind == 0) drawProp(cv, d);
             else if (d.kind == 1) drawPlayer(cv, d.pl);
-            else if (d.kind == 2) drawEnemy(cv, d.en);
-            else sw().drawDrawable(cv, d.obj, camX, camY, zoom, W, H, loadT);
+            else drawEnemy(cv, d.en);
         }
     }
 
@@ -2304,7 +2278,40 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (storyMode && story != null && story.hasObjective) {
             hexToWorld(story.objectiveQ, story.objectiveR, FW_A);
-            sw().drawObjective(cv, FW_A[0], FW_A[1], camX, camY, zoom, W, H, loadT);
+            float ox = sx(FW_A[0]), oy = sy(FW_A[1]);
+            if (ox < 50 || ox > W - 50 || oy < 50 || oy > H - 50) {
+                float cx = W / 2f, cy = H / 2f;
+                float ang = (float) Math.atan2(oy - cy, ox - cx);
+                float ax = cx + (float) Math.cos(ang) * (W / 3f);
+                float ay = cy + (float) Math.sin(ang) * (H / 3f);
+                cv.save();
+                cv.translate(ax, ay);
+                cv.rotate(ang * 180f / (float) Math.PI);
+                paint.setColor(C_CYAN);
+                paint.setStyle(Paint.Style.FILL);
+                hexPath.reset();
+                hexPath.moveTo(14 * zoom, 0);
+                hexPath.lineTo(-10 * zoom, -10 * zoom);
+                hexPath.lineTo(-10 * zoom, 10 * zoom);
+                hexPath.close();
+                cv.drawPath(hexPath, paint);
+                cv.restore();
+            } else {
+                float pulse = 0.8f + 0.2f * (float) Math.sin(loadT * 4f);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(C_CYAN);
+                paint.setAlpha((int) (150 * pulse));
+                cv.drawCircle(ox, oy, 15 * zoom * pulse, paint);
+                paint.setAlpha(255);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(2 * zoom);
+                cv.drawCircle(ox, oy, 20 * zoom, paint);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setStrokeWidth(0);
+                paint.setAlpha(80);
+                cv.drawRect(ox - 10 * zoom, oy - 200 * zoom, ox + 10 * zoom, oy, paint);
+                paint.setAlpha(255);
+            }
         }
 
         if (hexesShown) drawMoveFan(cv);
