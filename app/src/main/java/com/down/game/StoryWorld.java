@@ -2,6 +2,7 @@ package com.down.game;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
@@ -26,7 +27,7 @@ public class StoryWorld {
     private int encounterN;
     private final int[][] encounterHex = new int[8][2];
     private boolean sceneEvent;
-    private float snapX, snapY;
+    public float snapX, snapY;
 
     public final float[] pt = new float[2];
 
@@ -138,10 +139,6 @@ public class StoryWorld {
                 } else if (b.cmd.equals("FIGHT")) {
                     story.fightRequest = b.n;
                     break;
-                } else if (b.cmd.startsWith("ACTION") || b.cmd.equals("SHOW")
-                        || b.cmd.equals("HIDE") || b.cmd.equals("WALK")
-                        || b.cmd.equals("EXIT")) {
-                    // handled by GameView's processStoryAction
                 }
             }
         }
@@ -240,11 +237,8 @@ public class StoryWorld {
 
     public void drawOver(Canvas cv, float camX, float camY, float zoom, int W, int H, int quality, float t) {
         if (!loaded || currentScene == null) return;
-        actors.drawObjective(cv, camX, camY, zoom, W, H, animClock);
         if (fadeT > 0) {
-            cv.save();
-            cv.drawColor(0xFF000000 | ((int)(fadeT * 255) << 24));
-            cv.restore();
+            cv.drawColor(Color.argb((int)(fadeT * 255), 0, 0, 0));
         }
     }
 }
