@@ -11,42 +11,35 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.Locale;
 import java.util.Queue;
 import java.util.Random;
 
 public class Sound {
 
     private static final int MAX_STREAMS = 16;
-
-    private static final String[] HERO_FOLDERS = {
-            "nilou", "vex"
-    };
-
-    private static final String[] GENERAL_SOUNDS = {
-            "ui", "turn", "step", "hit", "hurt", "death", "poison", "claw", "swing",
-            "male_hurt", "male_cry", "male_death",
-            "female_hurt", "female_cry", "female_death"
-    };
-
-    private static final String[] HERO_ACTIONS = {
-            "select", "turn", "move", "attack", "hurt", "wounded", "death", "kill", "victory"
-    };
+    private static final String[] HERO_FOLDERS = { "nilou", "vex" };
 
     private final Object lock = new Object();
     private final Random rnd = new Random();
 
-    private final HashMap<String, ArrayList<Integer>> loaded = new HashMap<>();
-    private final HashMap<Integer, String> loadIdToName = new HashMap<>();
-    private final HashSet<String> loading = new HashSet<>();
-    private final HashSet<String> failed = new HashSet<>();
-    private final HashSet<String> pending = new HashSet<>();
-    private final HashSet<String> checkedBases = new HashSet<>();
+    // base key -> all variant asset paths (vex_attack -> [..ogg, ..2.ogg, ..3.ogg])
+    private final HashMap<String, ArrayList<String>> sfxPaths = new HashMap<>();
+    private final HashMap<String, ArrayList<String>> voicePaths = new HashMap<>();
 
-    // Voice queue system
+    // base key -> loaded SoundPool ids
+    private final HashMap<String, ArrayList<Integer>> sfxLoaded = new HashMap<>();
+    private final HashMap<Integer, String> loadIdToKey = new HashMap<>();
+    private final HashSet<String> loadingPaths = new HashSet<>();
+    private final HashSet<String> failedPaths = new HashSet<>();
+    private final HashSet<String> pendingKeys = new HashSet<>();
+    private final HashSet<String> checkedKeys = new HashSet<>();
+
+    // voice channel: one MediaPlayer, queued, never overlaps
     private MediaPlayer voicePlayer;
     private final Queue<String> voiceQueue = new LinkedList<>();
-    private String currentVoice = null;
-    private volatile boolean isPreparing = false;
+    private String currentVoiceKey = null;
+    private volatile boolean voicePreparing = false;
 
     private Context context;
     private SoundPool pool;
@@ -57,19 +50,44 @@ public class Sound {
         return i == name.length() ? name : name.substring(0, i);
     }
 
-    private boolean isHeroVoice(String name) {
-        if (name == null) return false;
-        for (String hero : HERO_FOLDERS) {
-            if (name.startsWith(hero + "_")) return true;
-        }
-        return false;
+    public void init(Context ctx) {
+        if (pool != null || context != null) return;
+        context = ctx.getApplicationContext();
+        scan();
+        createPool();
+        preloadSfx();
     }
 
-    public void init(Context ctx) {
-        if (pool != null) return;
-        context = ctx.getApplicationContext();
-        createPool();
-        preloadKnownSounds();
+    private void addPath(HashMap<String, ArrayList<String>> map, String key, String path) {
+        ArrayList<String> l = map.get(key);
+        if (l == null) { l = new ArrayList<>(); map.put(key, l); }
+        l.add(path);
+    }
+
+    private void scan() {
+        try {
+            String[] root = context.getAssets().list("sounds");
+            if (root != null) {
+                for (String f : root) {
+                    if (f == null) continue;
+                    String low = f.toLowerCase(Locale.US);
+                    if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
+                    String base = f.substring(0, f.lastIndexOf('.'));
+                    addPath(sfxPaths, baseKey(base), "sounds/" + f);
+                }
+            }
+            for (String hero : HERO_FOLDERS) {
+                String[] files = context.getAssets().list("sounds/" + hero);
+                if (files == null) continue;
+                for (String f : files) {
+                    if (f == null) continue;
+                    String low = f.toLowerCase(Locale.US);
+                    if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
+                    String base = f.substring(0, f.lastIndexOf('.'));
+                    addPath(voicePaths, baseKey(base), "sounds/" + hero + "/" + f);
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private void createPool() {
@@ -88,189 +106,65 @@ public class Sound {
 
         pool.setOnLoadCompleteListener(new SoundPool.OnLoadCompleteListener() {
             @Override
-            public void onLoadComplete(SoundPool soundPool, int sampleId, int status) {
-                if (status == 0) {
-                    String name;
-                    boolean shouldPlay = false;
-
-                    synchronized (lock) {
-                        name = loadIdToName.remove(sampleId);
-                        if (name != null) {
-                            String key = baseKey(name);
-                            ArrayList<Integer> list = loaded.get(key);
-                            if (list == null) {
-                                list = new ArrayList<>();
-                                loaded.put(key, list);
-                            }
-                            if (!list.contains(sampleId)) list.add(sampleId);
-                            loading.remove(name);
-
-                            if (pending.remove(key)) {
-                                shouldPlay = true;
-                            }
+            public void onLoadComplete(SoundPool sp, int sampleId, int status) {
+                String key;
+                boolean shouldPlay = false;
+                synchronized (lock) {
+                    key = loadIdToKey.remove(sampleId);
+                    if (key != null) {
+                        if (status == 0) {
+                            ArrayList<Integer> l = sfxLoaded.get(key);
+                            if (l == null) { l = new ArrayList<>(); sfxLoaded.put(key, l); }
+                            if (!l.contains(sampleId)) l.add(sampleId);
+                            if (pendingKeys.remove(key)) shouldPlay = true;
+                        } else {
+                            pendingKeys.remove(key);
                         }
                     }
-
-                    if (shouldPlay) {
-                        SoundPool p = pool;
-                        if (p != null) {
-                            float rate = 0.95f + rnd.nextFloat() * 0.1f;
-                            p.play(sampleId, 1f, 1f, 0, 0, rate);
-                        }
-                    }
-                } else {
-                    synchronized (lock) {
-                        String name = loadIdToName.remove(sampleId);
-                        if (name != null) {
-                            loading.remove(name);
-                            failed.add(name);
-                            pending.remove(baseKey(name));
-                        }
+                }
+                if (shouldPlay && status == 0) {
+                    SoundPool p = pool;
+                    if (p != null) {
+                        p.play(sampleId, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
                     }
                 }
             }
         });
     }
 
-    private void preloadKnownSounds() {
-        for (String name : GENERAL_SOUNDS) load(name);
-        for (String hero : HERO_FOLDERS) {
-            for (String action : HERO_ACTIONS) load(hero + "_" + action);
-        }
+    private void preloadSfx() {
+        for (String key : new ArrayList<>(sfxPaths.keySet())) loadSfxKey(key);
     }
 
-    public void play(String name) {
-        if (name == null) return;
-        if (isHeroVoice(name)) {
-            playVoice(name);
-        } else {
-            playSfx(name);
-        }
+    private void loadSfxKey(String key) {
+        ArrayList<String> paths = sfxPaths.get(key);
+        if (paths == null) return;
+        for (String path : paths) loadPath(path, key);
     }
 
-    private void playVoice(String name) {
+    private void loadPath(String path, String key) {
         synchronized (lock) {
-            // Deduplicate: if it's already playing or in the queue, ignore it.
-            // This perfectly solves the "killing 3 enemies at once" AOE spam.
-            if (name.equals(currentVoice) || voiceQueue.contains(name)) return;
-            voiceQueue.add(name);
+            if (pool == null || loadingPaths.contains(path) || failedPaths.contains(path)) return;
+            loadingPaths.add(path);
         }
-        processVoiceQueue();
-    }
-
-    private void processVoiceQueue() {
-        String toPlay = null;
-        synchronized (lock) {
-            if (voiceQueue.isEmpty()) return;
-            if (voicePlayer != null && (voicePlayer.isPlaying() || isPreparing)) return;
-            
-            toPlay = voiceQueue.poll();
-            currentVoice = toPlay;
-            isPreparing = true;
-        }
-        
-        if (voicePlayer == null) {
-            voicePlayer = new MediaPlayer();
-            voicePlayer.setOnCompletionListener(mp -> {
-                synchronized (lock) { 
-                    currentVoice = null; 
-                    isPreparing = false;
-                }
-                processVoiceQueue();
-            });
-            voicePlayer.setOnErrorListener((mp, what, extra) -> {
-                synchronized (lock) { 
-                    currentVoice = null; 
-                    isPreparing = false;
-                }
-                processVoiceQueue();
-                return true;
-            });
-        } else {
-            voicePlayer.reset();
-        }
-
-        try {
-            String path = resolveSoundPath(toPlay);
-            AssetFileDescriptor afd = context.getAssets().openFd(path);
-            voicePlayer.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
-            afd.close();
-            
-            voicePlayer.setOnPreparedListener(mp -> {
-                synchronized (lock) { isPreparing = false; }
-                mp.start();
-            });
-            voicePlayer.prepareAsync();
-        } catch (Exception e) {
-            synchronized (lock) { 
-                currentVoice = null; 
-                isPreparing = false;
-            }
-            processVoiceQueue();
-        }
-    }
-
-    private void playSfx(String name) {
-        SoundPool p = pool;
-        if (p == null) return;
-
-        String key = baseKey(name);
-        int id = 0;
-
-        synchronized (lock) {
-            ArrayList<Integer> list = loaded.get(key);
-            if (list != null && !list.isEmpty()) {
-                id = list.get(rnd.nextInt(list.size()));
-            }
-        }
-
-        if (id != 0) {
-            float rate = 0.95f + rnd.nextFloat() * 0.1f;
-            p.play(id, 1f, 1f, 0, 0, rate);
-            return;
-        }
-
-        synchronized (lock) {
-            if (checkedBases.contains(key)) return;
-            checkedBases.add(key);
-            pending.add(key);
-        }
-
-        load(key);
-        for (int i = 2; i <= 9; i++) {
-            load(key + i);
-        }
-    }
-
-    private void load(String name) {
-        synchronized (lock) {
-            if (pool == null || name == null || loading.contains(name) || failed.contains(name)) return;
-            loading.add(name);
-        }
-
         AssetFileDescriptor afd = null;
         try {
-            String path = resolveSoundPath(name);
             afd = context.getAssets().openFd(path);
             int id = 0;
             synchronized (lock) {
-                SoundPool p = pool;
-                if (p != null) {
-                    id = p.load(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength(), 1);
+                if (pool != null) {
+                    id = pool.load(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength(), 1);
                 }
             }
             synchronized (lock) {
-                if (id == 0 || pool == null) {
-                    loading.remove(name);
-                    failed.add(name);
-                } else {
-                    loadIdToName.put(id, name);
-                }
+                loadingPaths.remove(path);
+                if (id == 0 || pool == null) failedPaths.add(path);
+                else loadIdToKey.put(id, key);
             }
         } catch (Exception e) {
             synchronized (lock) {
-                loading.remove(name);
-                failed.add(name);
+                loadingPaths.remove(path);
+                failedPaths.add(path);
             }
         } finally {
             if (afd != null) {
@@ -279,13 +173,87 @@ public class Sound {
         }
     }
 
-    private String resolveSoundPath(String name) {
-        for (String hero : HERO_FOLDERS) {
-            if (name.startsWith(hero + "_")) {
-                return "sounds/" + hero + "/" + name + ".ogg";
-            }
+    public void play(String name) {
+        if (name == null || context == null) return;
+        String key = baseKey(name.toLowerCase(Locale.US));
+        if (voicePaths.containsKey(key)) playVoice(key);
+        else playSfx(key);
+    }
+
+    // SFX: always immediate, random variant
+    private void playSfx(String key) {
+        SoundPool p = pool;
+        if (p == null) return;
+        int id = 0;
+        synchronized (lock) {
+            ArrayList<Integer> l = sfxLoaded.get(key);
+            if (l != null && !l.isEmpty()) id = l.get(rnd.nextInt(l.size()));
         }
-        return "sounds/" + name + ".ogg";
+        if (id != 0) {
+            p.play(id, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
+            return;
+        }
+        synchronized (lock) {
+            if (checkedKeys.contains(key)) return;
+            checkedKeys.add(key);
+            pendingKeys.add(key);
+        }
+        loadSfxKey(key);
+    }
+
+    // Voices: queued behind voices only, deduped, random variant
+    private void playVoice(String key) {
+        synchronized (lock) {
+            if (key.equals(currentVoiceKey) || voiceQueue.contains(key)) return;
+            voiceQueue.add(key);
+        }
+        processVoiceQueue();
+    }
+
+    private void processVoiceQueue() {
+        String key;
+        synchronized (lock) {
+            if (voiceQueue.isEmpty()) return;
+            if (voicePlayer != null && (voicePlayer.isPlaying() || voicePreparing)) return;
+            key = voiceQueue.poll();
+            currentVoiceKey = key;
+            voicePreparing = true;
+        }
+        ArrayList<String> paths = voicePaths.get(key);
+        if (paths == null || paths.isEmpty()) {
+            voiceDone();
+            processVoiceQueue();
+            return;
+        }
+        String path = paths.get(rnd.nextInt(paths.size()));
+
+        if (voicePlayer == null) {
+            voicePlayer = new MediaPlayer();
+            voicePlayer.setOnCompletionListener(mp -> { voiceDone(); processVoiceQueue(); });
+            voicePlayer.setOnErrorListener((mp, w, x) -> { voiceDone(); processVoiceQueue(); return true; });
+        } else {
+            voicePlayer.reset();
+        }
+        try {
+            AssetFileDescriptor afd = context.getAssets().openFd(path);
+            voicePlayer.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            afd.close();
+            voicePlayer.setOnPreparedListener(mp -> {
+                synchronized (lock) { voicePreparing = false; }
+                mp.start();
+            });
+            voicePlayer.prepareAsync();
+        } catch (Exception e) {
+            voiceDone();
+            processVoiceQueue();
+        }
+    }
+
+    private void voiceDone() {
+        synchronized (lock) {
+            currentVoiceKey = null;
+            voicePreparing = false;
+        }
     }
 
     public void stopAll() {
@@ -299,7 +267,7 @@ public class Sound {
     public void resumeAll() {
         SoundPool p = pool;
         if (p != null) p.autoResume();
-        if (voicePlayer != null && !voicePlayer.isPlaying() && currentVoice != null) {
+        if (voicePlayer != null && !voicePlayer.isPlaying() && currentVoiceKey != null) {
             try { voicePlayer.start(); } catch (Exception ignored) {}
         }
     }
@@ -311,22 +279,19 @@ public class Sound {
             try { p.release(); } catch (Exception ignored) {}
         }
         if (voicePlayer != null) {
-            try { 
-                voicePlayer.stop();
-                voicePlayer.release(); 
-            } catch (Exception ignored) {}
+            try { voicePlayer.stop(); voicePlayer.release(); } catch (Exception ignored) {}
             voicePlayer = null;
         }
         synchronized (lock) {
             voiceQueue.clear();
-            currentVoice = null;
-            isPreparing = false;
-            loaded.clear();
-            loadIdToName.clear();
-            loading.clear();
-            failed.clear();
-            pending.clear();
-            checkedBases.clear();
+            currentVoiceKey = null;
+            voicePreparing = false;
+            sfxLoaded.clear();
+            loadIdToKey.clear();
+            loadingPaths.clear();
+            failedPaths.clear();
+            pendingKeys.clear();
+            checkedKeys.clear();
         }
     }
 }
