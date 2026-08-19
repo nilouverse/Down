@@ -38,7 +38,7 @@ public class Story {
     public int groundColor = 0xFF0d120a;
     public int objectiveQ = 0, objectiveR = 0;
     public boolean hasObjective = false;
-    
+
     private final Queue<String> actionQueue = new LinkedList<>();
 
     private static class Beat {
@@ -48,10 +48,11 @@ public class Story {
     }
     private final ArrayList<Beat> beats = new ArrayList<>();
     private int bi = -1;
+    private boolean clusterSkip = false;
 
-    public Story(Host h) { 
-        host = h; 
-        loadScript(h.shGetContext()); 
+    public Story(Host h) {
+        host = h;
+        loadScript(h.shGetContext());
     }
 
     private void loadScript(Context ctx) {
@@ -70,7 +71,7 @@ public class Story {
         String[] parts = line.split(" ", 2);
         String cmd = parts[0];
         String arg = parts.length > 1 ? parts[1] : "";
-        
+
         if (cmd.equals("NAME")) {
             Beat b = new Beat(); b.type = 2; b.cmd = "NAME"; b.txt = arg; beats.add(b);
         } else if (cmd.equals("GROUND")) {
@@ -78,18 +79,25 @@ public class Story {
         } else if (cmd.equals("SAY")) {
             String[] p2 = arg.split(" ", 2);
             Beat b = new Beat(); b.type = 0; b.who = p2[0]; b.txt = p2.length > 1 ? p2[1] : ""; beats.add(b);
-        } else if (cmd.equals("ACTION") || cmd.equals("SHOW") || cmd.equals("HIDE") || cmd.equals("EXIT") || cmd.equals("ACTOR") || cmd.equals("PLACE") || cmd.equals("CRACK") || cmd.equals("RESET")) {
+        } else if (cmd.equals("ACTION") || cmd.equals("SHOW") || cmd.equals("HIDE") || cmd.equals("EXIT")
+                || cmd.equals("ACTOR") || cmd.equals("PLACE") || cmd.equals("CRACK") || cmd.equals("RESET")) {
             Beat b = new Beat(); b.type = 1; b.cmd = cmd; b.txt = arg; beats.add(b);
         } else if (cmd.equals("WALK")) {
             String[] p2 = arg.split(" ");
             if (p2.length >= 3) {
-                Beat b = new Beat(); b.type = 3; b.who = p2[0]; 
-                b.q = Integer.parseInt(p2[1]); b.r = Integer.parseInt(p2[2]); 
+                Beat b = new Beat(); b.type = 3; b.who = p2[0];
+                b.q = Integer.parseInt(p2[1]); b.r = Integer.parseInt(p2[2]);
                 beats.add(b);
             }
         } else if (cmd.equals("FIGHT")) {
             Beat b = new Beat(); b.type = 4; b.count = Integer.parseInt(arg); beats.add(b);
         }
+    }
+
+    private static boolean skippable(Beat b) {
+        if (b.type != 1) return false;
+        if (b.cmd.equals("HIDE")) return true;
+        return b.cmd.equals("ACTION") && (b.txt.startsWith("slash") || b.txt.startsWith("blood"));
     }
 
     private final float[] HW = new float[2];
@@ -98,25 +106,31 @@ public class Story {
         o[1] = HEX * 1.5f * r * SQUASH;
     }
 
-    public void start() { bi = -1; mode = MODE_RUN; next(); }
+    public void start() { bi = -1; mode = MODE_RUN; clusterSkip = false; next(); }
 
     private void next() {
         bi++; tw = 0;
+        while (clusterSkip && bi < beats.size() && skippable(beats.get(bi))) bi++;
         if (bi >= beats.size()) { ended = true; mode = MODE_DONE; dialogUp = false; return; }
         Beat b = beats.get(bi);
-        
-        if (b.type == 0) { 
-            mode = MODE_DIALOG; dialogUp = true; speaker = b.who; text = b.txt; 
-        } else if (b.type == 1) { 
+
+        if (b.type == 0) {
+            mode = MODE_DIALOG; dialogUp = true; speaker = b.who; text = b.txt;
+        } else if (b.type == 1) {
+            if (b.cmd.equals("SHOW") || b.cmd.equals("EXIT")) clusterSkip = false;
             actionQueue.add(b.cmd + " " + b.txt);
-            mode = MODE_RUN; next(); 
-        } else if (b.type == 2) { 
-            if (b.cmd.equals("NAME")) { title = b.txt; titleT = 0; }
-            else if (b.cmd.equals("GROUND")) {
+            mode = MODE_RUN; next();
+        } else if (b.type == 2) {
+            if (b.cmd.equals("NAME")) {
+                title = b.txt; titleT = 0;
+                clusterSkip = false;
+                actionQueue.add("SCENE " + b.txt);
+            } else if (b.cmd.equals("GROUND")) {
                 try { groundColor = 0xFF000000 | Integer.parseInt(b.txt, 16); } catch (Exception e) {}
             }
             mode = MODE_RUN; next();
-        } else if (b.type == 3) { 
+        } else if (b.type == 3) {
+            clusterSkip = false;
             if (b.who.equals("nilou") || b.who.equals("NilouZila")) {
                 objectiveQ = b.q; objectiveR = b.r; hasObjective = true;
                 mode = MODE_WAIT;
@@ -124,7 +138,8 @@ public class Story {
                 actionQueue.add("WALK " + b.who + " " + b.q + " " + b.r);
                 mode = MODE_RUN; next();
             }
-        } else if (b.type == 4) { 
+        } else if (b.type == 4) {
+            clusterSkip = true;
             mode = MODE_FIGHT; fightRequest = b.count;
         }
     }
