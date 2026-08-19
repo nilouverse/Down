@@ -76,6 +76,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private int state = STATE_MENU;
     private Story story;
+    private boolean storyFight;
     private boolean camSnap;
     private int menuPress;
     private final RectF menuBtnTest = new RectF();
@@ -486,6 +487,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private boolean hexBlocked(int q, int r) {
+        if (storyFight) return false;
         hexToWorld(q, r, HO_F);
         int tx0 = (int) Math.floor(HO_F[0] / TILE), ty0 = (int) Math.floor(HO_F[1] / TH);
         for (int ty = ty0 - 1; ty <= ty0 + 1; ty++) {
@@ -531,8 +533,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return false;
     }
 
+    private boolean storyWalkHex(int q, int r) {
+        if (!storyFight || story == null) return true;
+        hexToWorld(q, r, HO_F);
+        return story.isWalkable(HO_F[0], HO_F[1]);
+    }
+
     private boolean hexFree(int q, int r, Enemy self) {
-        return !hexOccupied(q, r, self) && !hexBlocked(q, r);
+        return storyWalkHex(q, r) && !hexOccupied(q, r, self) && !hexBlocked(q, r);
     }
 
     private void spawnEnemy() {
@@ -559,7 +567,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         hexesShown = false;
         ei = 0;
         mana = Math.min(100, mana + 25);
-        if (enemies.size() < 5) spawnEnemy();
+        if (!storyFight && enemies.size() < 5) spawnEnemy();
         sound.play(voice + "_turn");
     }
 
@@ -593,7 +601,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             for (int[] n : NEIGH6) {
                 int nq = c[0] + n[0], nr = c[1] + n[1];
                 long k = hexKey(nq, nr);
-                if (flow.containsKey(k) || hexBlocked(nq, nr)) continue;
+                if (flow.containsKey(k) || hexBlocked(nq, nr) || !storyWalkHex(nq, nr)) continue;
                 flow.put(k, d + 1);
                 q.addLast(new int[] { nq, nr });
             }
@@ -876,7 +884,49 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void startStory() {
         story = new Story(getContext(), loadedFrames);
         story.load("act1");
+        storyFight = false;
         state = STATE_STORY;
+    }
+
+    private void beginStoryFight() {
+        int n = story.fightRequest;
+        if (n <= 0) n = 2;
+        story.fightRequest = 0;
+        storyFight = true;
+        playerHp = 100;
+        playerCried = false;
+        mana = 100;
+        for (Dmg d : dmgPool) d.active = false;
+        for (Bolt b : boltPool) b.active = false;
+        for (Blast b : blastPool) b.active = false;
+        for (Puff p : puffPool) p.active = false;
+        for (Slash s : slashPool) s.active = false;
+        for (Decal dcl : decalPool) dcl.active = false;
+        float[] o = story.fightOrigin();
+        player.x = o[0]; player.y = o[1];
+        player.targetX = o[0]; player.targetY = o[1];
+        camSnap = false;
+        enemies.clear();
+        for (int i = 0; i < n; i++) spawnStoryEnemy();
+        state = STATE_GAME;
+        startPlayerTurn();
+    }
+
+    private void spawnStoryEnemy() {
+        for (int tries = 0; tries < 40; tries++) {
+            float a = (float) (Math.random() * Math.PI * 2);
+            float d = HEX * (4 + (float) (Math.random() * 3));
+            float x = player.x + (float) Math.cos(a) * d;
+            float y = player.y + (float) Math.sin(a) * d;
+            if (!story.isWalkable(x, y)) continue;
+            worldToHex(x, y, IH_A);
+            if (!hexFree(IH_A[0], IH_A[1], null)) continue;
+            hexToWorld(IH_A[0], IH_A[1], FW_A);
+            Enemy e = new Enemy();
+            e.x = FW_A[0]; e.y = FW_A[1];
+            enemies.add(e);
+            return;
+        }
     }
 
     private void updateEmbers(float dt) {
@@ -894,7 +944,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (state == STATE_MENU || state == STATE_SELECT) return;
         if (state == STATE_STORY) {
             story.update(dt);
-            if (story.quitRequested) { story = null; state = STATE_MENU; }
+            if (story.quitRequested) { story = null; storyFight = false; state = STATE_MENU; }
+            else if (story.fightRequest > 0) beginStoryFight();
             return;
         }
 
@@ -914,7 +965,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (deadT > 0) {
             deadT -= dt;
-            if (deadT <= 0) resetFight();
+            if (deadT <= 0) {
+                if (storyFight) {
+                    story.fightLost();
+                    beginStoryFight();
+                } else {
+                    resetFight();
+                }
+            }
             return;
         }
 
@@ -975,8 +1033,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     spawnDeathParticles(en.x, en.y);
                     enemies.remove(i);
                     if (enemies.isEmpty()) {
-                        sound.play(voice + "_victory");
-                        emberBurst();
+                        if (storyFight) {
+                            storyFight = false;
+                            hexesShown = false;
+                            attackRangeShown = 0;
+                            targetEnemy = null;
+                            story.fightWon();
+                            state = STATE_STORY;
+                        } else {
+                            sound.play(voice + "_victory");
+                            emberBurst();
+                        }
                     }
                 }
             }
@@ -1413,6 +1480,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         for (int ty = ty0; ty <= ty1; ty++) {
             for (int tx = tx0; tx <= tx1; tx++) {
+                if (storyFight) continue;
                 int h = (tx * 40503) ^ (ty * 66827);
                 int roll = (h >>> 3) % 100;
                 if (roll < 8 && !props2.isEmpty()) {
@@ -1762,7 +1830,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void drawGame(Canvas cv) {
         cv.drawColor(GROUND_COL);
 
-        drawGround(cv);
+        if (storyFight && story != null) story.drawBattleGround(cv, camX, camY, zoom, W, H);
+        else drawGround(cv);
+
         if (hexesShown) drawMoveFan(cv);
         if (attackRangeShown > 0) drawAttackRange(cv);
         if (targetEnemy != null && !targetEnemy.dead) {
