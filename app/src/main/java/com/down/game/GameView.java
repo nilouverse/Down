@@ -1038,9 +1038,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     @Override public void shTeleport(float x, float y) {
         player.x = x; player.y = y; player.targetX = x; player.targetY = y; camSnap = false;
     }
-    @Override public void shWalkTo(float x, float y) { player.setTarget(x, y); }
     @Override public boolean shPlayerArrived() { return !player.isMoving(); }
-    @Override public void shClearEnemies() { enemies.clear(); }
+    @Override public void shClearEnemies() { enemies.clear(); fanDirty = true; }
+    @Override public android.content.Context shGetContext() { return getContext(); }
 
     private void drawChapter(Canvas cv) {
         if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
@@ -1092,6 +1092,18 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         startPlayerTurn();
     }
 
+    private void processStoryAction(String act) {
+        if (act.startsWith("ACTION shake")) shakeT = 0.2f;
+        else if (act.startsWith("ACTION flash")) hurtT = 0.15f;
+        else if (act.startsWith("ACTION slash")) {
+            spawnSlash(player.x + player.facing * 60, player.y);
+            sound.play("hit");
+        }
+        else if (act.startsWith("ACTION blood")) {
+            spawnDecal(player.x + player.facing * 60, player.y);
+        }
+    }
+
     private void spawnStoryEnemy() {
         for (int tries = 0; tries < 40; tries++) {
             float a = (float) (Math.random() * Math.PI * 2);
@@ -1129,7 +1141,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 story = null; storyMode = false; storyFight = false; state = STATE_MENU; return;
             }
             if (story.fightRequest > 0) beginStoryFight();
-            if (story.mode == Story.MODE_WALK && !player.isMoving()) story.onWalkDone();
+            
+            String act;
+            while ((act = story.pollAction()) != null) processStoryAction(act);
+
+            if (story.hasObjective && !player.isMoving()) {
+                worldToHex(player.x, player.y, IH_A);
+                if (IH_A[0] == story.objectiveQ && IH_A[1] == story.objectiveR) {
+                    story.onObjectiveReached();
+                }
+            }
         }
         if (storyMode && story != null && story.dialogUp) {
             if (!camSnap && H > 0) { camX = player.x; camY = player.y - (H * 0.28f) / zoom; camSnap = true; }
@@ -1617,7 +1638,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         float wy0 = camY - halfH, wy1 = camY + halfH;
 
         paint.setAlpha(255);
-        paint.setColor(0xFF150d16);
+        paint.setColor(storyMode && story != null ? story.groundColor : 0xFF150d16);
         cv.drawRect(0, 0, W, H, paint);
 
         float strip = 30f;
@@ -1978,7 +1999,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
 
         cv.save();
-        cv.translate(sx(pl.x), by);
+        float lx = h.visualX * pl.facing;
+        cv.translate(sx(pl.x + lx), by);
         if (pl.facing < 0) cv.scale(-1, 1);
         if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
         if (!h.hidden) {
@@ -2154,8 +2176,23 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private void drawGame(Canvas cv) {
         cv.drawColor(GROUND_COL);
 
-        if (storyMode && story != null) story.drawBattleGround(cv, camX, camY, zoom, W, H);
-        else drawGround(cv);
+        drawGround(cv);
+
+        if (storyMode && story != null && story.hasObjective) {
+            hexToWorld(story.objectiveQ, story.objectiveR, FW_A);
+            float ox = sx(FW_A[0]), oy = sy(FW_A[1]);
+            float pulse = 0.5f + 0.5f * (float) Math.sin(loadT * 4f);
+            paint.setColor(C_CYAN);
+            paint.setAlpha((int) (100 + 100 * pulse));
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(3 * zoom);
+            float hr = HEX * 1.2f * zoom * (1f + 0.1f * pulse);
+            rf.set(ox - hr, oy - hr * SQUASH, ox + hr, oy + hr * SQUASH);
+            cv.drawOval(rf, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(0);
+            paint.setAlpha(255);
+        }
 
         if (hexesShown) drawMoveFan(cv);
         if (attackRangeShown > 0) drawAttackRange(cv);
@@ -2536,7 +2573,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (attackRangeShown == 3 && canAct()
                 && dTap <= player.hero.attacks[2].range) {
             player.actionsLeft--;
-            attackType = 3;
             player.facing = wx >= player.x ? 1 : -1;
             mana -= player.hero.attacks[2].mana;
             player.hero.startAttack(2, null);
@@ -2576,7 +2612,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 } else {
                     int ai = attackRangeShown - 1;
                     player.actionsLeft--;
-                    attackType = attackRangeShown;
                     player.facing = tapped.x >= player.x ? 1 : -1;
                     mana -= player.hero.attacks[ai].mana;
                     player.hero.startAttack(ai, tapped);
