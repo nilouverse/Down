@@ -4,11 +4,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Typeface;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.Queue;
 
 public class Story {
 
@@ -21,7 +16,6 @@ public class Story {
         Context shGetContext();
     }
 
-    private static final float SQUASH = 0.6f, HEX = 96f;
     private static final float CPS = 42f;
 
     private static final int C_BLOOD = 0xFFb3102a, C_BRIGHT = 0xFFff2747,
@@ -36,120 +30,27 @@ public class Story {
     public String speaker = "", text = "", title = "";
     public float tw = 0, titleT = 99;
     public int groundColor = 0xFF0d120a;
+    
+    // Old objective system (kept for backward compatibility, though unused by new zones)
     public int objectiveQ = 0, objectiveR = 0;
     public boolean hasObjective = false;
 
-    private final Queue<String> actionQueue = new LinkedList<>();
-
-    private static class Beat {
-        int type; // 0 dialog, 1 action, 2 scene, 3 walk, 4 fight
-        String who, txt, cmd;
-        int count, q, r;
-    }
-    private final ArrayList<Beat> beats = new ArrayList<>();
-    private int bi = -1;
-    private boolean clusterSkip = false;
+    // New HUD/Objective system
+    public String objective = "";
+    private String note; 
+    private float noteT;
+    private String actCard; 
+    private float actCardT;
 
     public Story(Host h) {
         host = h;
-        loadScript(h.shGetContext());
+        // Script is now parsed and driven by StoryWorld singleton.
     }
 
-    private void loadScript(Context ctx) {
-        try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/act1.txt")));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
-                parseLine(line);
-            }
-        } catch (Exception e) {}
-    }
-
-    private void parseLine(String line) {
-        String[] parts = line.split(" ", 2);
-        String cmd = parts[0];
-        String arg = parts.length > 1 ? parts[1] : "";
-
-        if (cmd.equals("NAME")) {
-            Beat b = new Beat(); b.type = 2; b.cmd = "NAME"; b.txt = arg; beats.add(b);
-        } else if (cmd.equals("GROUND")) {
-            Beat b = new Beat(); b.type = 2; b.cmd = "GROUND"; b.txt = arg; beats.add(b);
-        } else if (cmd.equals("SAY")) {
-            String[] p2 = arg.split(" ", 2);
-            Beat b = new Beat(); b.type = 0; b.who = p2[0]; b.txt = p2.length > 1 ? p2[1] : ""; beats.add(b);
-        } else if (cmd.equals("ACTION") || cmd.equals("SHOW") || cmd.equals("HIDE") || cmd.equals("EXIT")
-                || cmd.equals("ACTOR") || cmd.equals("PLACE") || cmd.equals("CRACK") || cmd.equals("RESET")) {
-            Beat b = new Beat(); b.type = 1; b.cmd = cmd; b.txt = arg; beats.add(b);
-        } else if (cmd.equals("WALK")) {
-            String[] p2 = arg.split(" ");
-            if (p2.length >= 3) {
-                Beat b = new Beat(); b.type = 3; b.who = p2[0];
-                b.q = Integer.parseInt(p2[1]); b.r = Integer.parseInt(p2[2]);
-                beats.add(b);
-            }
-        } else if (cmd.equals("FIGHT")) {
-            Beat b = new Beat(); b.type = 4; b.count = Integer.parseInt(arg); beats.add(b);
-        }
-    }
-
-    private static boolean skippable(Beat b) {
-        if (b.type != 1) return false;
-        if (b.cmd.equals("HIDE")) return true;
-        return b.cmd.equals("ACTION") && (b.txt.startsWith("slash") || b.txt.startsWith("blood"));
-    }
-
-    private final float[] HW = new float[2];
-    private static void hexToWorld(int q, int r, float[] o) {
-        o[0] = HEX * (float) Math.sqrt(3) * (q + r / 2f);
-        o[1] = HEX * 1.5f * r * SQUASH;
-    }
-
-    public void start() { bi = -1; mode = MODE_RUN; clusterSkip = false; next(); }
-
-    private void next() {
-        bi++; tw = 0;
-        while (clusterSkip && bi < beats.size() && skippable(beats.get(bi))) bi++;
-        if (bi >= beats.size()) { ended = true; mode = MODE_DONE; dialogUp = false; return; }
-        Beat b = beats.get(bi);
-
-        if (b.type == 0) {
-            mode = MODE_DIALOG; dialogUp = true; speaker = b.who; text = b.txt;
-        } else if (b.type == 1) {
-            if (b.cmd.equals("SHOW") || b.cmd.equals("EXIT")) clusterSkip = false;
-            actionQueue.add(b.cmd + " " + b.txt);
-            mode = MODE_RUN; next();
-        } else if (b.type == 2) {
-            if (b.cmd.equals("NAME")) {
-                title = b.txt; titleT = 0;
-                clusterSkip = false;
-                actionQueue.add("SCENE " + b.txt);
-            } else if (b.cmd.equals("GROUND")) {
-                try { groundColor = 0xFF000000 | Integer.parseInt(b.txt, 16); } catch (Exception e) {}
-            }
-            mode = MODE_RUN; next();
-        } else if (b.type == 3) {
-            clusterSkip = false;
-            if (b.who.equals("nilou") || b.who.equals("NilouZila")) {
-                objectiveQ = b.q; objectiveR = b.r; hasObjective = true;
-                mode = MODE_WAIT;
-            } else {
-                actionQueue.add("WALK " + b.who + " " + b.q + " " + b.r);
-                mode = MODE_RUN; next();
-            }
-        } else if (b.type == 4) {
-            clusterSkip = true;
-            mode = MODE_FIGHT; fightRequest = b.count;
-        }
-    }
-
-    public String pollAction() { return actionQueue.poll(); }
-
-    public void onObjectiveReached() {
-        hasObjective = false;
-        mode = MODE_RUN;
-        next();
+    public void start() { 
+        mode = MODE_RUN; 
+        ended = false; 
+        quitRequested = false;
     }
 
     public void update(float dt) {
@@ -159,23 +60,89 @@ public class Story {
 
     public void tap() {
         if (mode != MODE_DIALOG) return;
-        if (tw < text.length()) { tw = text.length(); return; }
-        dialogUp = false; mode = MODE_RUN; next();
+        if (tw < text.length()) { 
+            tw = text.length(); 
+            return; 
+        }
+        dialogUp = false; 
+        mode = MODE_RUN; 
     }
 
-    public void fightWon() { fightRequest = 0; mode = MODE_RUN; next(); }
-    public void fightLost() { }
+    public void fightWon() { 
+        fightRequest = 0; 
+        mode = MODE_RUN; 
+    }
+    
+    public void fightLost() { 
+        // Retry logic handled by GameView/StoryWorld
+    }
+
+    public void onObjectiveReached() {
+        hasObjective = false;
+        mode = MODE_RUN;
+    }
+
+    // =====================================================================
+    // NEW BRIDGE METHODS (Driven by StoryWorld)
+    // =====================================================================
+    
+    public void say(String speaker, String text) {
+        this.speaker = speaker; 
+        this.text = text;
+        this.dialogUp = true; 
+        this.tw = 0; 
+        this.mode = MODE_DIALOG;
+    }
+    
+    public boolean isOpen() { 
+        return dialogUp; 
+    }
+
+    public void setObjective(String text) { 
+        this.objective = text; 
+    }
+
+    public void onProgressFlag(String flag) {
+        if (flag.equals("descent_open"))        objective = "Descend to the city.";
+        else if (flag.equals("city_open"))      objective = "Fight through the falling city.";
+        else if (flag.equals("courtyard_open")) objective = "Reach the Courtyard of Bones.";
+        else if (flag.equals("velkarya_final_open")) objective = "Return to Velkarya.";
+        else if (flag.equals("run_open"))       objective = "Run. Do not look back.";
+        else if (flag.equals("ending_open"))    objective = "";
+    }
+
+    public void flashNote(String text) { 
+        note = text; 
+        noteT = 2.5f; 
+    }
+
+    public void showActCard(String title) { 
+        actCard = title; 
+        actCardT = 0f; 
+        dialogUp = false; 
+    }
+
+    public boolean isWalkable(float x, float y) {
+        return StoryWorld.sceneWalkable(x, y);
+    }
+
+    // =====================================================================
+    // RENDERING
+    // =====================================================================
 
     private String prefixFor(String who) {
         if (who == null) return null;
         if (who.startsWith("Nilou")) return "nilou";
         if (who.startsWith("Vex")) return "vex";
+        if (who.startsWith("Vel")) return "vel";
         return null;
     }
+    
     private int colorFor(String who) {
         String p = prefixFor(who);
         if ("nilou".equals(p)) return C_MAGENTA;
         if ("vex".equals(p)) return C_CYAN;
+        if ("vel".equals(p)) return 0xFF34e3d6; // Green/Cyan for Velkarya
         return C_BRIGHT;
     }
 
@@ -224,5 +191,36 @@ public class Story {
         paint.setTextAlign(Paint.Align.LEFT);
     }
 
-    public boolean isWalkable(float x, float y) { return true; }
+    public void drawHud(Canvas cv, int W, int H, Paint paint, Typeface body, Typeface logo) {
+        if (objective.length() > 0) {
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTypeface(body);
+            paint.setTextSize(24);
+            paint.setColor(0xAAefe6dd);
+            cv.drawText(objective, W / 2f, 60, paint);
+            paint.setTextAlign(Paint.Align.LEFT);
+        }
+        if (noteT > 0 && note != null) {
+            noteT -= 1f / 60f;
+            paint.setAlpha((int) Math.min(255, noteT * 340f));
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTypeface(body);
+            paint.setTextSize(30);
+            paint.setColor(0xFFC9C2B4);
+            cv.drawText(note, W / 2f, H - 96f, paint);
+            paint.setAlpha(255);
+            paint.setTextAlign(Paint.Align.LEFT);
+        }
+        if (actCard != null) {
+            actCardT += 1f / 60f;
+            paint.setAlpha((int) Math.min(255, actCardT * 90f));
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTypeface(logo);
+            paint.setTextSize(54);
+            paint.setColor(0xFFC9C2B4);
+            cv.drawText(actCard, W / 2f, H * 0.42f, paint);
+            paint.setAlpha(255);
+            paint.setTextAlign(Paint.Align.LEFT);
+        }
+    }
 }
