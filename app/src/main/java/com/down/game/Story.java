@@ -604,8 +604,8 @@ public class Story {
             float c = roadCenter(x), hf = roadHalf(x);
             float px = sx(x, camX, zoom, W);
             paint.setColor(0xFF3a2a1a);
-            cv.drawRect(px - 3 * zoom, sy(c - hf - 24, camY, zoom, H) - 8 * zoom, px + 3 * zoom, sy(c - hf - 24, camY, zoom, H));
-            cv.drawRect(px - 3 * zoom, sy(c + hf + 24, camY, zoom, H) - 8 * zoom, px + 3 * zoom, sy(c + hf + 24, camY, zoom, H));
+            cv.drawRect(px - 3 * zoom, sy(c - hf - 24, camY, zoom, H) - 8 * zoom, px + 3 * zoom, sy(c - hf - 24, camY, zoom, H), paint);
+            cv.drawRect(px - 3 * zoom, sy(c + hf + 24, camY, zoom, H) - 8 * zoom, px + 3 * zoom, sy(c + hf + 24, camY, zoom, H), paint);
             if (((int) (x / 240)) % 4 == 0) {
                 paint.setShader(new RadialGradient(px, sy(c - hf - 24, camY, zoom, H), 70 * zoom, 0x44ff7a1a, 0x00000000, Shader.TileMode.CLAMP));
                 cv.drawRect(px - 70 * zoom, sy(c - hf - 24, camY, zoom, H) - 70 * zoom, px + 70 * zoom, sy(c - hf - 24, camY, zoom, H) + 70 * zoom, paint);
