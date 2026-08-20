@@ -45,7 +45,10 @@ public final class SceneMap {
     private final ShortBuffer bakeBuf = ByteBuffer.allocateDirect(SRC * SRC * 2)
             .order(ByteOrder.nativeOrder()).asShortBuffer();
 
-    private volatile int bakeReqCX = Integer.MIN_VALUE, bakeReqCY = Integer.MIN_VALUE;
+    // Bake queue (ring buffer, allocation-free)
+    private static final int PEND = 128;
+    private final int[] pendQ = new int[PEND];
+    private int pendHead = 0, pendTail = 0;
     private Thread baker;
 
     // Bake-time scratch fields (allocation-free)
@@ -57,7 +60,7 @@ public final class SceneMap {
         this.walkable = new boolean[W_Q * W_R];
         buildWalkability();
 
-        int cap = 12;
+        int cap = 24;
         chunkBits = new Bitmap[cap];
         chunkKeys = new int[cap];
         chunkUsed = new long[cap];
@@ -81,7 +84,7 @@ public final class SceneMap {
         out[1] = HEX * 1.5f * r * SQUASH;
     }
 
-    public static void worldToHex(float x, float y, int[] out) {
+    public static void worldToHex(float x, float y, float[] out) {
         float hy = y / SQUASH;
         float qf = ((float) Math.sqrt(3) / 3f * x - 1f / 3f * hy) / HEX;
         float rf2 = (2f / 3f * hy) / HEX;
@@ -134,42 +137,59 @@ public final class SceneMap {
     }
 
     public boolean walkWorld(float wx, float wy) {
-        int[] out = new int[2];
+        float[] out = new float[2];
         worldToHex(wx, wy, out);
-        return walk(out[0], out[1]);
+        return walk(Math.round(out[0]), Math.round(out[1]));
     }
 
     private void startBaker() {
         baker = new Thread(new Runnable() { public void run() {
             while (!Thread.interrupted()) {
-                int cx, cy;
+                int key;
                 synchronized (SceneMap.this) {
-                    cx = bakeReqCX; cy = bakeReqCY;
-                    if (cx == Integer.MIN_VALUE) {
+                    while (pendHead == pendTail) {
                         try { SceneMap.this.wait(200); } catch (InterruptedException e) { return; }
-                        continue;
                     }
-                    bakeReqCX = Integer.MIN_VALUE;
+                    key = pendQ[pendHead];
+                    pendHead = (pendHead + 1) & (PEND - 1);
                 }
-                bakeChunk(cx, cy);
+                bakeChunkKey(key);
             }
         }}, "map-baker");
         baker.setDaemon(true);
         baker.start();
     }
 
-    private void bakeChunk(int cx, int cy) {
+    private static int qkey(int cx, int cy) { return ((cy & 0xFFFF) << 16) | (cx & 0xFFFF); }
+
+    private void enqueue(int cx, int cy) {
+        int lru = cy * 4096 + cx;
+        int k = qkey(cx, cy);
+        synchronized (this) {
+            for (int i = 0; i < chunkKeys.length; i++) if (chunkKeys[i] == lru) return;
+            for (int i = pendHead; i != pendTail; i = (i + 1) & (PEND - 1)) if (pendQ[i] == k) return;
+            if (((pendTail + 1) & (PEND - 1)) == pendHead) return;
+            pendQ[pendTail] = k;
+            pendTail = (pendTail + 1) & (PEND - 1);
+            notify();
+        }
+    }
+
+    private void bakeChunkKey(int key) {
+        int cy = (short) (key >>> 16);
+        int cx = (short) (key & 0xFFFF);
         Bitmap bmp = null;
         int slot = -1;
-        for (int i = 0; i < chunkBits.length; i++) {
+        int lru = cy * 4096 + cx;
+        for (int i = 0; i < chunkKeys.length; i++) {
             if (chunkKeys[i] == Integer.MIN_VALUE) { slot = i; break; }
         }
         if (slot < 0) {
             long best = Long.MAX_VALUE;
             for (int i = 0; i < chunkUsed.length; i++)
                 if (chunkUsed[i] < best) { best = chunkUsed[i]; slot = i; }
-            bmp = chunkBits[slot];
         }
+        bmp = chunkBits[slot];
         if (bmp == null) {
             bmp = Bitmap.createBitmap(SRC, SRC, Bitmap.Config.RGB_565);
             chunkBits[slot] = bmp;
@@ -191,7 +211,7 @@ public final class SceneMap {
         bmp.copyPixelsFromBuffer(bakeBuf);
 
         synchronized (this) {
-            chunkKeys[slot] = cy * 4096 + cx;
+            chunkKeys[slot] = lru;
             chunkUsed[slot] = ++frameStamp;
         }
     }
@@ -206,7 +226,7 @@ public final class SceneMap {
         float t = (x - a) / (b - a); if (t < 0f) t = 0f; else if (t > 1f) t = 1f; return t * t * (3f - 2f * t);
     }
     private static float lerp(float a, float b, float t) { return a + (b - a) * t; }
-    
+
     private float vnoise(float x, float y, int salt) {
         int xi = (int) x; if (x < xi) xi--;
         int yi = (int) y; if (y < yi) yi--;
@@ -220,13 +240,13 @@ public final class SceneMap {
         float u = c + (d - c) * fx;
         return (t + (u - t) * fy) * (1f / 65535f);
     }
-    
+
     private float grain(float x, float y, int salt) {
         int xi = (int) x; if (x < xi) xi--;
         int yi = (int) y; if (y < yi) yi--;
         return (h2(xi, yi, salt) >>> 16) * (1f / 65535f);
     }
-    
+
     private void voronoi(float x, float y, float cell, int salt) {
         float gx = x / cell, gy = y / cell;
         int cx = (int) gx; if (gx < cx) cx--;
@@ -245,7 +265,7 @@ public final class SceneMap {
         }
         vF1 = f1; vF2 = f2;
     }
-    
+
     private short pack565(float r, float g, float b, int px, int py) {
         int dIdx = ((px & 3) << 2) | (py & 3);
         int[] BAYER = {0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
@@ -259,32 +279,46 @@ public final class SceneMap {
         return (short) ((ri << 11) | (gi << 5) | bi);
     }
 
+    private int fallbackColor(int cx, int cy) {
+        float wx = (cx + 0.5f) * CHUNK_PX;
+        float wy = (cy + 0.5f) * CHUNK_PX;
+        float hy = wy * 1.6666667f;
+        float qf = wx * 0.0060141f - hy * 0.0057870f;
+        float rf = hy * 0.0115741f;
+        int r, g, b;
+        if (qf < 10) { if (rf < -4.5f) { r=12; g=11; b=14; } else { r=45; g=40; b=42; } }
+        else if (qf < 36) { r=60; g=52; b=48; }
+        else if (qf < 60) { r=52; g=48; b=50; }
+        else if (qf < 78) { r=120; g=112; b=98; }
+        else { r=28; g=26; b=30; }
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
+
     // ================= FRAGMENT SHADER (samplePixel) =================
     private short samplePixel(float wx, float wy, int[] hq, float[] hw) {
         worldToHex(wx, wy, hq);
         int q = hq[0], r = hq[1];
-        
+
         float hy = wy * 1.6666667f;
         float qf = wx * 0.0060141f - hy * 0.0057870f;
         float rf = hy * 0.0115741f;
-        
+
         int px = (int) (wx * 0.5f); if (wx * 0.5f < px) px--;
         int py = (int) (wy * 0.5f); if (wy * 0.5f < py) py--;
-        
+
         if (q < MIN_Q || q > MAX_Q || r < MIN_R || r > MAX_R) {
             cR = 8; cG = 7; cB = 10;
             return pack565(cR, cG, cB, px, py);
         }
-        
+
         float fq = qf - q;
         float fr = rf - r;
-        
-        // Shared noise fields
+
         float nLow = vnoise(wx * 0.0028f, wy * 0.0028f, 11);
         if (quality) nLow = nLow * 0.62f + 0.38f * vnoise(wx * 0.0067f, wy * 0.0067f, 12);
         float warp = quality ? vnoise(wx * 0.0105f, wy * 0.0105f, 23) : 0.5f;
         float nMid = vnoise((wx + (warp - 0.5f) * 52f) * 0.029f, (wy + (warp - 0.13f) * 52f) * 0.029f, 37);
-        
+
         float gc = 0.5f, gx = 0f, gy = 0f;
         if (quality) {
             gc = grain(wx * 0.5f, wy * 0.5f, 61);
@@ -292,14 +326,13 @@ public final class SceneMap {
             gy = grain(wx * 0.5f, wy * 0.5f + 0.75f, 61) - grain(wx * 0.5f, wy * 0.5f - 0.75f, 61);
         }
         float bump = (gx * 0.62f + gy * 0.78f) * 12f;
-        
-        // Zone selection & dispatch
+
         float wA = 1f - ss(7f, 13f, qf);
         float wD = ss(7f, 13f, qf) * (1f - ss(32f, 38f, qf));
         float wC = ss(32f, 38f, qf) * (1f - ss(56f, 62f, qf));
         float wY = ss(56f, 62f, qf) * (1f - ss(73f, 79f, qf));
         float wP = ss(73f, 79f, qf);
-        
+
         if (wA >= wD && wA >= wC && wA >= wY && wA >= wP) {
             paintAshen(wx, wy, qf, rf, q, r, fq, fr, nLow, nMid, gc, bump);
         } else if (wD >= wC && wD >= wY && wD >= wP) {
@@ -311,8 +344,8 @@ public final class SceneMap {
         } else {
             paintCraterField(wx, wy, qf, rf, q, r, fq, fr, nLow, nMid, gc, bump);
         }
-        
-        cR *= 0.98f; cB *= 1.05f; // Cold moon grade
+
+        cR *= 0.98f; cB *= 1.05f;
         return pack565(cR, cG, cB, px, py);
     }
 
@@ -343,16 +376,16 @@ public final class SceneMap {
         cG = 42f * mottle * duneShade * (1f - 0.4f * soot);
         cB = 44f * mottle * duneShade * (1f - 0.3f * soot);
         cR *= 0.92f + 0.16f * gc; cG *= 0.92f + 0.16f * gc; cB *= 0.92f + 0.16f * gc;
-        
+
         if (rf > -3f && rf < 2f && qf > -5f && qf < 12f) {
             float ridge = 1f - Math.abs(vnoise(wx * 0.02f, wy * 0.02f, 41) * 2f - 1f);
             float vein = ridge * ridge * ridge * ridge;
-            float intensity = ss(0.8f, 0.95f, ridge) * ss(-1f, -3f, rf);
-            cR += intensity * 120f + vein * 80f;
-            cG += intensity * 40f + vein * 30f;
-            cB += intensity * 10f + vein * 5f;
+            float intensity = ss(0.86f, 0.97f, ridge) * ss(-0.5f, -3f, rf) * (0.4f + 0.6f * nLow);
+            cR += intensity * 90f + vein * 40f;
+            cG += intensity * 30f + vein * 15f;
+            cB += intensity * 8f + vein * 4f;
         }
-        
+
         int sh = h2(q, r, 91);
         if ((sh >>> 16) < 20000 && edge > 0.5f) {
             float sx = ((sh >>> 8) & 255) / 255f - 0.5f;
@@ -377,19 +410,19 @@ public final class SceneMap {
         float dr = rf - c;
         float adr = dr < 0 ? -dr : dr;
         float e = halfW - adr;
-        
+
         if (e < -2.6f) {
             if (dr > 0) {
                 float strata = vnoise(wx * 0.02f, wy * 0.075f, 51);
                 cR = 35f * (0.6f + 0.55f * strata); cG = cR * 0.85f; cB = cR * 0.9f;
             } else {
-                float depth = ss(-0.3f, -1.8f, e);
+                float depth = ss(-0.4f, -2.6f, e);
                 cR = lerp(25f, 8f, depth); cG = lerp(22f, 7f, depth); cB = lerp(28f, 10f, depth);
             }
             cR += bump * 0.5f; cG += bump * 0.5f; cB += bump * 0.5f;
             return;
         }
-        
+
         if (e > 0) {
             float center = 1f - adr / halfW;
             cR = lerp(64f, 92f, center); cG = lerp(56f, 78f, center); cB = lerp(50f, 64f, center);
@@ -407,12 +440,12 @@ public final class SceneMap {
                 float rim = ss(-0.2f, -0.02f, e);
                 cR += rim * 30f; cG += rim * 32f; cB += rim * 40f;
             } else {
-                float depth = ss(-0.3f, -1.8f, e);
+                float depth = ss(-0.4f, -2.6f, e);
                 cR = lerp(35f, 8f, depth); cG = lerp(30f, 7f, depth); cB = lerp(38f, 10f, depth);
             }
         }
         cR += bump; cG += bump; cB += bump;
-        
+
         float dq = qf - 21f, dqr = rf + 1f;
         float d2 = dq * dq + dqr * dqr;
         if (d2 < 9f) {
@@ -424,7 +457,7 @@ public final class SceneMap {
     private void paintCity(float wx, float wy, float qf, float rf, int q, int r, float fq, float fr, float nLow, float nMid, float gc, float bump) {
         boolean street = (r >= -6 && r <= 12) && ((r % 5 == 0) || (q % 6 == 0) || insidePlaza(q, r));
         boolean rubble = insideRubble(q, r);
-        
+
         if (street && !rubble) {
             if (insidePlaza(q, r)) {
                 cR = 150f; cG = 144f; cB = 132f;
@@ -456,12 +489,13 @@ public final class SceneMap {
             cR -= rebar * 25f; cG -= rebar * 25f; cB -= rebar * 25f;
         } else {
             int bh = h2(q, r, 101);
-            float roofTone = 0.6f + 0.8f * ((bh >>> 16) / 65535f);
+            float roofN = vnoise(wx * 0.004f, wy * 0.004f, 105);
+            float roofTone = 0.7f + 0.5f * roofN + 0.15f * ((bh >>> 16) / 65535f - 0.5f);
             cR = 58f * roofTone; cG = 54f * roofTone; cB = 58f * roofTone;
             float e = 0.5f - Math.max(Math.max(Math.abs(fq), Math.abs(fr)), Math.abs(fq + fr));
-            float rim = ss(0.06f, 0.0f, e) * ss(0.1f, -0.25f, fq + fr);
-            cR += rim * 40f; cG += rim * 42f; cB += rim * 50f;
-            
+            float rim = ss(0.10f, 0.0f, e) * ss(0.1f, -0.25f, fq + fr);
+            cR += rim * 22f; cG += rim * 24f; cB += rim * 30f;
+
             if (quality && (bh & 15) < 2) {
                 int winX = (int)(wx * 0.125f), winY = (int)(wy * 0.125f);
                 int wh = h2(winX, winY, 111);
@@ -480,7 +514,7 @@ public final class SceneMap {
             }
         }
         cR += bump; cG += bump; cB += bump;
-        
+
         float dq = qf - 44f, dqr = rf - 6f;
         float d2 = dq * dq + dqr * dqr;
         if (d2 < 9f) {
@@ -493,24 +527,24 @@ public final class SceneMap {
         float dxh = (qf - 66f) / 10f, dyh = (rf - 4f) / 8f;
         float rho2 = dxh * dxh + dyh * dyh;
         float rho = (float)Math.sqrt(rho2);
-        
+
         if (rho < 1.05f) {
             cR = 172f; cG = 162f; cB = 140f;
             cR *= 0.8f + 0.4f * nMid; cG *= 0.8f + 0.4f * nMid; cB *= 0.8f + 0.4f * nMid;
             float crack = ss(0.90f, 0.98f, 1f - Math.abs(vnoise(wx * 0.02f, wy * 0.02f, 102) * 2f - 1f));
             cR -= crack * 25f; cG -= crack * 25f; cB -= crack * 20f;
-            
+
             if (quality) {
                 float sp = grain(wx * 0.4f, wy * 0.4f, 103);
                 if (sp > 0.985f) { cR += 25f; cG += 25f; cB += 20f; }
                 else if (sp < 0.015f) { cR -= 20f; cG -= 20f; cB -= 15f; }
             }
-            
+
             float dq = qf - 67f, dqr = rf - 4f;
             float d2 = dq * dq + dqr * dqr;
             float scorch = ss(9f, 1f, d2);
             cR = lerp(cR, 36f, scorch * 0.7f); cG = lerp(cG, 30f, scorch * 0.7f); cB = lerp(cB, 28f, scorch * 0.7f);
-            
+
             float ring = (float)Math.cos(Math.sqrt(d2) * 7f + nMid * 1.5f);
             if (ring > 0.6f && d2 < 16f) {
                 float rMask = (ring - 0.6f) * 2.5f * ss(16f, 4f, d2);
@@ -537,14 +571,14 @@ public final class SceneMap {
         } else {
             cR = 34f + 20f * nMid; cG = 30f + 18f * nMid; cB = 33f + 18f * nMid;
         }
-        
+
         if (rf >= 1.5f && rf <= 6.5f && qf >= 56f && qf <= 78f && rho > 1.05f) {
             float causeway = ss(1.5f, 2.2f, rf) * (1f - ss(5.8f, 6.5f, rf));
             cR = lerp(cR, 140f, causeway * 0.6f); cG = lerp(cG, 134f, causeway * 0.6f); cB = lerp(cB, 120f, causeway * 0.6f);
         }
-        
+
         cR += bump; cG += bump; cB += bump;
-        
+
         float dq = qf - 66f, dqr = rf - 4f;
         float d2 = dq * dq + dqr * dqr;
         if (d2 < 9f) {
@@ -559,7 +593,7 @@ public final class SceneMap {
         float d2 = dxw * dxw + dyw * dyw;
         float d = (float)Math.sqrt(d2);
         float rho = d / 330f;
-        
+
         if (qf >= 72.5f && qf <= 80f && rho > 1.05f && (rf < 1.5f || rf > 6.5f)) {
             int bh = h2(q, r, 121);
             float facet = 0.5f + 0.5f * ((bh >>> 16) / 65535f);
@@ -569,11 +603,8 @@ public final class SceneMap {
             cR += bump; cG += bump; cB += bump;
             return;
         }
-        
+
         if (rho > 1.35f) {
-            cR = 30f + 15f * nLow; cG = 27f + 12f * nLow; cB = 30f + 15f * nLow;
-            float glassSpeck = quality ? (grain(wx * 0.5f, wy * 0.5f, 131) > 0.99f ? 1f : 0f) : 0f;
-            cR += glassSpeck * 40f; cG += glassSpeck * 80f; cB += glassSpeck * 60f;
             float greenBleed = ss(1.5f, 1.05f, rho) * 0.25f;
             cR += greenBleed * 15f; cG += greenBleed * 40f; cB += greenBleed * 25f;
         } else if (rho > 1.0f) {
@@ -584,103 +615,14 @@ public final class SceneMap {
             cR = lerp(150f, 26f, rho); cG = lerp(255f, 40f, rho); cB = lerp(170f, 34f, rho);
             float heat = ss(0.5f, 0.08f, rho);
             cR += heat * 60f; cG += heat * 120f; cB += heat * 70f;
-            
             if (quality) {
-                float ang = (float)Math.atan2(dyw, dxw);
+                float ang = (float) Math.atan2(dyw, dxw);
                 float c1 = Math.abs((ang * 1.43239f + nMid * 0.35f) % 1f - 0.5f);
                 float c2 = Math.abs((rho * 6f + (nLow - 0.5f) * 0.8f) % 1f - 0.5f);
                 float crack = (c1 < 0.026f || c2 < 0.03f) ? 1f : 0f;
                 cR = lerp(cR, 10f, crack * 0.8f); cG = lerp(cG, 16f, crack * 0.8f); cB = lerp(cB, 12f, crack * 0.8f);
-                if (heat > 0.2f && crack > 0.5f) {
-                    cR += 40f; cG += 120f; cB += 60f;
-                }
+                if (heat > 0.2f && crack > 0.5f) { cR += 40f; cG += 120f; cB += 60f; }
             }
         }
         cR += bump * 0.5f; cG += bump * 0.5f; cB += bump * 0.5f;
     }
-
-    public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
-        int x0 = (int) Math.floor((camX - vw / (2f * zoom)) / CHUNK_PX) - 1;
-        int x1 = (int) Math.floor((camX + vw / (2f * zoom)) / CHUNK_PX) + 1;
-        int y0 = (int) Math.floor((camY - vh / (2f * zoom)) / CHUNK_PX) - 1;
-        int y1 = (int) Math.floor((camY + vh / (2f * zoom)) / CHUNK_PX) + 1;
-
-        for (int cy = y0; cy <= y1; cy++) {
-            for (int cx = x0; cx <= x1; cx++) {
-                Bitmap b = acquire(cx, cy);
-                if (b == null) continue;
-                srcR.set(0, 0, SRC, SRC);
-                dstR.set(
-                    (int) ((cx * CHUNK_PX - camX) * zoom + vw / 2f),
-                    (int) ((cy * CHUNK_PX - camY) * zoom + vh / 2f),
-                    (int) ((cx * CHUNK_PX + CHUNK_PX - camX) * zoom + vw / 2f),
-                    (int) ((cy * CHUNK_PX + CHUNK_PX - camY) * zoom + vh / 2f));
-                c.drawBitmap(b, srcR, dstR, bmpPaint);
-            }
-        }
-        if (craterVisible) {
-            float[] hw = new float[2];
-            hexToWorld(88, 4, hw);
-            float gx = hw[0], gy = hw[1];
-            dstR.set((int) ((gx - 500 - camX) * zoom + vw / 2f),
-                     (int) ((gy - 500 - camY) * zoom + vh / 2f),
-                     (int) ((gx + 500 - camX) * zoom + vw / 2f),
-                     (int) ((gy + 500 - camY) * zoom + vh / 2f));
-            c.drawBitmap(craterGlow, null, dstR, glowPaint);
-        }
-    }
-
-    private Bitmap acquire(int cx, int cy) {
-        int key = cy * 4096 + cx;
-        for (int i = 0; i < chunkKeys.length; i++) {
-            if (chunkKeys[i] == key) { chunkUsed[i] = ++frameStamp; return chunkBits[i]; }
-        }
-        requestBake(cx, cy);
-        return null;
-    }
-
-    private void requestBake(int cx, int cy) {
-        synchronized (this) {
-            if (bakeReqCX == Integer.MIN_VALUE) {
-                bakeReqCX = cx; bakeReqCY = cy;
-                this.notify();
-            }
-        }
-    }
-
-    public void setCraterVisible(boolean v) { craterVisible = v; }
-
-    private void bakeCraterGlow() {
-        int r = 256;
-        craterGlow = Bitmap.createBitmap(r * 2, r * 2, Bitmap.Config.ARGB_8888);
-        int[] px = new int[r * r * 4];
-        for (int y = 0; y < r * 2; y++) {
-            for (int x = 0; x < r * 2; x++) {
-                float dx = (x - r) / (float) r, dy = (y - r) / (float) r;
-                float d = (float) Math.sqrt(dx * dx + dy * dy);
-                float core = ss(1.0f, 0.1f, d);
-                float flicker = 0.85f + 0.15f * h2(x, y, 99) / 65535f;
-                int a = (int) (core * 255 * flicker);
-                int cr = (int) (lerp(40, 180, core) * flicker);
-                int cg = (int) (lerp(120, 255, core) * flicker);
-                int cb = (int) (lerp(60, 140, core) * flicker);
-                px[y * r * 2 + x] = (a << 24) | (cr << 16) | (cg << 8) | cb;
-            }
-        }
-        IntBuffer ib = ByteBuffer.allocateDirect(px.length * 4)
-                .order(ByteOrder.nativeOrder()).asIntBuffer();
-        ib.put(px).position(0);
-        craterGlow.copyPixelsFromBuffer(ib);
-        glowPaint.setAlpha(180);
-        glowPaint.setFilterBitmap(true);
-        glowPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SCREEN));
-    }
-
-    public void dispose() {
-        if (baker != null) { baker.interrupt(); baker = null; }
-        for (int i = 0; i < chunkBits.length; i++) {
-            if (chunkBits[i] != null) { chunkBits[i].recycle(); chunkBits[i] = null; chunkKeys[i] = Integer.MIN_VALUE; }
-        }
-        if (craterGlow != null) { craterGlow.recycle(); craterGlow = null; }
-    }
-}
