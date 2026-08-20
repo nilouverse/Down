@@ -55,16 +55,22 @@ public final class SceneMap {
         final Context app = ctx.getApplicationContext();
         Thread loader = new Thread(new Runnable() { public void run() {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-            tAsh    = dec(app, "map/ash.webp",    true);
-            tRoad   = dec(app, "map/road.webp",   true);
-            tCity   = dec(app, "map/city.webp",   true);
-            tCrater = dec(app, "map/crater.webp", true);
-            gGlow   = dec(app, "map/glow.webp",   false);
-            pA      = key(dec(app, "map/props_a.webp", false));
-            pB      = key(dec(app, "map/props_b.webp", false));
+            tAsh    = decAny(app, "map/ash",    true);
+            tRoad   = decAny(app, "map/road",   true);
+            tCity   = decAny(app, "map/city",   true);
+            tCrater = decAny(app, "map/crater", true);
+            gGlow   = decAny(app, "map/glow",   false);
+            pA      = key(decAny(app, "map/props_a", false));
+            pB      = key(decAny(app, "map/props_b", false));
             ready = true;
         } }, "map-load");
         loader.setDaemon(true); loader.start();
+    }
+
+    private static Bitmap decAny(Context c, String base, boolean opaque) {
+        String[] ext = { ".webp", ".png", ".jpg" };
+        for (String e : ext) { Bitmap b = dec(c, base + e, opaque); if (b != null) return b; }
+        return null;
     }
 
     private static Bitmap dec(Context c, String path, boolean opaque) {
