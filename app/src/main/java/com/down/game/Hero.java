@@ -47,6 +47,7 @@ public abstract class Hero {
     public String name = "?", voice = "nilou", keyPrefix = "x:";
     public int moveMax = 3;
     public float hoverLift = -15f;
+    public float atkSpeed = 1f;
     public String[] atkSfx = new String[] { "swing", "bolt", "nova" };
     public SheetSpec[] sheets = new SheetSpec[0];
     public Attack[] attacks = new Attack[0];
@@ -64,7 +65,7 @@ public abstract class Hero {
     public int seqI = 0;
     public boolean hidden;
     public float visualY = 0;
-    public float visualX = 0; // Lunge offset
+    public float visualX = 0;
     public Frame frameA, frameB; public float frameK;
     public Attack cur; public Enemy target;
 
@@ -108,7 +109,6 @@ public abstract class Hero {
         float liftTarget = airborne() ? hoverLift : 0f;
         visualY += (liftTarget - visualY) * (1f - (float) Math.exp(-dt * 15f));
 
-        // Lunge interpolation
         float lx = 0, ly = 0;
         if (mode == 4 && cur != null && seqI < cur.steps.length) {
             Step s = cur.steps[seqI];
@@ -118,7 +118,7 @@ public abstract class Hero {
         visualX += (lx - visualX) * (1f - (float) Math.exp(-dt * 25f));
 
         if (mode == 4) {
-            modeT += dt;
+            modeT += dt * atkSpeed;
             Step s = cur.steps[seqI];
             while (modeT >= s.dur) {
                 modeT -= s.dur;
