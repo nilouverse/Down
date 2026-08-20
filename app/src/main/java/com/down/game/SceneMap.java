@@ -78,6 +78,7 @@ public final class SceneMap {
             InputStream in = c.getAssets().open(path);
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inPreferredConfig = opaque ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888;
+            o.inMutable = true;
             Bitmap b = BitmapFactory.decodeStream(in, null, o);
             in.close(); return b;
         } catch (Exception e) { return null; }
