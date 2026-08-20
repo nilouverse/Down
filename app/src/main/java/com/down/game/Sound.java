@@ -33,8 +33,7 @@ public class Sound {
     private final HashSet<String> pendingKeys = new HashSet<>();
     private final HashSet<String> checkedKeys = new HashSet<>();
 
-    private MediaPlayer voiceA, voiceB;
-    private MediaPlayer activeVoice;
+    private MediaPlayer voicePlayer;
     private final Queue<String> voiceQueue = new LinkedList<>();
     private String currentVoiceKey = null;
     private volatile boolean voicePreparing = false;
@@ -123,8 +122,7 @@ public class Sound {
                 if (shouldPlay && status == 0) {
                     SoundPool p = pool;
                     if (p != null) {
-                        float vol = isVoicePlaying() ? 0.3f : 1.0f;
-                        p.play(sampleId, vol, vol, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
+                        p.play(sampleId, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
                     }
                 }
             }
@@ -179,8 +177,23 @@ public class Sound {
         else playSfx(key);
     }
 
-    private boolean isVoicePlaying() {
-        return activeVoice != null && (activeVoice.isPlaying() || voicePreparing);
+    // Looping footsteps: plays while any unit moves, stops when idle.
+    // baseKey() strips trailing digits, so footsteps_running2.ogg etc. join the same pool.
+    private int footStream = 0;
+    public void setFootsteps(boolean on) {
+        SoundPool p = pool;
+        if (p == null) return;
+        if (on && footStream == 0) {
+            int id = 0;
+            synchronized (lock) {
+                ArrayList<Integer> l = sfxLoaded.get("footsteps_running");
+                if (l != null && !l.isEmpty()) id = l.get(rnd.nextInt(l.size()));
+            }
+            if (id != 0) footStream = p.play(id, 0.8f, 0.8f, 0, -1, 1f);
+        } else if (!on && footStream != 0) {
+            try { p.stop(footStream); } catch (Exception e) {}
+            footStream = 0;
+        }
     }
 
     private void playSfx(String key) {
@@ -192,8 +205,7 @@ public class Sound {
             if (l != null && !l.isEmpty()) id = l.get(rnd.nextInt(l.size()));
         }
         if (id != 0) {
-            float vol = isVoicePlaying() ? 0.3f : 1.0f;
-            p.play(id, vol, vol, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
+            p.play(id, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
             return;
         }
         synchronized (lock) {
@@ -216,7 +228,7 @@ public class Sound {
         String key;
         synchronized (lock) {
             if (voiceQueue.isEmpty()) return;
-            if (isVoicePlaying()) return;
+            if (voicePlayer != null && (voicePlayer.isPlaying() || voicePreparing)) return;
             key = voiceQueue.poll();
             currentVoiceKey = key;
             voicePreparing = true;
@@ -229,29 +241,22 @@ public class Sound {
         }
         String path = paths.get(rnd.nextInt(paths.size()));
 
-        MediaPlayer prep = (activeVoice == voiceA) ? voiceB : voiceA;
-        if (prep == null) {
-            prep = new MediaPlayer();
-            prep.setOnCompletionListener(mp -> { voiceDone(); processVoiceQueue(); });
-            prep.setOnErrorListener((mp, w, x) -> { voiceDone(); processVoiceQueue(); return true; });
-            if (voiceA == null) voiceA = prep; else voiceB = prep;
+        if (voicePlayer == null) {
+            voicePlayer = new MediaPlayer();
+            voicePlayer.setOnCompletionListener(mp -> { voiceDone(); processVoiceQueue(); });
+            voicePlayer.setOnErrorListener((mp, w, x) -> { voiceDone(); processVoiceQueue(); return true; });
         } else {
-            prep.reset();
+            voicePlayer.reset();
         }
-        
-        final MediaPlayer currentPrep = prep;
         try {
             AssetFileDescriptor afd = context.getAssets().openFd(path);
-            currentPrep.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            voicePlayer.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
             afd.close();
-            currentPrep.setOnPreparedListener(mp -> {
-                synchronized (lock) { 
-                    voicePreparing = false; 
-                    activeVoice = mp;
-                }
+            voicePlayer.setOnPreparedListener(mp -> {
+                synchronized (lock) { voicePreparing = false; }
                 mp.start();
             });
-            currentPrep.prepareAsync();
+            voicePlayer.prepareAsync();
         } catch (Exception e) {
             voiceDone();
             processVoiceQueue();
@@ -268,16 +273,16 @@ public class Sound {
     public void stopAll() {
         SoundPool p = pool;
         if (p != null) p.autoPause();
-        if (activeVoice != null && activeVoice.isPlaying()) {
-            try { activeVoice.pause(); } catch (Exception ignored) {}
+        if (voicePlayer != null && voicePlayer.isPlaying()) {
+            try { voicePlayer.pause(); } catch (Exception ignored) {}
         }
     }
 
     public void resumeAll() {
         SoundPool p = pool;
         if (p != null) p.autoResume();
-        if (activeVoice != null && !activeVoice.isPlaying() && currentVoiceKey != null) {
-            try { activeVoice.start(); } catch (Exception ignored) {}
+        if (voicePlayer != null && !voicePlayer.isPlaying() && currentVoiceKey != null) {
+            try { voicePlayer.start(); } catch (Exception ignored) {}
         }
     }
 
@@ -287,9 +292,10 @@ public class Sound {
         if (p != null) {
             try { p.release(); } catch (Exception ignored) {}
         }
-        if (voiceA != null) { try { voiceA.stop(); voiceA.release(); } catch (Exception ignored) {} voiceA = null; }
-        if (voiceB != null) { try { voiceB.stop(); voiceB.release(); } catch (Exception ignored) {} voiceB = null; }
-        activeVoice = null;
+        if (voicePlayer != null) {
+            try { voicePlayer.stop(); voicePlayer.release(); } catch (Exception ignored) {}
+            voicePlayer = null;
+        }
         synchronized (lock) {
             voiceQueue.clear();
             currentVoiceKey = null;
