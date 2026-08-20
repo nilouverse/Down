@@ -50,6 +50,11 @@ public final class StoryWorld {
 
     public final float[] pt = new float[2];
 
+    private static final String[] SPEAKERS = {
+            "Wounded Soldier", "Thornborn Scout", "Carrion Infantry Leader",
+            "NilouZila", "Velkarya"
+    };
+
     private StoryWorld(Context ctx, Sound snd) {
         this.ctx = ctx.getApplicationContext();
         this.snd = snd;
@@ -139,8 +144,7 @@ public final class StoryWorld {
 
     private void exec(String cmd) {
         if (cmd.startsWith("SAY ")) {
-            int sp = cmd.indexOf(' ', 4);
-            gv.showDialog(cmd.substring(4, sp), cmd.substring(sp + 1));
+            sayLine(cmd.substring(4));
         } else if (cmd.startsWith("SPAWN ")) {
             String[] p = cmd.split(" ");
             actors.spawn(p[1], Integer.parseInt(p[2]), Integer.parseInt(p[3]));
@@ -170,6 +174,19 @@ public final class StoryWorld {
             victory = true;
             gv.onActComplete();
         }
+    }
+
+    private void sayLine(String rest) {
+        String speaker = null, text = null;
+        for (String s : SPEAKERS) {
+            if (rest.startsWith(s + " ")) { speaker = s; text = rest.substring(s.length() + 1); break; }
+        }
+        if (speaker == null) {
+            int sp = rest.indexOf(' ');
+            if (sp < 0) { speaker = rest; text = ""; }
+            else { speaker = rest.substring(0, sp); text = rest.substring(sp + 1); }
+        }
+        gv.showDialog(speaker, text);
     }
 
     private void runAction(String name, int ms) {
@@ -236,7 +253,7 @@ public final class StoryWorld {
         if (f.equals("ending_open") && map != null) map.setCraterVisible(true);
         if (gv != null) gv.onProgressFlag(f);
     }
-    
+
     public int remainingReinforcements() {
         return reinforceKills >= 0 ? reinforceTarget - reinforceKills : -1;
     }
@@ -252,7 +269,7 @@ public final class StoryWorld {
         if (sceneEvent) { sceneEvent = false; return true; }
         return false;
     }
-    
+
     public boolean filterAction(String act) { return false; }
     public void npcCommand(String act) {}
     public void resolveActionPoint(String act, float fx, float fy) { pt[0] = fx; pt[1] = fy; }
