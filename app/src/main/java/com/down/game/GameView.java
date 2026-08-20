@@ -70,6 +70,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private int fanN = 0;
     private int fanMoveMax = -1;
     private boolean fanDirty = true;
+    private int[] fan2Qs = new int[64];
+    private int[] fan2Rs = new int[64];
+    private int fan2N = 0;
+    private final HashMap<Long, Integer> reachDist = new HashMap<>();
+    private final HashMap<Long, Long> reachParent = new HashMap<>();
     private int atkRangeQ, atkRangeR, atkRangeR2;
     private int atkRangeKind;
     private int[] atkQs = new int[64];
@@ -341,6 +346,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     public void stop() {
         running = false;
         try { if (loop != null) loop.join(); } catch (Exception e) {}
+        sound.setFootsteps(false);
         sound.stopAll();
     }
 
@@ -653,7 +659,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void startPlayerTurn() {
         phase = PH_PLAYER; phaseT = 0;
-        for (Player p : party) p.actionsLeft = 2;
+        for (Player p : party) p.actionsLeft = 3;
         sound.play("turn");
         attackRangeShown = 0;
         targetEnemy = null;
@@ -1475,6 +1481,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             d.t += dt;
             if (d.t > 0.8f) d.active = false;
         }
+        boolean anyMoving = false;
+        for (Player p : party) if (p.isMoving()) { anyMoving = true; break; }
+        if (!anyMoving) for (Enemy en : enemies) if (!en.dead && en.floater.moving) { anyMoving = true; break; }
+        sound.setFootsteps(anyMoving);
     }
     private void draw() {
         SurfaceHolder h = getHolder();
@@ -1862,45 +1872,76 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setStrokeWidth(0);
     }
 
+    private void buildReach(int maxDist) {
+        reachDist.clear(); reachParent.clear();
+        worldToHex(player.x, player.y, IH_A);
+        long start = hexKey(IH_A[0], IH_A[1]);
+        reachDist.put(start, 0);
+        ArrayDeque<long[]> q = new ArrayDeque<>();
+        q.addLast(new long[]{IH_A[0], IH_A[1]});
+        while (!q.isEmpty()) {
+            long[] c = q.pollFirst();
+            int cq = (int) c[0], cr = (int) c[1];
+            int d = reachDist.get(hexKey(cq, cr));
+            if (d >= maxDist) continue;
+            for (int[] n : NEIGH6) {
+                int nq = cq + n[0], nr = cr + n[1];
+                long k = hexKey(nq, nr);
+                if (reachDist.containsKey(k)) continue;
+                if (!hexFree(nq, nr, null)) continue;
+                reachDist.put(k, d + 1);
+                reachParent.put(k, hexKey(cq, cr));
+                q.addLast(new long[]{nq, nr});
+            }
+        }
+    }
+
     private void rebuildFan() {
         worldToHex(player.x, player.y, IH_A);
         fanQ = IH_A[0]; fanR = IH_A[1];
         fanMoveMax = player.hero.moveMax;
-        fanN = 0;
-        int mm = fanMoveMax;
-        for (int r = -mm; r <= mm && fanN < fanQs.length; r++) {
-            for (int q = -mm; q <= mm && fanN < fanQs.length; q++) {
-                int d = hexDist(fanQ, fanR, fanQ + q, fanR + r);
-                if (d < 1 || d > mm) continue;
-                if (!hexFree(fanQ + q, fanR + r, null)) continue;
-                fanQs[fanN] = fanQ + q;
-                fanRs[fanN] = fanR + r;
-                fanN++;
-            }
+        fanN = 0; fan2N = 0;
+        buildReach(fanMoveMax * 2);
+        for (java.util.Map.Entry<Long, Integer> e : reachDist.entrySet()) {
+            long k = e.getKey(); int d = e.getValue();
+            if (d < 1) continue;
+            int q = (int) (k >> 32), r = (int) (k & 0xFFFFFFFFL);
+            if (d <= fanMoveMax) { if (fanN < fanQs.length) { fanQs[fanN] = q; fanRs[fanN] = r; fanN++; } }
+            else { if (fan2N < fan2Qs.length) { fan2Qs[fan2N] = q; fan2Rs[fan2N] = r; fan2N++; } }
         }
         fanDirty = false;
     }
 
-    private void rebuildAtk() {
+    private boolean tryMoveTo(int q, int r) {
+        if (player.actionsLeft <= 0) return false;
+        buildReach(player.hero.moveMax * 2);
         worldToHex(player.x, player.y, IH_A);
-        atkRangeQ = IH_A[0]; atkRangeR = IH_A[1];
-        Hero.Attack atkSel = player.hero.attacks[attackRangeShown - 1];
-        atkRangeR2 = atkSel.range;
-        atkRangeKind = atkSel.kind;
-        atkN = 0;
-        int range = atkRangeR2;
-        boolean nova = atkRangeKind == 2;
-        for (int r = -range; r <= range && atkN < atkQs.length; r++) {
-            for (int q = -range; q <= range && atkN < atkQs.length; q++) {
-                int d = hexDist(atkRangeQ, atkRangeR, atkRangeQ + q, atkRangeR + r);
-                if (d > range) continue;
-                if (d < 1 && !nova) continue;
-                atkQs[atkN] = atkRangeQ + q;
-                atkRs[atkN] = atkRangeR + r;
-                atkN++;
-            }
+        long startK = hexKey(IH_A[0], IH_A[1]);
+        long tk = hexKey(q, r);
+        Integer rd = reachDist.get(tk);
+        if (rd == null || rd < 1) return false;
+        int cost = rd <= player.hero.moveMax ? 1 : 2;
+        if (player.actionsLeft < cost) return false;
+        float[] xs = new float[rd]; float[] ys = new float[rd];
+        long cur = tk; int idx = rd - 1;
+        while (idx >= 0 && cur != startK) {
+            int cq = (int) (cur >> 32), cr = (int) (cur & 0xFFFFFFFFL);
+            hexToWorld(cq, cr, FW_A);
+            xs[idx] = FW_A[0]; ys[idx] = FW_A[1];
+            idx--;
+            Long par = reachParent.get(cur);
+            if (par == null) break;
+            cur = par;
         }
-        atkDirty = false;
+        player.setPath(xs, ys, rd);
+        player.actionsLeft -= cost;
+        hexesShown = false;
+        fanDirty = true;
+        runeX = xs[rd - 1]; runeY = ys[rd - 1]; runeT = 0;
+        sound.play("step");
+        sound.play(voice + "_move");
+        hapticTiered(0);
+        return true;
     }
 
     private void drawMoveFan(Canvas cv) {
@@ -1914,6 +1955,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (int i = 0; i < fanN; i++) {
             hexToWorld(fanQs[i], fanRs[i], FW_A);
             drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xAAefe6dd, 0x14efe6dd);
+        }
+        if (player.actionsLeft >= 2) {
+            paint.setAlpha(110);
+            for (int i = 0; i < fan2N; i++) {
+                hexToWorld(fan2Qs[i], fan2Rs[i], FW_A);
+                drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0x77b3102a, 0x0fb3102a);
+            }
         }
         paint.setAlpha(255);
     }
@@ -2430,7 +2478,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             drawDockButton(cv, dockAtk[i], lbl[i], acc[i], en || on, menuPress == 6 + i, on);
         }
 
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             float px = dockEnd.right + 30 + i * 36, py = dockPanel.centerY();
             if (coinBmp != null) {
                 paint.setAlpha((int) (dockSlide * (i < player.actionsLeft ? 255 : 70)));
@@ -2694,43 +2742,19 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
 
         // C1: consume buffered move if the hero just arrived
-        if (player.qT > 0 && !player.isMoving() && !player.isAttacking() && player.actionsLeft > 0) {
-            worldToHex(player.qX, player.qY, TW_A);
-            worldToHex(player.x, player.y, TW_B);
-            int dQ = hexDist(TW_B[0], TW_B[1], TW_A[0], TW_A[1]);
-            if (dQ >= 1 && dQ <= player.hero.moveMax && hexFree(TW_A[0], TW_A[1], null)) {
-                player.setTarget(player.qX, player.qY);
-                player.actionsLeft--;
-                player.clearQueue();
-                fanDirty = true;
-                runeX = player.qX; runeY = player.qY; runeT = 0;
-                sound.play("step");
-                sound.play(voice + "_move");
-                hapticTiered(0);
-                return true;
-            } else {
-                player.clearQueue();
-            }
+        if (player.qT > 0 && player.qQ != Integer.MIN_VALUE && !player.isMoving() && !player.isAttacking()) {
+            int qq = player.qQ, qr = player.qR;
+            player.clearQueue();
+            if (tryMoveTo(qq, qr)) return true;
         }
 
-        if (dTap >= 1 && dTap <= player.hero.moveMax
-                && hexFree(TW_A[0], TW_A[1], null) && player.actionsLeft > 0) {
-            hexToWorld(TW_A[0], TW_A[1], TW_F);
-            if (player.isMoving() && hexesShown) {
-                // C1: queue the move while hero is still walking
-                player.queueTarget(TW_F[0], TW_F[1]);
-                hexesShown = false;
-                return true;
-            }
-            player.setTarget(TW_F[0], TW_F[1]);
-            player.actionsLeft--;
+        if (player.isMoving() && hexesShown && dTap >= 1) {
+            // queue the move while hero is still walking
+            player.queueHex(TW_A[0], TW_A[1]);
             hexesShown = false;
-            fanDirty = true;
-            runeX = TW_F[0]; runeY = TW_F[1]; runeT = 0;
-            sound.play("step");
-            sound.play(voice + "_move");
-            hapticTiered(0); // E3: light tick
+            return true;
         }
+        if (tryMoveTo(TW_A[0], TW_A[1])) return true;
         return true;
     }
 
