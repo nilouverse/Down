@@ -1991,6 +1991,30 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
     }
 
+    private void rebuildAtk() {
+        atkRangeQ = IH_A[0];
+        atkRangeR = IH_A[1];
+        if (attackRangeShown < 1 || attackRangeShown > player.hero.attacks.length) {
+            atkN = 0;
+            atkDirty = false;
+            return;
+        }
+        atkRangeR2 = player.hero.attacks[attackRangeShown - 1].range;
+        atkN = 0;
+        int R = (int) Math.ceil(atkRangeR2);
+        for (int dq = -R; dq <= R; dq++) {
+            int r1 = Math.max(-R, -dq - R);
+            int r2 = Math.min(R, -dq + R);
+            for (int dr = r1; dr <= r2; dr++) {
+                if (atkN >= atkQs.length) break;
+                atkQs[atkN] = atkRangeQ + dq;
+                atkRs[atkN] = atkRangeR + dr;
+                atkN++;
+            }
+        }
+        atkDirty = false;
+    }
+
     private void drawRune(Canvas cv) {
         if (runeT > 0.6f) return;
         float k = runeT / 0.6f;
