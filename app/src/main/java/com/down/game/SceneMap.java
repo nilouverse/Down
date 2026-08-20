@@ -626,3 +626,104 @@ public final class SceneMap {
         }
         cR += bump * 0.5f; cG += bump * 0.5f; cB += bump * 0.5f;
     }
+    // int[] overload so GameView and internal int callers keep compiling
+    public static void worldToHex(float x, float y, int[] out) {
+        float hy = y / SQUASH;
+        float qf = ((float) Math.sqrt(3) / 3f * x - 1f / 3f * hy) / HEX;
+        float rf2 = (2f / 3f * hy) / HEX;
+        float sf = -qf - rf2;
+        int rq = Math.round(qf), rr = Math.round(rf2), rs = Math.round(sf);
+        float dq = Math.abs(rq - qf), dr = Math.abs(rr - rf2), ds = Math.abs(rs - sf);
+        if (dq > dr && dq > ds) rq = -rr - rs;
+        else if (dr > ds) rr = -rq - rs;
+        out[0] = rq; out[1] = rr;
+    }
+
+    private static final float[] CRATER_HW = new float[2];
+
+    public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        int x0 = (int) Math.floor((camX - vw / (2f * zoom)) / CHUNK_PX) - 1;
+        int x1 = (int) Math.floor((camX + vw / (2f * zoom)) / CHUNK_PX) + 1;
+        int y0 = (int) Math.floor((camY - vh / (2f * zoom)) / CHUNK_PX) - 1;
+        int y1 = (int) Math.floor((camY + vh / (2f * zoom)) / CHUNK_PX) + 1;
+
+        for (int cy = y0; cy <= y1; cy++) {
+            for (int cx = x0; cx <= x1; cx++) {
+                Bitmap b = acquire(cx, cy);
+                dstR.set(
+                    (int) ((cx * CHUNK_PX - camX) * zoom + vw / 2f),
+                    (int) ((cy * CHUNK_PX - camY) * zoom + vh / 2f),
+                    (int) ((cx * CHUNK_PX + CHUNK_PX - camX) * zoom + vw / 2f),
+                    (int) ((cy * CHUNK_PX - camY) * zoom + vh / 2f));
+                if (b == null) {
+                    // Never show black: instant flat biome fill until the bake pops in
+                    bmpPaint.setColor(fallbackColor(cx, cy));
+                    c.drawRect(dstR, bmpPaint);
+                    continue;
+                }
+                srcR.set(0, 0, SRC, SRC);
+                c.drawBitmap(b, srcR, dstR, bmpPaint);
+            }
+        }
+
+        // Bake-ahead: request a ring around the camera so chunks arrive before they're seen
+        for (int cy = y0 - 1; cy <= y1 + 1; cy++)
+            for (int cx = x0 - 1; cx <= x1 + 1; cx++)
+                enqueue(cx, cy);
+
+        if (craterVisible) {
+            hexToWorld(88, 4, CRATER_HW);
+            float gx = CRATER_HW[0], gy = CRATER_HW[1];
+            dstR.set((int) ((gx - 500 - camX) * zoom + vw / 2f),
+                     (int) ((gy - 500 - camY) * zoom + vh / 2f),
+                     (int) ((gx + 500 - camX) * zoom + vw / 2f),
+                     (int) ((gy + 500 - camY) * zoom + vh / 2f));
+            c.drawBitmap(craterGlow, null, dstR, glowPaint);
+        }
+    }
+
+    private Bitmap acquire(int cx, int cy) {
+        int lru = cy * 4096 + cx;
+        for (int i = 0; i < chunkKeys.length; i++) {
+            if (chunkKeys[i] == lru) { chunkUsed[i] = ++frameStamp; return chunkBits[i]; }
+        }
+        enqueue(cx, cy);
+        return null;
+    }
+
+    public void setCraterVisible(boolean v) { craterVisible = v; }
+
+    private void bakeCraterGlow() {
+        int r = 256;
+        craterGlow = Bitmap.createBitmap(r * 2, r * 2, Bitmap.Config.ARGB_8888);
+        int[] px = new int[r * r * 4];
+        for (int y = 0; y < r * 2; y++) {
+            for (int x = 0; x < r * 2; x++) {
+                float dx = (x - r) / (float) r, dy = (y - r) / (float) r;
+                float d = (float) Math.sqrt(dx * dx + dy * dy);
+                float core = ss(1.0f, 0.1f, d);
+                float flicker = 0.85f + 0.15f * h2(x, y, 99) / 65535f;
+                int a = (int) (core * 255 * flicker);
+                int cr = (int) (lerp(40, 180, core) * flicker);
+                int cg = (int) (lerp(120, 255, core) * flicker);
+                int cb = (int) (lerp(60, 140, core) * flicker);
+                px[y * r * 2 + x] = (a << 24) | (cr << 16) | (cg << 8) | cb;
+            }
+        }
+        IntBuffer ib = ByteBuffer.allocateDirect(px.length * 4)
+                .order(ByteOrder.nativeOrder()).asIntBuffer();
+        ib.put(px).position(0);
+        craterGlow.copyPixelsFromBuffer(ib);
+        glowPaint.setAlpha(180);
+        glowPaint.setFilterBitmap(true);
+        glowPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SCREEN));
+    }
+
+    public void dispose() {
+        if (baker != null) { baker.interrupt(); baker = null; }
+        for (int i = 0; i < chunkKeys.length; i++) {
+            if (chunkBits[i] != null) { chunkBits[i].recycle(); chunkBits[i] = null; chunkKeys[i] = Integer.MIN_VALUE; }
+        }
+        if (craterGlow != null) { craterGlow.recycle(); craterGlow = null; }
+    }
+}
