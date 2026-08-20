@@ -8,6 +8,8 @@ public class Vex extends Hero {
         keyPrefix = "vex:";
         moveMax = 4;
         hoverLift = -10f;
+        glideFps = 8f;
+        atkSpeed = 1.15f;
         atkSfx = new String[] { "slash", "poison", "slash" };
         sheets = new SheetSpec[] {
             new SheetSpec("idleA", "sprites/vex_idle_a.png", 2, 2, 4, false, true),
@@ -18,7 +20,6 @@ public class Vex extends Hero {
         idleSheets = new String[] { "idleA", "idleB" };
         glideSheet = "glide";
         glideLoop = new int[] { 0, 1, 2 };
-        glideFps = 6f;
         liftSeq = new int[0];
         liftDur = new float[0];
         landSeq = new int[] { 3, 0 };
