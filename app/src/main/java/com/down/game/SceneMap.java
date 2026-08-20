@@ -215,7 +215,7 @@ public final class SceneMap {
             } else if ((qi % 6 == 3) && (ri % 5 == 2)) { ti = 14 + (h & 1); if ((h >>> 9) % 100 < 8) pr = 6; }
             else {
                 int v = (h >>> 3) & 3; ti = v;
-                if ((h >>> 6) & 1) ti = 4 + ((h >>> 12) & 1);
+                if (((h >>> 6) & 1) != 0) ti = 4 + ((h >>> 12) & 1);
                 else if ((h >>> 8) % 8 == 0) ti = 6 + ((h >>> 14) & 1);
                 if ((h >>> 10) % 100 < 3) ti = 12; else if ((h >>> 10) % 100 < 5) ti = 13;
                 if ((h >>> 5) % 100 < 9) gl = 2 + (((h >>> 13) & 1) * 9);          // lit windows
