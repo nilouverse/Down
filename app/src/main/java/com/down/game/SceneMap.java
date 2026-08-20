@@ -1,4 +1,3 @@
-```java
 package com.down.game;
 
 import android.content.Context;
@@ -533,4 +532,3 @@ public final class SceneMap {
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
 }
-```
