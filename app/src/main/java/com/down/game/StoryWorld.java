@@ -45,6 +45,9 @@ public final class StoryWorld {
     private int lastPQ = Integer.MIN_VALUE, lastPR = Integer.MIN_VALUE;
     private boolean victory = false;
 
+    public float snapX, snapY;
+    private boolean sceneEvent = false;
+
     public final float[] pt = new float[2];
 
     private StoryWorld(Context ctx, Sound snd) {
@@ -240,6 +243,15 @@ public final class StoryWorld {
 
     public void saveState() {}
     public void restoreState() {}
+
+    public static boolean sceneWalkable(float x, float y) {
+        return inst == null || inst.map == null ? true : inst.map.walkWorld(x, y);
+    }
+
+    public boolean takeSceneEvent() {
+        if (sceneEvent) { sceneEvent = false; return true; }
+        return false;
+    }
     
     public boolean filterAction(String act) { return false; }
     public void npcCommand(String act) {}
