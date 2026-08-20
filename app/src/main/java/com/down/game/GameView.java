@@ -1254,8 +1254,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         phaseT += dt;
         if (hurtT > 0) hurtT -= dt;
-        float dockTarget = (phase == PH_PLAYER && deadT <= 0
-                && !(storyMode && !storyFight && !sw().encounterLive())) ? 1 : 0;
+        float dockTarget = (phase == PH_PLAYER && deadT <= 0) ? 1 : 0;
         dockSlide += (dockTarget - dockSlide) * (1 - (float) Math.exp(-dt * 10));
         for (Player p : party) p.update(dt);
         if (zoomPunch > 0) zoomPunch = Math.max(0, zoomPunch - dt * 3f);
@@ -2295,20 +2294,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         drawBolts(cv);
         drawSlashes(cv);
         drawDmgs(cv);
-
-        // E1: parallax treeline at 0.3x camera
-        if (treeStrip != null && quality > 0) {
-            float par = camX * 0.3f;
-            float ty = H - treeStrip.getHeight() * 1.1f;
-            int tw = treeStrip.getWidth();
-            float off = ((par % tw) + tw) % tw;
-            paint.setAlpha(180);
-            rf.set(-off, ty, -off + tw, ty + treeStrip.getHeight());
-            cv.drawBitmap(treeStrip, null, rf, paint);
-            rf.set(-off + tw, ty, -off + 2 * tw, ty + treeStrip.getHeight());
-            cv.drawBitmap(treeStrip, null, rf, paint);
-            paint.setAlpha(255);
-        }
 
         if (gameOverlay != null) {
             rf.set(0, 0, W, H);
