@@ -19,7 +19,8 @@ import java.io.InputStream;
  * Story-map compositor, hex-cut edition. ASHEN first: meadow = ash cells with
  * random 60-degree spins + mirror; north plateau = staged ledge (drawn, never
  * walkable); north/south/west rims = cliff lips; bodies (south-facing wall
- * faces) hang below north rim, south rim and the SW corner.
+ * faces) hang below north rim, south rim and the SW corner as stacked halves
+ * of their body cell (top half on row r+1, bottom half on row r+2).
  * Road band uses the path tile. Everything else stays fallback until designed.
  * draw() allocates ZERO objects.
  */
@@ -45,7 +46,7 @@ public final class SceneMap {
     private final Paint tp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
     private final Paint gp = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final Rect srcR = new Rect(), dstR = new Rect();
+    private final Rect srcR = new Rect(), dstR = new Rect(), wallSrc = new Rect();
     private final float[] HW = new float[2];
     private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
@@ -324,6 +325,24 @@ public final class SceneMap {
         tp.setShader(null);
     }
 
+    // Cliff body: explicit source-rect clip of the chosen cell's top or bottom
+    // half into the hex. No shader, no clamping — strata stay continuous.
+    private void wallHex(Canvas c, int ti, float cx, float cy, float s, boolean topHalf) {
+        Bitmap b = tBody;
+        if (b == null || b.isRecycled()) return;
+        int cw = cellW[5], ch = cellH[5];
+        if (cw <= 0 || ch <= 0) return;
+        int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
+        int half = ch >> 1;
+        wallSrc.set(x0, topHalf ? y0 : y0 + half, x0 + cw, topHalf ? y0 + half : y0 + ch);
+        c.save();
+        hexPath(cx, cy, s * 1.02f);
+        c.clipPath(hexP);
+        dstR.set(cx - s, cy - s * 0.62f, cx + s, cy + s * 0.62f);
+        c.drawBitmap(b, wallSrc, dstR, tp);
+        c.restore();
+    }
+
     // ================= DRAW (zero allocation) =================
     public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         float halfW = vw / (2f * zoom), halfH = vh / (2f * zoom);
@@ -352,36 +371,19 @@ public final class SceneMap {
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
-        // PASS 1b — cliff bodies as hex-fitted wall rows: top half + bottom half
-        // of the cell stacked on rows r+1 / r+2, strata continuous, tessellates.
-        if (shaders[5] != null) {
+        // PASS 1b — cliff bodies: top half on row r+1, bottom half on row r+2.
+        if (tBody != null) {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
                 if (!full || bB[i] != 1 || fF[i] == 1) continue;
                 int ti = (h2(q, r, 7) >>> 4) & 15;
                 int dq = q < MIN_Q ? -1 : 0;                     // west wall hangs west of its lip
                 hexToWorld(q + dq, r + 1, HW);
-                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true);
                 hexToWorld(q + dq, r + 2, HW);
-                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false);
             }
         }
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
-    }
-
-    private void wallHex(Canvas c, int ti, float cx, float cy, float s) {
-        Shader sh = shaders[5];
-        if (sh == null) return;
-        int cw = cellW[5], ch = cellH[5];
-        mS.reset();
-        mS.postTranslate(-((ti & 3) * cw), -((ti >> 2) * ch));
-        mS.postScale(2f / cw, 1.2f / ch);
-        mS.postScale(s, s);
-        mS.postTranslate(cx, cy - 0.6f * s);
-        sh.setLocalMatrix(mS);
-        tp.setShader(sh);
-        hexPath(cx, cy, s * 1.02f);
-        c.drawPath(hexP, tp);
-        tp.setShader(null);
     }
 
     // South rim (lip + body) rendered AFTER actors so the near edge occludes them.
@@ -397,9 +399,9 @@ public final class SceneMap {
             int ti = (h2(q, r, 7) >>> 4) & 15;
             int dq = q < MIN_Q ? -1 : 0;
             hexToWorld(q + dq, r + 1, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true);
             hexToWorld(q + dq, r + 2, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false);
         }
     }
 
