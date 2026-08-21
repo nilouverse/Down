@@ -18,16 +18,15 @@ public class Enemy {
     public int poisonTurns = 0;
     public final Floater floater = new Floater();
 
-    // Heavy class — shield-bearing variant with mana + 2 attack forms
+    // class flags
     public boolean heavy = false;
+    public boolean beast = false;   // war-beast brute: slow, tough, one heavy hit, no mana
+
     public int mana = 100, maxMana = 100;
-    public int atkForm = 0;     // 0 = default, 1 = heavy blade combo, 2 = heavy nova
-    public int atkPos = 0;      // current position in the attack sequence
+    public int atkForm = 0;
+    public int atkPos = 0;
     public float attackDuration = ATK_DUR;
 
-    // Heavy attack sequences (0-indexed frame indices within the heavy attack sheet)
-    // attack 1 — blade combo (9 frames)
-    // attack 2 — shield nova (6 frames)
     public static final int[][] HEAVY_ATK_SEQ = {
             { 0, 2, 3, 7, 6, 10, 4, 5, 0 },
             { 0, 4, 2, 3, 5, 8 }
@@ -37,6 +36,7 @@ public class Enemy {
     public static final int[] HEAVY_ATK_MANA   = {  0, 60 };
     public static final int[] HEAVY_ATK_RANGE  = {  1,  2 };
     public static final float[] HEAVY_ATK_DUR  = { 0.95f, 1.10f };
+    public static final int BEAST_DMG = 18;
 
     public static final float MANA_REGEN = 30f;
 
