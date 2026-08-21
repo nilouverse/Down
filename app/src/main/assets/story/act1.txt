@@ -1,12 +1,13 @@
 # ACT ONE — continuous-map trigger script.
 # Zones fire once unless gated.
 # Display text = SAY lines only. Everything else is picture or sound.
+# NOTE: the cliff-top ledge is staging ground only — never player-walkable.
 
 ZONE opening 0 7 2
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
-# ---- the plain under a bruised sky -------------------------------
+# ---- the plain under a bruised sky (far below the ledge) --------
 SKY bruised
 LAYER molten on
 BACKDROP towers_burning on
@@ -14,19 +15,19 @@ HORDE on
 FLYERS on
 AMBIENT plain_battlefield
 SFX war_horn_far
-CAM_PAN 2 -8 2600
+CAM_PAN 2 -14 2600
 WAIT 2600
 
-# ---- the littered dead --------------------------------------------
-SCATTER corpse 2 -6 7 12
-SPAWN risen 0 -6 ambient
-SPAWN risen 5 -7 ambient
+# ---- the littered dead -------------------------------------------
+SCATTER corpse 1 -8 4 8
+SPAWN risen 0 2 ambient
+SPAWN risen 5 3 ambient
 SFX corpse_moan_far
 ACTION shake 140
 
-# ---- her, at the rim -----------------------------------------------
-TELEPORT 1 -2
-CAM_PAN 1 -2 1400
+# ---- her, on the ledge --------------------------------------------
+TELEPORT 1 -9
+CAM_PAN 1 -9 1400
 CAM_FOLLOW nilou
 FX nilou hand_crackle
 SFX dark_crackle_low
@@ -43,20 +44,20 @@ CAM_PUSH nilou 700
 WAIT 700
 SAY NilouZila Thornborn. I watched Vorvexis flay their elders alive two centuries ago. Apparently the children remembered.
 SFX explosion_far
-FX debris_arc 2 -8
+FX debris_arc 2 -14
 ACTION shake 500
 WAIT 600
 SAY NilouZila Eastern wall. Gone.
 
-# ---- the report -------------------------------------------------------
+# ---- the report (they climb the cliff path) -------------------------
 SFX footsteps_gravel_far
-SPAWN vex 1 5 npc
-SPAWN soldier 0 6 npc s1
-SPAWN soldier 2 6 npc s2
+SPAWN vex 1 -5 npc
+SPAWN soldier 0 -5 npc s1
+SPAWN soldier 2 -5 npc s2
 FX vex bleed
-WALK vex 1 0 1.6
-WALK s1 0 1 1.6
-WALK s2 2 1 1.6
+WALK vex 1 -8 1.6
+WALK s1 0 -8 1.6
+WALK s2 2 -8 1.6
 WAIT_WALK vex
 FACE nilou right
 SAY Vex Mistress! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
@@ -71,18 +72,21 @@ SAY Vex What about you?
 SAY NilouZila I'm going to the courtyard.
 SAY Vex That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
-EXIT vex 1 8
-EXIT s1 0 9
-EXIT s2 2 9
+EXIT vex 1 -5
+EXIT s1 0 -5
+EXIT s2 2 -5
 SFX footsteps_gravel_far
 CAM_RELEASE
-CAM_PAN 2 -8 1200
+CAM_PAN 2 -14 1200
 WAIT 800
 
-# ---- the descent --------------------------------------------------------
+# ---- the descent: she glides off the ledge ----------------------------
 SAY NilouZila Four hundred years I've knelt at her feet.
-WALK nilou 1 2 2.4
+CAM_PUSH nilou 600
+WAIT 600
+GLIDE nilou 1 0 1.2
 WAIT_WALK nilou
+CAM_RELEASE
 SAY NilouZila I didn't claw my way out of the Pit of Screaming Souls, survive the Binding Trials, and bury my rivals one by one just to watch her empire turn to ash from a cliff.
 
 # ---- cockroaches ---------------------------------------------------------
