@@ -160,6 +160,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eBeastGlideFr = new ArrayList<>();
     private final ArrayList<Frame> eBeastAtkFr = new ArrayList<>();
     private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
+    private final HashMap<String, Frame[]> heroSheets = new HashMap<>();
     private final HashMap<Player, Integer> bleedTurns = new HashMap<>();
     private final HashMap<Player, Integer> bleedDmg = new HashMap<>();
     private static final int BEAST_B1_DMG = 14, BEAST_B2_DMG = 30,
@@ -433,7 +434,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         AssetBundle b = pending;
         pending = null;
         loadedFrames = b.frames;
-        for (Hero h : roster) h.bind(b.frames);
+        for (Hero h : roster) {
+            h.bind(b.frames);
+            if (!h.idleFrames.isEmpty())
+                heroSheets.put(h.voice, h.idleFrames.toArray(new Frame[0]));
+        }
         eIdleFr.addAll(b.eIdle); eGlideFr.addAll(b.eGlide); eAtkFr.addAll(b.eAtk);
         eHeavyIdleFr.addAll(b.eHeavyIdle);
         eHeavyGlideFr.addAll(b.eHeavyGlide);
@@ -1291,7 +1296,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (storyMode && story != null && state == STATE_GAME) {
             story.update(dt);
-            if (actors != null) actors.update(dt);
+            if (actors != null) {
+                actors.update(dt);
+                for (int i = 0; i < actors.size(); i++) {
+                    StoryActor a = actors.get(i);
+                    if (a.idleFrames == null) {
+                        Frame[] f = heroSheets.get(a.type);
+                        if (f != null) a.idleFrames = f;
+                    }
+                }
+            }
             if (story.quitRequested || story.ended) {
                 story = null; storyMode = false; storyFight = false; state = STATE_MENU; return;
             }
