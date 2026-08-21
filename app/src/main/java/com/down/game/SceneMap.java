@@ -27,7 +27,7 @@ public final class SceneMap {
     private static final int MAXT = 8192, PMAX = 1024;
 
     private final boolean[] walkable = new boolean[W_Q * W_R];
-    private volatile Bitmap tAsh, tRoad, tCity, tCrater, gGlow, pA, pB;
+    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, gGlow, pA, pB;
     private volatile boolean ready, disposed;
     private final boolean quality;
     private boolean craterVisible;
@@ -38,7 +38,7 @@ public final class SceneMap {
     private final Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Rect srcR = new Rect(), dstR = new Rect();
     private final float[] HW = new float[2];
-    private final Bitmap[] sheets = new Bitmap[4];
+    private final Bitmap[] sheets = new Bitmap[5];
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
             dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
     private final float[] pBX = new float[PMAX], pBY = new float[PMAX];
@@ -59,13 +59,16 @@ public final class SceneMap {
         final Context app = ctx.getApplicationContext();
         Thread loader = new Thread(new Runnable() { public void run() {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-            Bitmap a = flatten(dec(app, "map/ash", true)), ro = flatten(dec(app, "map/road", true)),
-                    ci = flatten(dec(app, "map/city", true)), cr = flatten(dec(app, "map/crater", true)),
+            Bitmap a = soften(flatten(dec(app, "map/ash", true))),
+                    ro = soften(flatten(dec(app, "map/road", true))),
+                    ci = soften(flatten(dec(app, "map/city", true))),
+                    cr = soften(flatten(dec(app, "map/crater", true))),
+                    cl = soften(flatten(dec(app, "map/cliff", true))),
                     gl = dec(app, "map/glow", false),
                     pa = key(dec(app, "map/props_a", false)),
                     pb = key(dec(app, "map/props_b", false));
-            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(gl); recycle(pa); recycle(pb); return; }
-            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; gGlow = gl; pA = pa; pB = pb;
+            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(gl); recycle(pa); recycle(pb); return; }
+            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; gGlow = gl; pA = pa; pB = pb;
             ready = true;
         } }, "map-load");
         loader.setDaemon(true);
@@ -159,6 +162,52 @@ public final class SceneMap {
         return b;
     }
 
+    // Slightly blur each cell's edge band (clamped inside the cell) so neighboring
+    // tiles melt into each other instead of butting hard.
+    private static Bitmap soften(Bitmap b) {
+        if (b == null) return null;
+        if (!b.isMutable()) { Bitmap m = b.copy(b.getConfig(), true); if (m == null) return b; b = m; }
+        int w = b.getWidth(), h = b.getHeight(), cw = w >> 2, ch = h >> 2;
+        int[] px = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        int[] cell = new int[cw * ch], bl = new int[cw * ch], org = new int[cw * ch];
+        int strip = Math.max(3, cw >> 6);
+        for (int cy = 0; cy < 4; cy++) for (int cx = 0; cx < 4; cx++) {
+            int x0 = cx * cw, y0 = cy * ch;
+            for (int y = 0; y < ch; y++) System.arraycopy(px, (y0 + y) * w + x0, cell, y * cw, cw);
+            System.arraycopy(cell, 0, org, 0, cell.length);
+            for (int pass = 0; pass < 2; pass++) {
+                for (int y = 0; y < ch; y++) for (int x = 0; x < cw; x++) {
+                    int r = 0, g = 0, bb = 0, n = 0;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        int yy = y + dy; if (yy < 0) yy = 0; if (yy >= ch) yy = ch - 1;
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int xx = x + dx; if (xx < 0) xx = 0; if (xx >= cw) xx = cw - 1;
+                            int c = cell[yy * cw + xx];
+                            r += (c >> 16) & 255; g += (c >> 8) & 255; bb += c & 255; n++;
+                        }
+                    }
+                    bl[y * cw + x] = 0xFF000000 | ((r / n) << 16) | ((g / n) << 8) | (bb / n);
+                }
+                int[] t = cell; cell = bl; bl = t;
+            }
+            for (int y = 0; y < ch; y++) for (int x = 0; x < cw; x++) {
+                int d = x; if (y < d) d = y;
+                int d2 = cw - 1 - x; if (d2 < d) d = d2;
+                d2 = ch - 1 - y; if (d2 < d) d = d2;
+                if (d >= strip) continue;
+                float t = (1f - d / (float) strip) * 0.75f, it = 1f - t;
+                int o = org[y * cw + x], s = cell[y * cw + x];
+                int r = (int) ((o >> 16 & 255) * it + (s >> 16 & 255) * t);
+                int g = (int) ((o >> 8 & 255) * it + (s >> 8 & 255) * t);
+                int bb = (int) ((o & 255) * it + (s & 255) * t);
+                px[(y0 + y) * w + x0 + x] = 0xFF000000 | (r << 16) | (g << 8) | bb;
+            }
+        }
+        b.setPixels(px, 0, w, 0, 0, w, h);
+        return b;
+    }
+
     public static void hexToWorld(int q, int r, float[] out) {
         out[0] = HEX * SQ3 * (q + r / 2f);
         out[1] = HEX * 1.5f * r * SQUASH;
@@ -234,12 +283,12 @@ public final class SceneMap {
         int ts = -1, ti = 0, rot = 0, di = -1, pr = -1, gl = -1;
 
         if (qf < 10.5f) {                                   // ---- ASHEN FIELDS ----
-            ts = 0;
-            if (qf < MIN_Q || rf < MIN_R || rf > MAX_R) ti = 15;        // out-of-bounds void
-            else if (rf < -7.7f || rf > 15.2f) ti = 15;                 // void rims (N + S)
-            else if (rf < -4.5f || rf > 12.5f) ti = 10 + ((h >>> 3) & 1); // cliff strata rims
-            else {                                        // walkable meadow
-                ti = 5;                                     // a6 pebbled ash, as-is
+            if (qf < MIN_Q || rf < MIN_R || rf > MAX_R
+                    || rf < -7.7f || rf > 15.2f) ts = -1;               // void -> flat black
+            else if (rf < -4.5f || rf > 12.5f) {                        // cliff strata rims
+                ts = 4; ti = (h >>> 4) & 15; rot = ((h >>> 12) & 1) << 1; // 0/180 keeps bands level
+            } else {                                        // walkable meadow
+                ts = 0; ti = (h >>> 4) & 15; rot = (h >>> 12) & 3;      // all 16 cells, 4 spins
             }
         }
         // other regions: ts stays -1 -> flat zone color until composed.
@@ -255,7 +304,7 @@ public final class SceneMap {
         int y1 = (int) Math.floor((camY + halfH) / TS) + 1;
         int n = (x1 - x0 + 1) * (y1 - y0 + 1);
         boolean full = ready && n <= MAXT;
-        sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater;
+        sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater; sheets[4] = tCliff;
         if (full) {
             int i = 0;
             for (int ty = y0; ty <= y1; ty++)
@@ -371,7 +420,7 @@ public final class SceneMap {
     private int fallback(int tx, int ty) {
         float wx = tx * TS + TS * 0.5f, wy = ty * TS + TS * 0.5f;
         float qf = wx * 0.0060141f - wy * 0.0057870f, rf = wy * 0.0115741f;
-        if (qf < 10.5f) return rf < -4.5f ? 0xFF0c0b0e : 0xFF322d2b;
+        if (qf < 10.5f) return (rf < -4.5f || rf > 12.5f) ? 0xFF0c0b0e : 0xFF322d2b;
         if (qf < 36.5f) return 0xFF3a332e;
         if (qf < 60f) return 0xFF353136;
         if (qf < 78.5f) return 0xFF7a7264;
@@ -415,9 +464,9 @@ public final class SceneMap {
     public void dispose() {
         ready = false;
         disposed = true;
-        recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater);
+        recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
         recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
-        tAsh = tRoad = tCity = tCrater = gGlow = pA = pB = craterGlow = null;
+        tAsh = tRoad = tCity = tCrater = tCliff = gGlow = pA = pB = craterGlow = null;
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
 }
