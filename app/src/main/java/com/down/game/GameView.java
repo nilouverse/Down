@@ -100,6 +100,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private float panFromX, panFromY, panToX, panToY, panT, panDur;
     private float pushT = -1f, pushDur = 1f;
     private boolean swActive;
+    private boolean swGlide;
+    private float swLift;
     private float swFromX, swFromY, swToX, swToY, swT, swDur;
     private String fxActorName = null, fxActorKind = null;
     private float fxActorT = 0f;
@@ -155,7 +157,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eHeavyGlideFr = new ArrayList<>();
     private final ArrayList<Frame> eHeavyAtkFr = new ArrayList<>();
 
-    private List<Bitmap> props, props2;
+    private List<Bitmap> props, props2, propsCity;
+    private List<Bitmap> propsAF, propsBF, propsCF;
 
     private float runeX, runeY, runeT = 99;
 
@@ -255,7 +258,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         HashMap<String, List<Frame>> frames;
         ArrayList<Frame> eIdle, eGlide, eAtk;
         ArrayList<Frame> eHeavyIdle, eHeavyGlide, eHeavyAtk;
-        List<Bitmap> props, props2;
+        List<Bitmap> props, props2, propsCity;
+        List<Bitmap> propsAF, propsBF, propsCF;
         Bitmap menuBg, keyBmp, coinBmp;
     }
     private volatile AssetBundle pending;
@@ -302,9 +306,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             b.eHeavyAtk = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_heavy_attack.png", 3, 4, 2), false, false));
             b.props  = Sprites.trimBottom(
-                    Sprites.cutSheet(c, "sprites/props.png",  2, 4, 4), 0.9f);
+                    Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
-                    Sprites.cutSheet(c, "sprites/props2.png", 2, 4, 4), 0.9f);
+                    Sprites.cutSheet(c, "sprites/props_b.png", 4, 4, 4), 0.9f);
+            b.propsCity = Sprites.trimBottom(
+                    Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 4), 0.9f);
+            b.propsAF = Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 2);
+            b.propsBF = Sprites.cutSheet(c, "sprites/props_b.png", 4, 4, 2);
+            b.propsCF = Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 2);
             b.menuBg = decodeSampled(c, "art/hero.webp", 1024);
             b.keyBmp = decodeRaw(c, "art/button.webp");
             b.coinBmp = decodeRaw(c, "art/coin.webp");
@@ -408,7 +417,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         eHeavyIdleFr.addAll(b.eHeavyIdle);
         eHeavyGlideFr.addAll(b.eHeavyGlide);
         eHeavyAtkFr.addAll(b.eHeavyAtk);
-        props = b.props; props2 = b.props2;
+        props = b.props; props2 = b.props2; propsCity = b.propsCity;
+        propsAF = b.propsAF; propsBF = b.propsBF; propsCF = b.propsCF;
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
 
         for (int i = 0; i < 3; i++) spawnEnemy();
@@ -977,7 +987,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
         if (dist <= 1) {
             en.atkForm = en.heavy ? 1 : 0;
-            en.attacksPlanned = en.heavy ? 1 : 2;
+            en.attacksPlanned = (en.heavy || en.beast) ? 1 : 2;
             en.intent = 1;
             return;
         }
@@ -1552,7 +1562,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     } else if (adj) {
                         // Single-target (light enemy, or heavy blade combo).
                         sound.play(active.weapon == 1 ? "claw" : "swing");
-                        int dmg = active.heavy ? Enemy.HEAVY_ATK_DMG[0] : 10;
+                        int dmg = active.heavy ? Enemy.HEAVY_ATK_DMG[0] : (active.beast ? Enemy.BEAST_DMG : 10);
                         tgt.hp -= dmg;
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
@@ -1926,6 +1936,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
 
+        if (storyMode) addPlacedProps();
         for (Player pp : party) { D p = obtainD(); p.kind = 1; p.pl = pp; p.y = pp.y; drawList.add(p); }
         for (Enemy en : enemies) { D d = obtainD(); d.kind = 2; d.en = en; d.y = en.y; drawList.add(d); }
 
@@ -1939,10 +1950,101 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void drawProp(Canvas cv, D d) {
         float s = d.s * zoom;
-        rf.set(sx(d.ax) - d.pr.getWidth() * s / 2f, sy(d.ay) - d.pr.getHeight() * s,
-               sx(d.ax) + d.pr.getWidth() * s / 2f, sy(d.ay));
+        cv.save();
+        cv.translate(sx(d.ax), sy(d.ay));
+        if (d.obj == Boolean.TRUE) cv.scale(-1f, 1f);
+        rf.set(-d.pr.getWidth() * s / 2f, -d.pr.getHeight() * s,
+               d.pr.getWidth() * s / 2f, 0);
         paint.setAlpha(255);
         cv.drawBitmap(d.pr, null, rf, paint);
+        cv.restore();
+    }
+
+    private List<Bitmap> propList(int sheet, boolean flat) {
+        if (sheet == 0) return flat ? propsAF : props;
+        if (sheet == 1) return flat ? propsBF : props2;
+        return flat ? propsCF : propsCity;
+    }
+
+    private void addPlacedProps() {
+        StoryWorld sw = sw();
+        for (int i = 0; i < sw.placedProps.size(); i++) {
+            StoryWorld.Prop pr = sw.placedProps.get(i);
+            if (pr.flat) continue;
+            List<Bitmap> list = propList(pr.sheet, false);
+            if (list == null || list.isEmpty()) continue;
+            Bitmap b = list.get(pr.idx % list.size());
+            if (b == null || b.isRecycled()) continue;
+            float px = sx(pr.x), py = sy(pr.y);
+            if (px < -300 || px > W + 300 || py < -300 || py > H + 300) continue;
+            D d = obtainD();
+            d.kind = 0;
+            d.pr = b;
+            d.ax = pr.x; d.ay = pr.y;
+            d.s = (TH * 1.9f * pr.scale) / b.getHeight();
+            d.y = pr.y;
+            d.obj = pr.flip ? Boolean.TRUE : null;
+            drawList.add(d);
+        }
+    }
+
+    private void drawFlatProps(Canvas cv) {
+        StoryWorld sw = sw();
+        for (int i = 0; i < sw.placedProps.size(); i++) {
+            StoryWorld.Prop pr = sw.placedProps.get(i);
+            if (!pr.flat) continue;
+            List<Bitmap> list = propList(pr.sheet, true);
+            if (list == null || list.isEmpty()) continue;
+            Bitmap b = list.get(pr.idx % list.size());
+            if (b == null || b.isRecycled()) continue;
+            float px = sx(pr.x), py = sy(pr.y);
+            if (px < -400 || px > W + 400 || py < -400 || py > H + 400) continue;
+            float w = HEX * 2.2f * pr.scale * zoom;
+            float h = w * b.getHeight() / (float) b.getWidth();
+            cv.save();
+            cv.translate(px, py);
+            if (pr.flip) cv.scale(-1f, 1f);
+            rf.set(-w / 2f, -h / 2f, w / 2f, h / 2f);
+            paint.setAlpha(235);
+            cv.drawBitmap(b, null, rf, paint);
+            paint.setAlpha(255);
+            cv.restore();
+        }
+        if (sw.scatterSet) drawScatter(cv, sw);
+    }
+
+    private void drawScatter(Canvas cv, StoryWorld sw) {
+        for (int i = 0; i < sw.scatterN; i++) {
+            int h = h2(sw.scatterQ * 31 + i, sw.scatterR * 17 + i, 5);
+            int dq = ((h & 255) % (sw.scatterRad * 2 + 1)) - sw.scatterRad;
+            int dr = (((h >>> 8) & 255) % (sw.scatterRad * 2 + 1)) - sw.scatterRad;
+            SceneMap.hexToWorld(sw.scatterQ + dq, sw.scatterR + dr, FW_A);
+            float px = sx(FW_A[0]), py = sy(FW_A[1]);
+            if (px < -400 || px > W + 400 || py < -400 || py > H + 400) continue;
+            int pick = (h >>> 16) % 3;
+            Bitmap b = pick == 0 ? safeGet(propsAF, 4) : (pick == 1 ? safeGet(propsAF, 5) : safeGet(propsCF, 7));
+            if (b == null) continue;
+            float w = HEX * (1.4f + ((h >>> 20) & 63) / 63f * 0.9f) * zoom;
+            float hh = w * b.getHeight() / (float) b.getWidth();
+            cv.save();
+            cv.translate(px, py);
+            if (((h >>> 12) & 1) == 1) cv.scale(-1f, 1f);
+            rf.set(-w / 2f, -hh / 2f, w / 2f, hh / 2f);
+            paint.setAlpha(225);
+            cv.drawBitmap(b, null, rf, paint);
+            paint.setAlpha(255);
+            cv.restore();
+        }
+    }
+
+    private Bitmap safeGet(List<Bitmap> l, int i) {
+        return (l == null || l.isEmpty()) ? null : l.get(i % l.size());
+    }
+
+    private static int h2(int x, int y, int s) {
+        int h = x * 0x27D4EB2D ^ y * 0x165667B1 ^ s * 0x9E3779B1;
+        h ^= h >>> 15; h *= 0x85EBCA6B; h ^= h >>> 13;
+        return h & 0x7FFFFFFF;
     }
 
     private int palIdx(int col) {
@@ -2219,10 +2321,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         float br = idle ? (float) Math.sin(pl.bobTime * 1.7f) : 0f;
 
         float by = sy(pl.y + h.visualY) + FOOT_DROP * zoom;
+        if (pl == player && swLift > 0f) by -= swLift * zoom;
 
         if (!h.hidden) {
             float sw = (fl ? 45 : 55) * zoom * (1f - 0.045f * br);
-            paint.setAlpha(fl ? 150 : 220);
+            if (pl == player && swLift > 0f) sw *= 0.7f;
+            paint.setAlpha((pl == player && swLift > 0f) ? 120 : (fl ? 150 : 220));
             rf.set(sx(pl.x) - sw, by - sw * 0.36f,
                    sx(pl.x) + sw, by + sw * 0.36f);
             cv.drawBitmap(shadowBmp, null, rf, paint);
@@ -2305,10 +2409,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
+        float bs = en.beast ? 1.3f : 1f;
         float x = sx(en.x), y = sy(en.y + en.floater.visualY) + FOOT_DROP * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
         float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
-        float sw = 45 * zoom * (1f - 0.045f * br);
+        float sw = 45 * zoom * bs * (1f - 0.045f * br);
         paint.setAlpha(220);
         rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
         cv.drawBitmap(shadowBmp, null, rf, paint);
@@ -2321,6 +2426,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         cv.save();
         cv.translate(x, y);
         if (en.facing < 0) cv.scale(-1, 1);
+        if (bs != 1f) cv.scale(bs, bs);
         if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
         // E4: death squash-then-sink
         if (en.dead) {
@@ -2346,7 +2452,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         cv.restore();
 
         if (!en.dead) {
-            float top = y - ENEMY_H * zoom - 24;
+            float top = y - ENEMY_H * bs * zoom - 24;
             float bw = 90, bh = 8;
             rf.set(x - bw/2, top, x + bw/2, top + bh);
             paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
@@ -2444,6 +2550,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (storyMode && story != null) {
             sw().drawWorld(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, quality, loadT);
+            drawFlatProps(cv);
         } else {
             drawGround(cv);
         }
@@ -2943,9 +3050,19 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         swFromX = player.x; swFromY = player.y;
         swToX = FW_A[0]; swToY = FW_A[1];
         swT = 0f; swDur = Math.max(0.1f, dur);
-        swActive = true;
+        swActive = true; swGlide = false; swLift = 0f;
         player.facing = swToX >= swFromX ? 1 : -1;
         camMode = 0; camSnap = false;
+    }
+    public void scriptGlide(int q, int r, float dur) {
+        SceneMap.hexToWorld(q, r, FW_A);
+        swFromX = player.x; swFromY = player.y;
+        swToX = FW_A[0]; swToY = FW_A[1];
+        swT = 0f; swDur = Math.max(0.1f, dur);
+        swActive = true; swGlide = true; swLift = 0f;
+        player.facing = swToX >= swFromX ? 1 : -1;
+        camMode = 0; camSnap = false;
+        try { sound.play("glide"); } catch (Exception ignored) {}
     }
     public void scriptCamPan(float wx, float wy, int ms) {
         camMode = 2;
@@ -2984,6 +3101,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     public void fxActor(String name, String kind) {
         fxActorName = name; fxActorKind = kind; fxActorT = 2.5f;
     }
+    private float puffGlideT = 0f;
     private void updateScriptWalk(float dt) {
         if (!swActive) return;
         swT += dt;
@@ -2992,7 +3110,26 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         player.x = swFromX + (swToX - swFromX) * e;
         player.y = swFromY + (swToY - swFromY) * e;
         player.targetX = player.x; player.targetY = player.y;
-        if (t >= 1f) swActive = false;
+        if (swGlide) {
+            swLift = (float) Math.sin(t * 3.14159f) * 150f;
+            puffGlideT += dt;
+            if (puffGlideT > 0.09f) {
+                puffGlideT = 0f;
+                spawnPuff(player.x + (float) (Math.random() * 30 - 15),
+                          player.y + (float) (Math.random() * 10 - 5));
+            }
+        }
+        if (t >= 1f) {
+            if (swGlide) {
+                swGlide = false; swLift = 0f;
+                shakeT = Math.max(shakeT, 0.12f);
+                try { sound.play("land"); } catch (Exception ignored) {}
+                for (int i = 0; i < 6; i++)
+                    spawnPuff(player.x + (float) (Math.random() * 60 - 30),
+                              player.y + (float) (Math.random() * 16 - 8));
+            }
+            swActive = false;
+        }
     }
     private void updateDirector(float dt) {
         if (camMode == 2) {
@@ -3083,6 +3220,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             e.hp = 60; e.maxHp = 60;
             e.mana = 100; e.maxMana = 100;
             e.weapon = 2;
+        } else if ("beast".equals(type)) {
+            e.beast = true;
+            e.hp = 120; e.maxHp = 120;
+            e.speed = 160f;
         }
         enemies.add(e);
     }
