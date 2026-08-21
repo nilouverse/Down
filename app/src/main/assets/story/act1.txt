@@ -51,6 +51,7 @@ WALK e2 2 3 1.4
 WALK e3 0 3 1.4
 WAIT 1400
 SAY NilouZila Thornborn. Of course they survived. Cockroaches, all of them.
+KILLNOTE 4 four taken DOWN.
 FIGHT 4
 
 SAY NilouZila Venom. Naturally.
@@ -98,7 +99,6 @@ ACTION shake 400
 
 SAY NilouZila Same trick twice?
 
-KILLNOTE 4 four taken DOWN.
 FIGHT 7
 
 SAY NilouZila Eleven.
