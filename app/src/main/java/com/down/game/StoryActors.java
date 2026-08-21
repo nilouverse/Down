@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import java.util.ArrayList;
 
@@ -16,6 +17,7 @@ public class StoryActors {
     private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Path bodyPath = new Path();
     private final RectF dstRect = new RectF();
+    private final Rect frameSrc = new Rect();
     private int seq = 0;
 
     private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
@@ -133,10 +135,31 @@ public class StoryActors {
 
         if (a.idleFrames != null && a.idleFrames.length > 0) {
             int idx = (int) (t * 8f) % a.idleFrames.length;
-            Bitmap bmp = a.idleFrames[idx].bmp;
+            Frame f = a.idleFrames[idx];
+            Bitmap bmp = f.bmp;
             if (bmp != null && !bmp.isRecycled()) {
-                dstRect.set(-w, -h, w, 0);
-                cv.drawBitmap(bmp, null, dstRect, bitmapPaint);
+                float s = h / f.ref;
+                if (f.vCrop) {
+                    frameSrc.set(0, f.top, bmp.getWidth(), f.top + f.ch);
+                    dstRect.set(-bmp.getWidth() * s / 2f, -f.ch * s, bmp.getWidth() * s / 2f, 0);
+                } else if (f.cCenter) {
+                    int wl = Math.max(0, f.rgt - f.ww);
+                    int wr = f.rgt;
+                    if (wl >= wr || f.top + f.ch > bmp.getHeight()) {
+                        frameSrc.set(0, 0, bmp.getWidth(), bmp.getHeight());
+                        dstRect.set(-bmp.getWidth() * s / 2f, -bmp.getHeight() * s,
+                                bmp.getWidth() * s / 2f, 0);
+                    } else {
+                        frameSrc.set(wl, f.top, wr, f.top + f.ch);
+                        float right = f.ww * s / 2f;
+                        dstRect.set(right - (wr - wl) * s, -f.ch * s, right, 0);
+                    }
+                } else {
+                    frameSrc.set(0, 0, bmp.getWidth(), bmp.getHeight());
+                    dstRect.set(-bmp.getWidth() * s / 2f, -bmp.getHeight() * s,
+                            bmp.getWidth() * s / 2f, 0);
+                }
+                cv.drawBitmap(bmp, frameSrc, dstRect, bitmapPaint);
             }
             cv.restore();
             return;
