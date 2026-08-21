@@ -239,8 +239,7 @@ public final class SceneMap {
             else if (rf < -7.7f || rf > 15.2f) ti = 15;                 // void rims (N + S)
             else if (rf < -4.5f || rf > 12.5f) ti = 10 + ((h >>> 3) & 1); // cliff strata rims
             else {                                        // walkable meadow
-                ti = 5;                                     // a6 pebbled ash, one material
-                rot = (h >>> 12) & 3;                       // 0/90/180/270
+                ti = 5;                                     // a6 pebbled ash, as-is
             }
         }
         // other regions: ts stays -1 -> flat zone color until composed.
