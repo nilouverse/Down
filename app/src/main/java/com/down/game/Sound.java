@@ -71,6 +71,10 @@ public class Sound {
         l.add(path);
     }
 
+    // Universal scan: root files + every subfolder become SFX pools with random
+    // variants (trailing digits join the same key). Only two exceptions:
+    // hero folders -> streamed voice lines, "ambient" -> looping beds.
+    // Any future folder (beast, soldier, ...) works with zero code changes.
     private void scan() {
         try {
             String[] root = context.getAssets().list("sounds");
@@ -78,31 +82,25 @@ public class Sound {
                 for (String f : root) {
                     if (f == null) continue;
                     String low = f.toLowerCase(Locale.US);
-                    if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
-                    String base = f.substring(0, f.lastIndexOf('.'));
-                    addPath(sfxPaths, baseKey(base), "sounds/" + f);
-                }
-            }
-            for (String hero : HERO_FOLDERS) {
-                String[] files = context.getAssets().list("sounds/" + hero);
-                if (files == null) continue;
-                for (String f : files) {
-                    if (f == null) continue;
-                    String low = f.toLowerCase(Locale.US);
-                    if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
-                    String base = f.substring(0, f.lastIndexOf('.'));
-                    addPath(voicePaths, baseKey(base), "sounds/" + hero + "/" + f);
-                }
-            }
-            // Ambient folder: sounds/ambient/ — pure loops for scene beds.
-            String[] amb = context.getAssets().list("sounds/ambient");
-            if (amb != null) {
-                for (String f : amb) {
-                    if (f == null) continue;
-                    String low = f.toLowerCase(Locale.US);
-                    if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
-                    String base = f.substring(0, f.lastIndexOf('.'));
-                    addPath(ambientPaths, baseKey(base), "sounds/ambient/" + f);
+                    if (low.endsWith(".ogg") || low.endsWith(".wav")) {
+                        String base = f.substring(0, f.lastIndexOf('.'));
+                        addPath(sfxPaths, baseKey(base), "sounds/" + f);
+                        continue;
+                    }
+                    String[] files = context.getAssets().list("sounds/" + f);
+                    if (files == null) continue;
+                    boolean voice = false;
+                    for (String h : HERO_FOLDERS) if (h.equals(low)) voice = true;
+                    boolean amb = "ambient".equals(low);
+                    for (String sf : files) {
+                        if (sf == null) continue;
+                        String slow = sf.toLowerCase(Locale.US);
+                        if (!slow.endsWith(".ogg") && !slow.endsWith(".wav")) continue;
+                        String base = sf.substring(0, sf.lastIndexOf('.'));
+                        if (voice) addPath(voicePaths, baseKey(base), "sounds/" + f + "/" + sf);
+                        else if (amb) addPath(ambientPaths, baseKey(base), "sounds/" + f + "/" + sf);
+                        else addPath(sfxPaths, baseKey(base), "sounds/" + f + "/" + sf);
+                    }
                 }
             }
         } catch (Exception ignored) {}
@@ -194,7 +192,6 @@ public class Sound {
     public void play(String name) {
         if (name == null || context == null) return;
         String key = baseKey(name.toLowerCase(Locale.US));
-        // Route: ambient keys go to the ambient bed layer, voice keys to voice, else SFX.
         if (ambientPaths.containsKey(key)) { setAmbient(key); return; }
         if (voicePaths.containsKey(key)) { playVoice(key); return; }
         playSfx(key);
@@ -302,14 +299,12 @@ public class Sound {
 
         ArrayList<String> paths = ambientPaths.get(key);
         if (paths == null || paths.isEmpty()) {
-            // Sound law: missing ambient must never break the scene.
             stopAmbient();
             return;
         }
         String path = paths.get(rnd.nextInt(paths.size()));
 
         final MediaPlayer old = ambientPlayer;
-        final String oldKey = ambientKey;
         ambientKey = key;
 
         final MediaPlayer np = new MediaPlayer();
@@ -336,7 +331,6 @@ public class Sound {
             return;
         }
 
-        // Crossfade: old -> 0, new -> target, over ~0.9s on a worker thread.
         ambientFadeStop = true;
         Thread prev = ambientFadeThread;
         if (prev != null) {
