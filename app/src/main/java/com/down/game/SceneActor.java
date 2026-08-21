@@ -1,45 +1,62 @@
 package com.down.game;
 
-public class SceneActor {
-    public String id;
-    public String type;
-    public float x, y;
-    public int q, r;
+public class StoryActor {
+    public String name, kind, type, tag, alias;
     public boolean hidden;
+    public int q, r;
+    public float x, y;
+    public boolean walking;
+    public float fromX, fromY, toX, toY;
+    public float walkT, walkDuration;
+    public float bobT;
+    public float facing = 1f;
+    public Frame[] idleFrames;
 
-    public float targetX, targetY;
-    public boolean moving;
-    public float speed = 150f;
-    public float bobPhase;
+    private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
 
-    public SceneActor(String id, String type, float x, float y, int q, int r, boolean hidden) {
-        this.id = id; this.type = type;
-        this.x = x; this.y = y;
-        this.q = q; this.r = r;
+    public StoryActor(String name, String kind, String type, String tag, float x, float y, boolean hidden) {
+        this.name = name;
+        this.kind = kind;
+        this.type = type;
+        this.tag = tag;
+        this.x = x;
+        this.y = y;
         this.hidden = hidden;
-        this.targetX = x; this.targetY = y;
-        this.bobPhase = (float) Math.random() * 6f;
+        this.walking = false;
+    }
+
+    public boolean isEnemy() { return "enemy".equals(kind) || "beast".equals(kind); }
+    public boolean isWalking() { return walking; }
+
+    public void setHex(int q, int r) {
+        this.q = q; this.r = r;
+        this.x = hexX(q, r);
+        this.y = hexY(q, r);
+        this.walking = false;
+    }
+
+    public void moveToHex(int q, int r, float duration) {
+        this.fromX = this.x;
+        this.fromY = this.y;
+        this.toX = hexX(q, r);
+        this.toY = hexY(q, r);
+        this.q = q; this.r = r;
+        this.walkDuration = Math.max(0.01f, duration);
+        this.walkT = 0f;
+        this.walking = true;
     }
 
     public void update(float dt) {
-        if (moving) {
-            float dx = targetX - x;
-            float dy = targetY - y;
-            float dist = (float) Math.sqrt(dx * dx + dy * dy);
-            if (dist < speed * dt) {
-                x = targetX; y = targetY;
-                moving = false;
-            } else {
-                x += (dx / dist) * speed * dt;
-                y += (dy / dist) * speed * dt;
-            }
-        }
+        bobT += dt;
+        if (!walking) return;
+        walkT += dt;
+        float t = Math.min(1f, walkT / walkDuration);
+        float ease = t * t * (3f - 2f * t);
+        x = fromX + (toX - fromX) * ease;
+        y = fromY + (toY - fromY) * ease;
+        if (t >= 1f) { x = toX; y = toY; walking = false; }
     }
 
-    public void walkTo(int nq, int nr, float hexSize, float squash) {
-        q = nq; r = nr;
-        targetX = hexSize * (float) Math.sqrt(3) * (q + r / 2f);
-        targetY = hexSize * 1.5f * r * squash;
-        moving = true;
-    }
+    private static float hexX(int q, int r) { return HEX * SQRT3 * (q + r * 0.5f); }
+    private static float hexY(int q, int r) { return HEX * 1.5f * r * SQUASH; }
 }
