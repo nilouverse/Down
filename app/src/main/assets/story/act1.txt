@@ -63,12 +63,43 @@ ZONE gate_mouth 34 -5 3
 GATE gate_mouth ashen_cleared
 ON_ENTER gate_mouth
 PROP city 0 38 -5 1.2 1
-SPAWN infantry 40 -5
-SPAWN infantry 41 -5
-SPAWN infantry 42 -5
-SPAWN infantry 43 -5
-SPAWN infantry 42 -6
-SPAWN infantry 42 -4
-SPAWN beast 44 -5
+SPAWN infantry 40 -5 i0
+SPAWN infantry 41 -5 i1
+SPAWN infantry 42 -5 i2
+SPAWN infantry 43 -5 i3
+SPAWN infantry 42 -6 i4
+SPAWN infantry 42 -4 i5
+SPAWN beast 44 -5 b0
+
+SAY Carrion_Infantry_Leader A lieutenant! She wears the marks! Take her alive — Mordethail wants the officers breathing!
+SAY NilouZila Come and try.
+
+# (the shield wall advances slowly)
+WALK i0 39 -5 2.2
+WALK i1 40 -5 2.2
+WALK i2 41 -5 2.2
+WALK i3 42 -5 2.2
+WALK i4 41 -6 2.2
+WALK i5 41 -4 2.2
+
+# (the war-beast snorts and paws the ground)
+SFX beast_move
+
+SAY NilouZila Shield wall. Tight. Slow. Predictable.
+
+# (dark energy into the blade — black flame)
+FX nilou crackle
+
+SAY NilouZila But first — the beast.
+
+# (the beast charges; the ground shakes)
+SFX beast_attack
+ACTION shake 400
+
+SAY NilouZila Same trick twice?
+
+KILLNOTE 4 four taken DOWN.
 FIGHT 7
+
+SAY NilouZila Eleven.
 SETFLAG gate_open
