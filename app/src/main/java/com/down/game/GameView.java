@@ -659,7 +659,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void startPlayerTurn() {
         phase = PH_PLAYER; phaseT = 0;
-        for (Player p : party) p.actionsLeft = 3;
+        for (Player p : party) p.actionsLeft = 2;
         sound.play("turn");
         attackRangeShown = 0;
         targetEnemy = null;
@@ -1957,10 +1957,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0xAAefe6dd, 0x14efe6dd);
         }
         if (player.actionsLeft >= 2) {
-            paint.setAlpha(110);
+            paint.setAlpha(160);
             for (int i = 0; i < fan2N; i++) {
                 hexToWorld(fan2Qs[i], fan2Rs[i], FW_A);
-                drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0x77b3102a, 0x0fb3102a);
+                drawHexRing(cv, sx(FW_A[0]), sy(FW_A[1]), 0x9939ff14, 0x1839ff14);
             }
         }
         paint.setAlpha(255);
@@ -2504,7 +2504,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             drawDockButton(cv, dockAtk[i], lbl[i], acc[i], en || on, menuPress == 6 + i, on);
         }
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             float px = dockEnd.right + 30 + i * 36, py = dockPanel.centerY();
             if (coinBmp != null) {
                 paint.setAlpha((int) (dockSlide * (i < player.actionsLeft ? 255 : 70)));
