@@ -200,18 +200,11 @@ public final class SceneMap {
 
         if (qf < 10.5f) {                                   // ---- ASHEN FIELDS ----
             ts = 0;
-            if (rf < -7.7f) ti = 15;                        // void
-            else if (rf < -4.5f) {                          // cliff strata band
-                ti = 10 + ((h >>> 3) & 1);
+            ti = 12;                                        // a13 scorched black, uniform field
+            if (rf < -4.5f) {                               // (old cliff band — now a13 too)
                 if ((h >>> 10) % 100 < 6) pr = 16 + ((h >>> 14) & 1);   // boulders at cliff base
                 if ((h >>> 13) % 1000 < 3) gl = 13;                     // rare blue wisp
             } else {
-                int dune = (int) (n1 * 4f); if (dune > 3) dune = 3;
-                ti = dune;                                  // dunes, dark -> light (clustered)
-                if (n2 > 0.62f) ti = 4 + dune;              // pebbled patches
-                if ((hB >>> 8) % 1000 < 18) ti = 8 + ((hB >>> 4) & 1);  // half-buried bones <=2%
-                if ((h >>> 6) % 1000 < 12) ti = 13;                     // pale dust drifts
-                if ((h >>> 14) % 1000 < 8) ti = 12;                     // scorched
                 if ((h >>> 4) % 1000 < 6) gl = 6;                       // stray ember sparks
                 if (qf > -5f && qf < 12f && rf > -3f && rf < 2f && n2 > 0.6f
                         && (h >>> 4) % 100 < 26)                        // ember veins ~10% of band
