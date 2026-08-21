@@ -164,6 +164,11 @@ public class StoryActors {
             cv.drawCircle(-w * 0.22f, top + h * 0.28f, 3f * zoom, bodyPaint);
             cv.drawCircle(w * 0.22f, top + h * 0.28f, 3f * zoom, bodyPaint);
         }
+        if ("beast".equals(a.kind)) {
+            // quadruped read: low wide body hint
+            bodyPaint.setColor(0xff140a08);
+            cv.drawOval(-w * 0.9f, -h * 0.42f, w * 0.9f, -h * 0.10f, bodyPaint);
+        }
         cv.restore();
     }
 
@@ -172,6 +177,7 @@ public class StoryActors {
         if ("ws".equals(kind)) return 190f;
         if ("npc".equals(kind)) return 195f;
         if ("ambient".equals(kind)) return 165f;
+        if ("beast".equals(kind)) return 260f;
         return 175f;
     }
 
@@ -180,6 +186,7 @@ public class StoryActors {
         if ("ws".equals(kind)) return 0xff34e3d6;
         if ("npc".equals(kind)) return 0xffb7a6ab;
         if ("ambient".equals(kind)) return 0xff6f8f6a;
+        if ("beast".equals(kind)) return 0xff7a1a10;
         return 0;
     }
 
@@ -187,6 +194,7 @@ public class StoryActors {
         if ("vel".equals(kind)) return 0xff1a0a24;
         if ("ws".equals(kind)) return 0xff120a0e;
         if ("ambient".equals(kind)) return 0xff0d120c;
+        if ("beast".equals(kind)) return 0xff140a08;
         return 0xff101418;
     }
 
@@ -194,6 +202,7 @@ public class StoryActors {
         if ("nilou".equalsIgnoreCase(name) || "vex".equalsIgnoreCase(name)) return "hero";
         if ("vel".equalsIgnoreCase(name)) return "vel";
         if ("ws".equalsIgnoreCase(name)) return "ws";
+        if ("beast".equalsIgnoreCase(name)) return "beast";
         return "enemy";
     }
 
