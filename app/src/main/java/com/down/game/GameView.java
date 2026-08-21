@@ -3450,6 +3450,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
     public void refreshDock() { fanDirty = true; }
     public void noteWave() { if (story != null) story.flashNote("More are coming..."); }
+    public void flashNote(String txt) { if (story != null) story.flashNote(txt); }
     public void onActComplete() {
         if (story != null) story.showActCard("END OF ACT ONE");
     }
