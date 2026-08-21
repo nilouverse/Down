@@ -2360,6 +2360,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         drawDecals(cv);
         drawSorted(cv);
+        if (storyMode && map != null)
+            map.drawFront(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H);
         drawParticles(cv);
 
         drawBlasts(cv);
