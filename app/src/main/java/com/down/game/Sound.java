@@ -197,21 +197,29 @@ public class Sound {
         playSfx(key);
     }
 
-    // Looping footsteps: plays while any unit moves, stops when idle.
-    private int footStream = 0;
-    public void setFootsteps(boolean on) {
+    // Looping footsteps: light for heroes, heavy for armored/normal enemies.
+    // Numbered variants (footsteps_light2.ogg …) join the same pool, random start.
+    private int footLight = 0, footHeavy = 0;
+    public void setFootstepsLight(boolean on) { footLoop(on, true); }
+    public void setFootstepsHeavy(boolean on) { footLoop(on, false); }
+    public void setFootsteps(boolean on) { footLoop(on, true); footLoop(on, false); }
+    private void footLoop(boolean on, boolean light) {
         SoundPool p = pool;
         if (p == null) return;
-        if (on && footStream == 0) {
+        int stream = light ? footLight : footHeavy;
+        if (on && stream == 0) {
             int id = 0;
             synchronized (lock) {
-                ArrayList<Integer> l = sfxLoaded.get("footsteps_running");
+                ArrayList<Integer> l = sfxLoaded.get(light ? "footsteps_light" : "footsteps_heavy");
                 if (l != null && !l.isEmpty()) id = l.get(rnd.nextInt(l.size()));
             }
-            if (id != 0) footStream = p.play(id, 0.8f, 0.8f, 0, -1, 1f);
-        } else if (!on && footStream != 0) {
-            try { p.stop(footStream); } catch (Exception e) {}
-            footStream = 0;
+            if (id != 0) {
+                int s = p.play(id, 0.8f, 0.8f, 0, -1, 1f);
+                if (light) footLight = s; else footHeavy = s;
+            }
+        } else if (!on && stream != 0) {
+            try { p.stop(stream); } catch (Exception e) {}
+            if (light) footLight = 0; else footHeavy = 0;
         }
     }
 
