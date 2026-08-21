@@ -17,6 +17,15 @@ public final class StoryWorld {
     // Engine key for the playable hero slot. A stable token, not a display name.
     public static final String PLAYER_KEY = "nilou";
 
+    public static class Prop {
+        public int sheet;   // 0 = props_a, 1 = props_b, 2 = props_city
+        public int idx;
+        public float x, y;
+        public float scale;
+        public boolean flip;
+        public boolean flat; // flat = ground scar, drawn under actors
+    }
+
     private static final int MAX_ZONES = 32;
     private final String[] zoneName = new String[MAX_ZONES];
     private final int[] zoneQ = new int[MAX_ZONES];
@@ -54,6 +63,7 @@ public final class StoryWorld {
     private boolean sceneEvent = false;
 
     public final float[] pt = new float[2];
+    public final ArrayList<Prop> placedProps = new ArrayList<>();
 
     // Stored render-state. The view layer reads these; missing art = silent.
     public String skyKey = "";
@@ -74,8 +84,7 @@ public final class StoryWorld {
     private void parse(String file) {
         try {
             BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/" + file)));
-            String line; String sink = null;
-            List<String> sinkList = null;
+            String line; List<String> sinkList = null;
             while ((line = r.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
@@ -184,6 +193,10 @@ public final class StoryWorld {
             } else if (actors != null) {
                 actors.walkTo(p[1], pi(p[2]), pi(p[3]), dur);
             }
+        } else if (cmd.startsWith("GLIDE ")) {
+            String[] p = cmd.split(" ");
+            if (gv != null) gv.scriptGlide(pi(p[1]), pi(p[2]), p.length > 3 ? pf(p[3]) : 1.2f);
+            waitWalk = PLAYER_KEY;
         } else if (cmd.startsWith("EXIT ")) {
             String[] p = cmd.split(" ");
             if (actors != null) actors.exitTo(p[1], pi(p[2]), pi(p[3]));
@@ -233,6 +246,19 @@ public final class StoryWorld {
                 scatterSet = true;
                 scatterQ = pi(p[2]); scatterR = pi(p[3]);
                 scatterRad = pi(p[4]); scatterN = pi(p[5]);
+            }
+        } else if (cmd.startsWith("PROP ") || cmd.startsWith("SCAR ")) {
+            String[] p = cmd.split(" ");
+            if (p.length > 4) {
+                Prop pr = new Prop();
+                pr.sheet = "a".equals(p[1]) ? 0 : ("b".equals(p[1]) ? 1 : 2);
+                pr.idx = pi(p[2]);
+                SceneMap.hexToWorld(pi(p[3]), pi(p[4]), pt);
+                pr.x = pt[0]; pr.y = pt[1];
+                pr.scale = p.length > 5 ? pf(p[5]) : 1f;
+                pr.flip = p.length > 6 && "1".equals(p[6]);
+                pr.flat = cmd.startsWith("SCAR");
+                placedProps.add(pr);
             }
         } else if (cmd.startsWith("SFX ") || cmd.startsWith("AMBIENT ")) {
             // Sound law: never break the scene on missing audio.
