@@ -156,6 +156,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eHeavyIdleFr = new ArrayList<>();
     private final ArrayList<Frame> eHeavyGlideFr = new ArrayList<>();
     private final ArrayList<Frame> eHeavyAtkFr = new ArrayList<>();
+    private final ArrayList<Frame> eBeastIdleFr = new ArrayList<>();
+    private final ArrayList<Frame> eBeastGlideFr = new ArrayList<>();
+    private final ArrayList<Frame> eBeastAtkFr = new ArrayList<>();
+    private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
+    private final HashMap<Player, Integer> bleedTurns = new HashMap<>();
+    private final HashMap<Player, Integer> bleedDmg = new HashMap<>();
+    private static final int BEAST_B1_DMG = 14, BEAST_B2_DMG = 30,
+            BEAST_B1_RANGE = 3, BEAST_BLEED_PCT = 20, BEAST_MANA_REGEN = 30;
 
     private List<Bitmap> props, props2, propsCity;
     private List<Bitmap> propsAF, propsBF, propsCF;
@@ -258,6 +266,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         HashMap<String, List<Frame>> frames;
         ArrayList<Frame> eIdle, eGlide, eAtk;
         ArrayList<Frame> eHeavyIdle, eHeavyGlide, eHeavyAtk;
+        ArrayList<Frame> eBeastIdle, eBeastGlide, eBeastAtk;
         List<Bitmap> props, props2, propsCity;
         List<Bitmap> propsAF, propsBF, propsCF;
         Bitmap menuBg, keyBmp, coinBmp;
@@ -305,6 +314,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/enemy_heavy_glide.png", 2, 2, 2), true, false));
             b.eHeavyAtk = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_heavy_attack.png", 3, 4, 2), false, false));
+            b.eBeastIdle = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_beast_idle_a.png", 2, 2, 4), false, true));
+            b.eBeastIdle.addAll(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_beast_idle_b.png", 2, 2, 4), false, true));
+            b.eBeastGlide = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_beast_glide_a.png", 2, 2, 2), true, false));
+            b.eBeastGlide.addAll(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_beast_glide_b.png", 2, 2, 2), true, false));
+            b.eBeastAtk = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_beast_attack.png", 2, 4, 2), false, false));
             b.props  = Sprites.trimBottom(
                     Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
@@ -417,6 +436,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         eHeavyIdleFr.addAll(b.eHeavyIdle);
         eHeavyGlideFr.addAll(b.eHeavyGlide);
         eHeavyAtkFr.addAll(b.eHeavyAtk);
+        eBeastIdleFr.addAll(b.eBeastIdle);
+        eBeastGlideFr.addAll(b.eBeastGlide);
+        eBeastAtkFr.addAll(b.eBeastAtk);
         props = b.props; props2 = b.props2; propsCity = b.propsCity;
         propsAF = b.propsAF; propsBF = b.propsBF; propsCF = b.propsCF;
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
@@ -716,7 +738,21 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         phase = PH_ENEMY; phaseT = 0;
         hexesShown = false; targetEnemy = null; attackRangeShown = 0;
         fanDirty = true; atkDirty = true;
-        for (Enemy en : enemies) en.resetTurn();
+        for (Enemy en : enemies) {
+            en.resetTurn();
+            if (en.beast && en.mana < en.maxMana)
+                en.mana = Math.min(en.maxMana, en.mana + BEAST_MANA_REGEN);
+        }
+        for (Player p : party) {
+            Integer bt = bleedTurns.get(p);
+            if (bt != null && bt > 0) {
+                int bd = bleedDmg.get(p);
+                p.hp -= bd;
+                addDmg(p.x, p.y - PLAYER_H - 20, -bd, C_BLOOD);
+                sound.play("hit");
+                bleedTurns.put(p, bt - 1);
+            }
+        }
         for (Enemy en : enemies) {
             if (en.dead || en.poisonTurns <= 0) continue;
             en.poisonTurns--;
@@ -957,14 +993,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (dmg >= en.maxHp * 0.7f) {
             sound.play(en.gender == 1 ? "female_cry" : "male_cry");
         } else {
-            sound.play(en.gender == 1 ? "female_hurt" : "male_hurt");
+            sound.play(en.beast ? "beast_hurt" : (en.gender == 1 ? "female_hurt" : "male_hurt"));
         }
 
         if (en.hp <= 0) {
             en.dead = true;
             spawnDecal(en.x, en.y);
             sound.play("death");
-            sound.play(en.gender == 1 ? "female_death" : "male_death");
+            sound.play(en.beast ? "beast_death" : (en.gender == 1 ? "female_death" : "male_death"));
             sound.play(voice + "_kill");
             if (storyMode) {
                 sw().onEnemyDeath();
@@ -984,6 +1020,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             en.attacksPlanned = 1;
             en.intent = 1;
             return;
+        }
+        if (en.beast) {
+            if (en.mana >= en.maxMana && dist <= 1) { en.atkForm = 2; en.attacksPlanned = 1; en.intent = 1; return; }
+            if (dist <= BEAST_B1_RANGE) { en.atkForm = 1; en.attacksPlanned = 1; en.intent = 1; return; }
         }
         if (dist <= 1) {
             en.atkForm = en.heavy ? 1 : 0;
@@ -1510,11 +1550,21 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
                 boolean inR2 = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= Enemy.HEAVY_ATK_RANGE[1];
                 boolean wasAttacking = active.attacking();
+                boolean wasMoving = active.floater.moving;
                 int prevAtkPos = active.atkPos;
                 active.turnUpdate(dt, tgt.x, tgt.y, adj, inR2);
+                if (active.beast && active.floater.moving && !wasMoving) sound.play("beast_move");
                 if ((!wasAttacking && active.attacking())) {
                     sound.play(active.weapon == 1 ? "claw" : "swing");
+                    if (active.beast) {
+                        active.attackDuration = active.atkForm == 1 ? 1.6f : 1.4f;
+                        sound.play("beast_attack");
+                        sound.play(active.atkForm == 1 ? "beast_lunge" : "beast_slam");
+                        if (active.atkForm == 1) beginBeastLeap(active, tgt);
+                    }
                 }
+                if (active.beast && active.attacking()) stepBeastLeap(active, tgt);
+                else if (active.beast) leapOff.remove(active);
                 // Strike detection: light uses time-fraction; heavy uses sequence index.
                 boolean didStrike = false;
                 if (active.attacking() && !active.struck) {
@@ -1522,13 +1572,54 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         int[] seq = Enemy.HEAVY_ATK_SEQ[active.atkForm - 1];
                         int strikeAt = Enemy.HEAVY_ATK_STRIKE[active.atkForm - 1];
                         if (active.atkPos > prevAtkPos && active.atkPos >= strikeAt) didStrike = true;
+                    } else if (active.beast) {
+                        if (active.atkForm == 1 && active.attackT > 0.55f) didStrike = true;
+                        if (active.atkForm == 2 && active.attackT > 0.8f) didStrike = true;
                     } else {
                         if (active.attackT > 0.45f) didStrike = true;
                     }
                 }
                 if (didStrike) {
                     active.struck = true;
-                    if (active.heavy && active.atkForm == 2) {
+                    if (active.beast && active.atkForm == 1) {
+                        // Leap slam: lands on the target hex.
+                        sound.play("swing");
+                        shakeT = Math.max(shakeT, 0.15f);
+                        spawnSlash(tgt.x, tgt.y);
+                        for (int i = 0; i < 4; i++)
+                            spawnPuff(tgt.x + (float) (Math.random() * 50 - 25), tgt.y + (float) (Math.random() * 14 - 7));
+                        tgt.hp -= BEAST_B1_DMG;
+                        hurtT = 0.3f;
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -BEAST_B1_DMG);
+                        sound.play("hit");
+                        sound.play("hurt");
+                        sound.play(tgt.hero.voice + "_hurt");
+                        post(hapticRun);
+                        if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        boolean allDeadB1 = true;
+                        for (Player p : party) if (p.hp > 0) allDeadB1 = false;
+                        if (allDeadB1) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
+                    } else if (active.beast && active.atkForm == 2) {
+                        // Full-mana slam: huge hit + bleed.
+                        active.mana = 0;
+                        sound.play("blast");
+                        spawnBlast(active.x, active.y);
+                        shakeT = Math.max(shakeT, 0.3f);
+                        zoomPunch = 0.15f;
+                        tgt.hp -= BEAST_B2_DMG;
+                        bleedTurns.put(tgt, 2);
+                        bleedDmg.put(tgt, BEAST_B2_DMG * BEAST_BLEED_PCT / 100);
+                        hurtT = 0.4f;
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -BEAST_B2_DMG);
+                        sound.play("hit");
+                        sound.play("hurt");
+                        sound.play(tgt.hero.voice + "_hurt");
+                        post(hapticRun);
+                        if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        boolean allDeadB2 = true;
+                        for (Player p : party) if (p.hp > 0) allDeadB2 = false;
+                        if (allDeadB2) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
+                    } else if (active.heavy && active.atkForm == 2) {
                         // Nova: hits all heroes within 2 hexes.
                         active.mana -= Enemy.HEAVY_ATK_MANA[1];
                         sound.play("blast");
@@ -1544,6 +1635,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                                 p.hp -= Enemy.HEAVY_ATK_DMG[1];
                                 addDmg(p.x, p.y - PLAYER_H - 20, -Enemy.HEAVY_ATK_DMG[1]);
                                 hurtT = 0.4f;
+                                sound.play("hit");
                                 sound.play("hurt");
                                 sound.play(p.hero.voice + "_hurt");
                                 post(hapticRun);
@@ -1566,6 +1658,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         tgt.hp -= dmg;
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
+                        sound.play("hit");
                         sound.play("hurt");
                         sound.play(tgt.hero.voice + "_hurt");
                         post(hapticRun);
@@ -2047,6 +2140,44 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return h & 0x7FFFFFFF;
     }
 
+    // Beast leap attack: jump onto the target, land, hop one hex back.
+    private void beginBeastLeap(Enemy en, Player tgt) {
+        float[] d = new float[9];
+        d[0] = en.x; d[1] = en.y;
+        d[2] = tgt.x; d[3] = tgt.y;
+        worldToHex(en.x, en.y, IH_B);
+        worldToHex(tgt.x, tgt.y, IH_A);
+        int dq = IH_B[0] - IH_A[0], dr = IH_B[1] - IH_A[1];
+        int rq = IH_B[0] + (dq > 0 ? 1 : (dq < 0 ? -1 : 0));
+        int rr = IH_B[1] + (dr > 0 ? 1 : (dr < 0 ? -1 : 0));
+        if (hexFree(rq, rr, en)) { hexToWorld(rq, rr, FW_A); d[4] = FW_A[0]; d[5] = FW_A[1]; }
+        else { d[4] = en.x; d[5] = en.y; }
+        leapOff.put(en, d);
+    }
+
+    private void stepBeastLeap(Enemy en, Player tgt) {
+        float[] d = leapOff.get(en);
+        if (d == null) return;
+        float t = en.attackT;
+        float dx = 0, dy = 0, lift = 0;
+        if (t < 0.55f) {
+            float k = t / 0.55f; float e = k * k * (3 - 2 * k);
+            dx = (d[2] - d[0]) * e; dy = (d[3] - d[1]) * e;
+            lift = (float) Math.sin(k * 3.14159f) * 120f;
+        } else if (t < 0.85f) {
+            dx = d[2] - en.x; dy = d[3] - en.y;
+        } else {
+            if (en.x != d[4] || en.y != d[5]) {
+                en.x = d[4]; en.y = d[5];
+                en.facing = d[2] >= d[4] ? 1 : -1;
+            }
+            float k = Math.min(1f, (t - 0.85f) / 0.75f); float e = k * k * (3 - 2 * k);
+            dx = (d[2] - d[4]) * (1 - e); dy = (d[3] - d[5]) * (1 - e);
+            lift = (float) Math.sin(k * 3.14159f) * 120f;
+        }
+        d[6] = dx; d[7] = dy; d[8] = lift;
+    }
+
     private int palIdx(int col) {
         if (col == 0xAAefe6dd) return 0;
         if (col == 0xFFefe6dd) return 1;
@@ -2366,6 +2497,29 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private Frame pickEnemyFrame(Enemy en) {
         if (en.attacking()) {
+            if (en.beast) {
+                java.util.List<Frame> pool = en.atkForm == 1 ? eBeastGlideFr : eBeastAtkFr;
+                if (pool.isEmpty()) return null;
+                int i;
+                if (en.atkForm == 1) {
+                    float t = en.attackT;
+                    if (t < 0.10f) i = 0;       // A1
+                    else if (t < 0.25f) i = 4;  // B1
+                    else if (t < 0.40f) i = 7;  // B4
+                    else if (t < 0.55f) i = 2;  // A3
+                    else if (t < 0.70f) i = 5;  // B2
+                    else if (t < 0.95f) i = 6;  // B3 land
+                    else if (t < 1.15f) i = 3;  // A4
+                    else if (t < 1.30f) i = 0;  // A1
+                    else i = (((int) (en.animT * 10f)) % 2 == 0) ? 1 : 5; // jump-back shuffle
+                } else {
+                    int[] seq = { 0, 1, 2, 3, 1, 4, 5 };
+                    float k = Math.min(0.999f, en.attackT / en.attackDuration);
+                    i = seq[(int) (k * seq.length)];
+                }
+                if (i >= pool.size()) i = pool.size() - 1;
+                return pool.get(i);
+            }
             java.util.List<Frame> pool = en.heavy ? eHeavyAtkFr : eAtkFr;
             if (pool.isEmpty()) return null;
             int i;
@@ -2383,8 +2537,27 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return pool.get(i);
         }
         if (en.floater.state == 0) {
+            if (en.beast && !eBeastIdleFr.isEmpty()) {
+                int bucket = (int) (en.animT * 2.5f);
+                return eBeastIdleFr.get(h2(bucket, 13, 21) % eBeastIdleFr.size());
+            }
             java.util.List<Frame> pool = en.heavy ? eHeavyIdleFr : eIdleFr;
             if (!pool.isEmpty()) return pool.get(((int) (en.animT * 3f)) % pool.size());
+        }
+        if (en.beast && eBeastGlideFr.size() >= 8) {
+            Floater f = en.floater;
+            if (f.state == 1) {
+                if (f.t < 0.10f) return eBeastGlideFr.get(0); // A1
+                if (f.t < 0.20f) return eBeastGlideFr.get(4); // B1
+                if (f.t < 0.30f) return eBeastGlideFr.get(7); // B4
+                return eBeastGlideFr.get(2);                  // A3
+            }
+            if (f.state == 2) {
+                return eBeastGlideFr.get((((int) (en.animT * 6f)) % 2 == 0) ? 1 : 5); // A2/B2
+            }
+            if (f.t < 0.10f) return eBeastGlideFr.get(6); // B3
+            if (f.t < 0.20f) return eBeastGlideFr.get(3); // A4
+            return eBeastGlideFr.get(0);                  // A1
         }
         java.util.List<Frame> gPool = en.heavy ? eHeavyGlideFr : eGlideFr;
         if (gPool.size() >= 4) {
@@ -2401,16 +2574,20 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private int enemyGroup(Enemy en) {
         if (en.attacking()) {
-            int base = en.heavy ? 30 : 10;
+            int base = en.beast ? 50 : (en.heavy ? 30 : 10);
             return base + en.atkForm;
         }
-        if (en.floater.state == 0) return en.heavy ? 20 : 0;
-        return (en.heavy ? 21 : 1) + en.floater.state;
+        if (en.floater.state == 0) return en.beast ? 40 : (en.heavy ? 20 : 0);
+        return (en.beast ? 41 : (en.heavy ? 21 : 1)) + en.floater.state;
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
         float bs = en.beast ? 1.3f : 1f;
-        float x = sx(en.x), y = sy(en.y + en.floater.visualY) + FOOT_DROP * zoom;
+        float[] lo = leapOff.get(en);
+        float lx = lo != null ? lo[6] : 0f;
+        float ly = lo != null ? lo[7] : 0f;
+        float ll = lo != null ? lo[8] : 0f;
+        float x = sx(en.x + lx), y = sy(en.y + ly + en.floater.visualY) + FOOT_DROP * zoom - ll * zoom;
         boolean idle = en.floater.state == 0 && !en.attacking() && !en.dead;
         float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
         float sw = 45 * zoom * bs * (1f - 0.045f * br);
@@ -2459,8 +2636,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             rf.right = rf.left + bw * (en.hp / (float)en.maxHp);
             paint.setColor(C_BLOOD); cv.drawRoundRect(rf, 4, 4, paint);
 
-            if (en.heavy) {
-                float mtop = y - ENEMY_H * zoom - 12;
+            if (en.heavy || en.beast) {
+                float mtop = y - ENEMY_H * bs * zoom - 12;
                 float mbw = 90, mbh = 5;
                 rf.set(x - mbw/2, mtop, x + mbw/2, mtop + mbh);
                 paint.setColor(0xCC050508); cv.drawRoundRect(rf, 3, 3, paint);
