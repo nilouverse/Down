@@ -275,8 +275,8 @@ public final class SceneMap {
         int ts = -1, ti = 0, rot = 0, body = 0, front = 0;
         if (q <= 10) {
             int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);   // 0/180 + mirror
-            boolean westLip = q < MIN_Q && q >= MIN_Q - 2 && r >= -7 && r <= 15;
-            if (q < MIN_Q - 2 || r <= -8 || r >= 16) ts = -1;                 // void
+            boolean westLip = q == MIN_Q - 1 && r >= -7 && r <= 15;
+            if (q < MIN_Q - 1 || r <= -8 || r >= 16) ts = -1;                 // void
             else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
             else if (r <= -5) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim
             else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim (over actors)
@@ -349,22 +349,23 @@ public final class SceneMap {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
                 if (!full || bB[i] != 1 || fF[i] == 1) continue;
                 int ti = (h2(q, r, 7) >>> 4) & 15;
-                hexToWorld(q, r + 1, HW);
-                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0f, 0.5f);
-                hexToWorld(q, r + 2, HW);
-                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0.5f, 1f);
+                int dq = q < MIN_Q ? -1 : 0;                     // west wall hangs west of its lip
+                hexToWorld(q + dq, r + 1, HW);
+                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+                hexToWorld(q + dq, r + 2, HW);
+                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
             }
         }
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
     }
 
-    private void wallHex(Canvas c, int ti, float cx, float cy, float s, float fy0, float fy1) {
+    private void wallHex(Canvas c, int ti, float cx, float cy, float s) {
         Shader sh = shaders[5];
         if (sh == null) return;
         int cw = cellW[5], ch = cellH[5];
         mS.reset();
-        mS.postTranslate(-((ti & 3) * cw), -(((ti >> 2) + fy0) * ch));
-        mS.postScale(2f / cw, 1.2f / (ch * (fy1 - fy0)));
+        mS.postTranslate(-((ti & 3) * cw), -((ti >> 2) * ch));
+        mS.postScale(2f / cw, 1.2f / ch);
         mS.postScale(s, s);
         mS.postTranslate(cx, cy - 0.6f * s);
         sh.setLocalMatrix(mS);
@@ -385,10 +386,11 @@ public final class SceneMap {
             hexToWorld(q, r, HW);
             shaderHex(c, 4, tI[i], tR[i], (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
             int ti = (h2(q, r, 7) >>> 4) & 15;
-            hexToWorld(q, r + 1, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0f, 0.5f);
-            hexToWorld(q, r + 2, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0.5f, 1f);
+            int dq = q < MIN_Q ? -1 : 0;
+            hexToWorld(q + dq, r + 1, HW);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+            hexToWorld(q + dq, r + 2, HW);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
         }
     }
 
