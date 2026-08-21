@@ -59,8 +59,8 @@ public final class SceneMap {
         final Context app = ctx.getApplicationContext();
         Thread loader = new Thread(new Runnable() { public void run() {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-            Bitmap a = dec(app, "map/ash", true), ro = dec(app, "map/road", true),
-                    ci = dec(app, "map/city", true), cr = dec(app, "map/crater", true),
+            Bitmap a = flatten(dec(app, "map/ash", true)), ro = flatten(dec(app, "map/road", true)),
+                    ci = flatten(dec(app, "map/city", true)), cr = flatten(dec(app, "map/crater", true)),
                     gl = dec(app, "map/glow", false),
                     pa = key(dec(app, "map/props_a", false)),
                     pb = key(dec(app, "map/props_b", false));
@@ -80,7 +80,7 @@ public final class SceneMap {
                 InputStream in = c.getAssets().open(base + ext[i]);
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 o.inPreferredConfig = opaque ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888;
-                o.inMutable = !opaque;
+                o.inMutable = true;
                 b = BitmapFactory.decodeStream(in, null, o);
                 in.close();
             } catch (Exception e) { b = null; }
@@ -107,6 +107,53 @@ public final class SceneMap {
             r -= sub; if (r < 0) r = 0;
             bl -= sub; if (bl < 0) bl = 0;
             px[i] = (a << 24) | (r << 16) | (g << 8) | bl;
+        }
+        b.setPixels(px, 0, w, 0, 0, w, h);
+        return b;
+    }
+
+    // Load-time vignette flatten: removes each cell's baked lighting gradient so
+    // edges normalize to the cell mean and tiles meet at equal tone (no blocks).
+    private static Bitmap flatten(Bitmap b) {
+        if (b == null) return null;
+        if (!b.isMutable()) { Bitmap m = b.copy(b.getConfig(), true); if (m == null) return b; b = m; }
+        int w = b.getWidth(), h = b.getHeight(), cw = w >> 2, ch = h >> 2;
+        int[] px = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        int strip = Math.max(4, ch >> 5);
+        for (int cy = 0; cy < 4; cy++) for (int cx = 0; cx < 4; cx++) {
+            int x0 = cx * cw, y0 = cy * ch;
+            long sr = 0, sg = 0, sb = 0, n = 0;
+            long tr = 0, tg = 0, tb = 0, tN = 0, br = 0, bg = 0, bb = 0, bN = 0;
+            long lr = 0, lg = 0, lb = 0, lN = 0, rr = 0, rg = 0, rb = 0, rN = 0;
+            for (int y = 0; y < ch; y++) for (int x = 0; x < cw; x++) {
+                int c = px[(y0 + y) * w + x0 + x];
+                int r = (c >> 16) & 255, g = (c >> 8) & 255, bl = c & 255;
+                sr += r; sg += g; sb += bl; n++;
+                if (y < strip) { tr += r; tg += g; tb += bl; tN++; }
+                if (y >= ch - strip) { br += r; bg += g; bb += bl; bN++; }
+                if (x < strip) { lr += r; lg += g; lb += bl; lN++; }
+                if (x >= cw - strip) { rr += r; rg += g; rb += bl; rN++; }
+            }
+            float ar = sr / (float) n, ag = sg / (float) n, ab = sb / (float) n;
+            float tR = tr / (float) tN, tG = tg / (float) tN, tB = tb / (float) tN;
+            float bR = br / (float) bN, bG = bg / (float) bN, bB = bb / (float) bN;
+            float lR = lr / (float) lN, lG = lg / (float) lN, lB = lb / (float) lN;
+            float rR = rr / (float) rN, rG = rg / (float) rN, rB = rb / (float) rN;
+            for (int y = 0; y < ch; y++) {
+                float fy = y / (float) (ch - 1);
+                float vr = tR + (bR - tR) * fy, vg = tG + (bG - tG) * fy, vb = tB + (bB - tB) * fy;
+                for (int x = 0; x < cw; x++) {
+                    float fx = x / (float) (cw - 1);
+                    float hr = lR + (rR - lR) * fx, hg = lG + (rG - lG) * fx, hb = lB + (rB - lB) * fx;
+                    float biasr = (vr + hr) * 0.5f, biasg = (vg + hg) * 0.5f, biasb = (vb + hb) * 0.5f;
+                    if (biasr < 6) biasr = 6; if (biasg < 6) biasg = 6; if (biasb < 6) biasb = 6;
+                    int i = (y0 + y) * w + x0 + x;
+                    int c = px[i], r = (c >> 16) & 255, g = (c >> 8) & 255, bl = c & 255;
+                    r = (int) (r * ar / biasr); g = (int) (g * ag / biasg); bl = (int) (bl * ab / biasb);
+                    px[i] = 0xFF000000 | ((r > 255 ? 255 : r) << 16) | ((g > 255 ? 255 : g) << 8) | (bl > 255 ? 255 : bl);
+                }
+            }
         }
         b.setPixels(px, 0, w, 0, 0, w, h);
         return b;
