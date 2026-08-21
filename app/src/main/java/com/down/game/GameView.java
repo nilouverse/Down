@@ -333,6 +333,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             b.propsAF = Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 2);
             b.propsBF = Sprites.cutSheet(c, "sprites/props_b.png", 4, 4, 2);
             b.propsCF = Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 2);
+            scrubFringe(b.props); scrubFringe(b.props2); scrubFringe(b.propsCity);
+            scrubFringe(b.propsAF); scrubFringe(b.propsBF); scrubFringe(b.propsCF);
             b.menuBg = decodeSampled(c, "art/hero.webp", 1024);
             b.keyBmp = decodeRaw(c, "art/button.webp");
             b.coinBmp = decodeRaw(c, "art/coin.webp");
@@ -1289,6 +1291,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         if (storyMode && story != null && state == STATE_GAME) {
             story.update(dt);
+            if (actors != null) actors.update(dt);
             if (story.quitRequested || story.ended) {
                 story = null; storyMode = false; storyFight = false; state = STATE_MENU; return;
             }
@@ -1698,10 +1701,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             d.t += dt;
             if (d.t > 0.8f) d.active = false;
         }
-        boolean anyMoving = false;
-        for (Player p : party) if (p.isMoving()) { anyMoving = true; break; }
-        if (!anyMoving) for (Enemy en : enemies) if (!en.dead && en.floater.moving) { anyMoving = true; break; }
-        sound.setFootsteps(anyMoving);
+        boolean heroMoving = false;
+        for (Player p : party) if (p.isMoving()) { heroMoving = true; break; }
+        boolean enemyMoving = false;
+        for (Enemy en : enemies) if (!en.dead && en.floater.moving) { enemyMoving = true; break; }
+        sound.setFootstepsLight(heroMoving);
+        sound.setFootstepsHeavy(enemyMoving);
     }
     private void draw() {
         SurfaceHolder h = getHolder();
@@ -2132,6 +2137,31 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private Bitmap safeGet(List<Bitmap> l, int i) {
         return (l == null || l.isEmpty()) ? null : l.get(i % l.size());
+    }
+
+    // Kills the magenta fringe on keyed props without touching character sheets.
+    private static void scrubFringe(List<Bitmap> l) {
+        if (l == null) return;
+        for (int i = 0; i < l.size(); i++) {
+            Bitmap src = l.get(i);
+            if (src == null || src.isRecycled()) continue;
+            Bitmap b = src.copy(Bitmap.Config.ARGB_8888, true);
+            if (b == null) continue;
+            int w = b.getWidth(), h = b.getHeight();
+            int[] px = new int[w * h];
+            b.getPixels(px, 0, w, 0, 0, w, h);
+            for (int p = 0; p < px.length; p++) {
+                int c = px[p];
+                int a = (c >>> 24) & 255;
+                if (a == 0) continue;
+                int r = (c >> 16) & 255, g = (c >> 8) & 255, bl = c & 255;
+                int ex = (r < bl ? r : bl) - g;
+                if (ex > 60) px[p] = 0;
+                else if (ex > 30) px[p] = (c & 0x00FFFFFF) | ((a / 2) << 24);
+            }
+            b.setPixels(px, 0, w, 0, 0, w, h);
+            l.set(i, b);
+        }
     }
 
     private static int h2(int x, int y, int s) {
