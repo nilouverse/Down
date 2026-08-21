@@ -94,6 +94,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     public StoryActors actors;
     private float camLookX, camLookY, camLookT;
 
+    // cinematic director state (script-driven camera / walk / fx)
+    private int camMode = 0; // 0 default follow, 1 follow actor, 2 pan-hold
+    private String camFollowName = null;
+    private float panFromX, panFromY, panToX, panToY, panT, panDur;
+    private float pushT = -1f, pushDur = 1f;
+    private boolean swActive;
+    private float swFromX, swFromY, swToX, swToY, swT, swDur;
+    private String fxActorName = null, fxActorKind = null;
+    private float fxActorT = 0f;
+
     private static final int[][] ATK_SEQ = {
             { 0, 1, 2, 3, 4, 9, 5 },
             { 0, 1, 2, 9, 5 },
@@ -1106,6 +1116,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         enemies.clear();
         for (int i = 0; i < n; i++) spawnStoryEnemy();
         fanDirty = true;
+        scriptCamRelease();
         state = STATE_GAME;
         startPlayerTurn();
     }
@@ -1204,10 +1215,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
         if (storyMode && story != null && story.dialogUp) {
-            if (!camSnap && H > 0) { camX = player.x; camY = player.y - (H * 0.28f) / zoom; camSnap = true; }
-            float kk = 1 - (float) Math.exp(-dt * 8);
-            camX += (player.x - camX) * kk;
-            camY += ((player.y - (H * 0.28f) / zoom) - camY) * kk;
+            if (camMode == 0) {
+                if (!camSnap && H > 0) { camX = player.x; camY = player.y - (H * 0.28f) / zoom; camSnap = true; }
+                float kk = 1 - (float) Math.exp(-dt * 8);
+                camX += (player.x - camX) * kk;
+                camY += ((player.y - (H * 0.28f) / zoom) - camY) * kk;
+            } else {
+                updateDirector(dt);
+            }
             return;
         }
 
@@ -1257,6 +1272,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             camY = player.y - (H * 0.28f) / zoom;
             camSnap = true;
         }
+        updateScriptWalk(dt);
+        updateDirector(dt);
 
         phaseT += dt;
         if (hurtT > 0) hurtT -= dt;
@@ -1265,7 +1282,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Player p : party) p.update(dt);
         if (zoomPunch > 0) zoomPunch = Math.max(0, zoomPunch - dt * 3f);
 
-        if (!panning && !player.isMoving() && (flingX != 0 || flingY != 0)) {
+        if (!panning && !player.isMoving() && camMode == 0 && !swActive && (flingX != 0 || flingY != 0)) {
             camX += flingX * dt;
             camY += flingY * dt;
             float dk = (float) Math.exp(-dt * 3f);
@@ -1294,7 +1311,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 }
             }
         }
-        if (!exploring && H > 0) {
+        if (!exploring && H > 0 && camMode == 0) {
             float k = 1 - (float) Math.exp(-dt * 8);
             float tx = fx, ty = fy - (H * 0.28f) / zoom;
             if (camLookT > 0) {
@@ -2360,6 +2377,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
         drawDecals(cv);
         drawSorted(cv);
+        if (storyMode && actors != null)
+            actors.draw(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, loadT);
         if (storyMode && map != null)
             map.drawFront(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H);
         drawParticles(cv);
@@ -2655,6 +2674,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return true;
         }
         panning = false;
+        // cutscene lock: no gameplay taps while the director is driving
+        if (storyMode && !storyFight && (swActive || camMode != 0)) return true;
 
         if (enemyPhase) return true; // C5: block gameplay taps during enemy phase
 
@@ -2788,6 +2809,131 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     // CONTINUOUS-MAP BRIDGE — invoked by StoryWorld
     // =====================================================================
     public boolean isDialogBlocking() { return story != null && story.dialogUp; }
+
+    // =====================================================================
+    // CINEMATIC DIRECTOR — script-driven camera, walk, fx
+    // =====================================================================
+    public void showTitle(String t) {
+        if (story != null) { story.title = t; story.titleT = 0f; }
+    }
+    public boolean isScriptWalking() { return swActive; }
+    public void scriptWalk(int q, int r, float dur) {
+        SceneMap.hexToWorld(q, r, FW_A);
+        swFromX = player.x; swFromY = player.y;
+        swToX = FW_A[0]; swToY = FW_A[1];
+        swT = 0f; swDur = Math.max(0.1f, dur);
+        swActive = true;
+        player.facing = swToX >= swFromX ? 1 : -1;
+        camMode = 0; camSnap = false;
+    }
+    public void scriptCamPan(float wx, float wy, int ms) {
+        camMode = 2;
+        panFromX = camX; panFromY = camY;
+        panToX = wx; panToY = wy;
+        panT = 0f; panDur = Math.max(0.05f, ms / 1000f);
+    }
+    public void scriptCamPush(int ms) { pushT = 0f; pushDur = Math.max(0.05f, ms / 1000f); }
+    public void scriptCamFollow(String name) { camMode = 1; camFollowName = name; }
+    public void scriptCamRelease() {
+        camMode = 0; camFollowName = null;
+        pushT = -1f; zoomPunch = 0f; camSnap = false;
+    }
+    public void fxPoint(String kind, float wx, float wy) {
+        if ("debris_arc".equals(kind)) {
+            for (int i = 0; i < 16; i++) {
+                for (Particle p : particlePool) {
+                    if (!p.active) {
+                        p.x = wx + (float) (Math.random() * 160 - 80);
+                        p.y = wy - (float) (Math.random() * 60);
+                        p.vx = (float) (Math.random() * 260 - 130);
+                        p.vy = -80 - (float) (Math.random() * 220);
+                        p.grav = 500;
+                        p.life = 0.9f + (float) Math.random() * 0.5f;
+                        p.t = 0;
+                        p.col = (i % 3 == 0) ? C_EMBER : ((i % 3 == 1) ? C_BLOOD : C_BONE_DIM);
+                        p.active = true;
+                        break;
+                    }
+                }
+            }
+        } else {
+            spawnBlast(wx, wy);
+        }
+    }
+    public void fxActor(String name, String kind) {
+        fxActorName = name; fxActorKind = kind; fxActorT = 2.5f;
+    }
+    private void updateScriptWalk(float dt) {
+        if (!swActive) return;
+        swT += dt;
+        float t = Math.min(1f, swT / swDur);
+        float e = t * t * (3f - 2f * t);
+        player.x = swFromX + (swToX - swFromX) * e;
+        player.y = swFromY + (swToY - swFromY) * e;
+        player.targetX = player.x; player.targetY = player.y;
+        if (t >= 1f) swActive = false;
+    }
+    private void updateDirector(float dt) {
+        if (camMode == 2) {
+            if (panT < panDur) {
+                panT += dt;
+                float t = Math.min(1f, panT / panDur);
+                float e = t * t * (3f - 2f * t);
+                camX = panFromX + (panToX - panFromX) * e;
+                camY = panFromY + (panToY - panFromY) * e;
+            }
+        } else if (camMode == 1 && actors != null && camFollowName != null
+                && !StoryWorld.PLAYER_KEY.equals(camFollowName)) {
+            StoryActor a = actors.get(camFollowName);
+            if (a != null && H > 0) {
+                float k = 1 - (float) Math.exp(-dt * 8);
+                camX += (a.x - camX) * k;
+                camY += ((a.y - (H * 0.28f) / zoom) - camY) * k;
+            }
+        }
+        if (pushT >= 0 && pushT < 1e7f) {
+            pushT += dt;
+            float t = Math.min(1f, pushT / pushDur);
+            zoomPunch = 0.35f * (t * t * (3f - 2f * t));
+            if (t >= 1f) pushT = 1e8f; // hold the push until CAM_RELEASE
+        }
+        if (fxActorT > 0) updateFxActor(dt);
+    }
+    private void updateFxActor(float dt) {
+        fxActorT -= dt;
+        float ax, ay;
+        if (StoryWorld.PLAYER_KEY.equals(fxActorName)) { ax = player.x; ay = player.y; }
+        else if (actors != null) {
+            StoryActor a = actors.get(fxActorName);
+            if (a == null) { fxActorT = 0f; return; }
+            ax = a.x; ay = a.y;
+        } else return;
+        boolean crack = fxActorKind != null && fxActorKind.indexOf("crackle") >= 0;
+        for (int i = 0; i < 2; i++) {
+            for (Particle p : particlePool) {
+                if (!p.active) {
+                    p.x = ax + (float) (Math.random() * 40 - 20);
+                    p.y = ay - 90 - (float) (Math.random() * 30);
+                    if (crack) {
+                        p.vx = (float) (Math.random() * 30 - 15);
+                        p.vy = -40 - (float) (Math.random() * 60);
+                        p.grav = -20;
+                        p.life = 0.35f + (float) Math.random() * 0.25f;
+                        p.col = (i == 0) ? C_VIOLET : C_MAGENTA;
+                    } else {
+                        p.vx = (float) (Math.random() * 16 - 8);
+                        p.vy = 30 + (float) (Math.random() * 50);
+                        p.grav = 300;
+                        p.life = 0.5f + (float) Math.random() * 0.3f;
+                        p.col = C_BLOOD;
+                    }
+                    p.t = 0;
+                    p.active = true;
+                    break;
+                }
+            }
+        }
+    }
     public void showDialog(String speaker, String text) {
         if (story == null) return;
         story.speaker = speaker; story.text = text;
