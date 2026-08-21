@@ -1294,6 +1294,20 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         updateEmbers(dt);
         if (state == STATE_MENU || state == STATE_SELECT || state == STATE_CHAPTER) return;
 
+        // hard guard: a non-finite camera/zoom/player makes every world draw a no-op.
+        if (!Float.isFinite(player.x) || !Float.isFinite(player.y)) {
+            worldToHex(640, 640, IH_A);
+            hexToWorld(IH_A[0], IH_A[1], FW_A);
+            player.x = player.targetX = FW_A[0]; player.y = player.targetY = FW_A[1];
+            swActive = false;
+        }
+        if (!Float.isFinite(camX) || !Float.isFinite(camY) || !Float.isFinite(zoom)
+                || !Float.isFinite(zoomPunch) || (zoom + zoomPunch) <= 0.01f) {
+            zoom = 1.25f; zoomPunch = 0f; pushT = -1f;
+            camX = player.x; camY = player.y - (H * 0.28f) / zoom;
+            camSnap = true; exploring = false; flingX = 0; flingY = 0;
+        }
+
         if (storyMode && story != null && state == STATE_GAME) {
             story.update(dt);
             if (actors != null) {
