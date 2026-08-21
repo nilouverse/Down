@@ -18,8 +18,9 @@ import java.io.InputStream;
 /**
  * Story-map compositor, hex-cut edition. Ground = squashed-hexagon cuts sampled
  * from square atlas cells via BitmapShader local matrices (AA edges, 1 call/hex).
- * Passes: 1 hex terrain -> 1b macro hex overlay -> 2 flat decals -> 3 Y-sorted
- * upright props -> 4 additive glow. draw() allocates ZERO objects.
+ * ASHEN only for now: meadow = all 16 ash cells, random 60-degree spins + mirror;
+ * cliff rims = cliff sheet; void = flat fill. No props/decals/glow yet.
+ * draw() allocates ZERO objects.
  */
 public final class SceneMap {
     public static final float HEX = 96f, SQUASH = 0.6f, BAKE = 2f;
@@ -274,39 +275,22 @@ public final class SceneMap {
         h ^= h >>> 15; h *= 0x85EBCA6B; h ^= h >>> 13;
         return h & 0x7FFFFFFF;
     }
-    private static float vn(float x, float y, int seed) {
-        int x0 = (int) Math.floor(x), y0 = (int) Math.floor(y);
-        float fx = x - x0, fy = y - y0;
-        fx = fx * fx * (3f - 2f * fx); fy = fy * fy * (3f - 2f * fy);
-        int a = h2(x0, y0, seed) & 1023, b = h2(x0 + 1, y0, seed) & 1023;
-        int c = h2(x0, y0 + 1, seed) & 1023, d = h2(x0 + 1, y0 + 1, seed) & 1023;
-        float t = a + (b - a) * fx, u = c + (d - c) * fx;
-        return (t + (u - t) * fy) * (1f / 1023f);
-    }
 
-    // ================= HEX COMPOSER (ASHEN for now) =================
+    // ================= HEX COMPOSER (ASHEN only, terrain only) =================
     private void computeHex(int i, int q, int r) {
-        int h = h2(q, r, 7), hB = h2(q, r, 91);
-        int ts = -1, ti = 0, rot = 0, di = -1, pr = -1, gl = -1;
-        if (q < 10.5f) {
-            if (q < MIN_Q || r < MIN_R || r > MAX_R || r < -7.7f || r > 15.2f) ts = -1;      // void
-            else if (r < -4.5f || r > 12.5f) {                                  // cliff rims
+        int h = h2(q, r, 7);
+        int ts = -1, ti = 0, rot = 0;
+        if (q <= 10) {
+            if (q < MIN_Q || r < MIN_R || r > MAX_R || r < -7.7f || r > 15.2f) ts = -1;   // void
+            else if (r < -4.5f || r > 12.5f) {                                // cliff rims
                 ts = 4; ti = (h >>> 4) & 15;
-                rot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);         // 0/180 + mirror
-            } else {                                                            // meadow
-                ts = 0; ti = (h >>> 4) & 15;
-                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);         // 6 hex spins + mirror
-                if ((h >>> 4) % 1000 < 6) gl = 6;
-                if (q > -5 && q < 12 && r > -3 && r < 2 && vn(q * 0.3f, r * 0.3f, 57) > 0.6f
-                        && (h >>> 4) % 100 < 9) gl = ((h >>> 9) & 1) == 0 ? 0 : 10;
-                if ((h >>> 5) % 100 < 6) di = 6 + ((h >>> 17) & 1);
-                if (quality && (hB >>> 20) % 100 < 2) di = 8;
-                if ((hB >>> 16) % 1000 < 7) pr = 18 + ((hB >>> 20) & 1);
-                if ((hB >>> 22) % 1000 < 4) pr = 20;
-                if ((h >>> 20) % 1000 < 5) pr = 15;
+                rot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);       // 0/180 + mirror
+            } else {                                                          // walkable meadow
+                ts = 0; ti = (h >>> 4) & 15;                                  // all 16 cells
+                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);       // 6 hex spins + mirror
             }
         }
-        tS[i] = ts; tI[i] = ti; tR[i] = rot; dI[i] = di; pI[i] = pr; gI[i] = gl;
+        tS[i] = ts; tI[i] = ti; tR[i] = rot; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
 
     private void hexPath(float cx, float cy, float s) {
@@ -318,18 +302,19 @@ public final class SceneMap {
         hexP.close();
     }
 
+    // Maps the chosen square cell into the hex cut: texture->screen local matrix.
     private void shaderHex(Canvas c, int sheet, int ti, int rot, float cx, float cy, float s) {
         Shader sh = shaders[sheet];
         if (sh == null) return;
         int cw = cellW[sheet], ch = cellH[sheet];
-        int ox = (ti & 3) * cw, oy = (ti >> 2) * ch;
+        float ox = ((ti & 3) + 0.5f) * cw, oy = ((ti >> 2) + 0.5f) * ch;
         mS.reset();
-        mS.postTranslate(cx, cy);
-        mS.postScale(s, s);
+        mS.postTranslate(-ox, -oy);
+        mS.postScale(2f / cw, 2f / ch);
         if ((rot & 8) != 0) mS.postScale(-1f, 1f);
         if ((rot & 7) != 0) mS.postRotate(-((rot & 7) * 60f));
-        mS.postScale(2f / cw, 2f / ch);
-        mS.postTranslate(-(ox + cw * 0.5f), -(oy + ch * 0.5f));
+        mS.postScale(s, s);
+        mS.postTranslate(cx, cy);
         sh.setLocalMatrix(mS);
         tp.setShader(sh);
         hexPath(cx, cy, s);
@@ -363,99 +348,6 @@ public final class SceneMap {
                 continue;
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
-        }
-        if (!full) { if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh); return; }
-
-        // PASS 1b — macro overlay: big semi-transparent hexes on even parity, crossing seams
-        if (shaders[0] != null) {
-            pp.setAlpha(76);
-            for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++) {
-                if (((q + r) & 1) != 0 || q < MIN_Q || q > 10 || r < -4 || r > 12) continue;
-                int hh = h2(q, r, 131);
-                hexToWorld(q, r, HW);
-                float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
-                int cw = cellW[0], ch = cellH[0];
-                int ox = ((hh >>> 4) & 15);
-                int oxx = (ox & 3) * cw, oyy = (ox >> 2) * ch;
-                int rot = (int) ((hh >>> 10) % 6) | ((hh >>> 13) & 1) << 3;
-                mS.reset();
-                mS.postTranslate(cx, cy);
-                mS.postScale(s * 2f, s * 2f);
-                if ((rot & 8) != 0) mS.postScale(-1f, 1f);
-                if ((rot & 7) != 0) mS.postRotate(-((rot & 7) * 60f));
-                mS.postScale(2f / cw, 2f / ch);
-                mS.postTranslate(-(oxx + cw * 0.5f), -(oyy + ch * 0.5f));
-                shaders[0].setLocalMatrix(mS);
-                pp.setShader(shaders[0]);
-                hexPath(cx, cy, s * 2f);
-                c.drawPath(hexP, pp);
-                pp.setShader(null);
-            }
-            pp.setAlpha(255);
-        }
-
-        // PASS 2 — flat decals
-        if (pA != null) {
-            for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
-                int d = dI[i];
-                if (d < 0) continue;
-                Bitmap b = pA; int ci = d;
-                if (d >= 16) { if (pB == null) continue; b = pB; ci = d == 16 ? 9 : d == 17 ? 13 : 14; }
-                int h = h2(q, r, 7);
-                hexToWorld(q, r, HW);
-                float cx = (HW[0] - camX) * zoom + vw * 0.5f + (((h >>> 8) & 255) / 255f - 0.5f) * TS * 0.4f * zoom;
-                float cy = (HW[1] - camY) * zoom + vh * 0.5f + (((h >>> 16) & 255) / 255f - 0.5f) * TS * 0.4f * zoom;
-                float ds = D_S[d] * TS * zoom;
-                pp.setAlpha(D_A[d]);
-                int cw = b.getWidth() >> 2, ch = b.getHeight() >> 2;
-                srcR.set((ci & 3) * cw, (ci >> 2) * ch, ((ci & 3) + 1) * cw, ((ci >> 2) + 1) * ch);
-                dstR.set((int) (cx - ds * 0.5f), (int) (cy - ds * 0.5f), (int) (cx + ds * 0.5f), (int) (cy + ds * 0.5f));
-                c.drawBitmap(b, srcR, dstR, pp);
-            }
-            pp.setAlpha(255);
-        }
-
-        // PASS 3 — upright props, bottom-anchored, Y-sorted
-        int pc = 0;
-        for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
-            if (pI[i] < 0 || pc >= PMAX) continue;
-            int h = h2(q, r, 7);
-            hexToWorld(q, r, HW);
-            pBX[pc] = (HW[0] + (((h >>> 8) & 255) / 255f - 0.5f) * TS * 0.45f - camX) * zoom + vw * 0.5f;
-            pBY[pc] = (HW[1] + HEX * (0.2f + ((h >>> 16) & 255) / 255f * 0.4f) - camY) * zoom + vh * 0.5f;
-            pBI[pc] = pI[i];
-            pc++;
-        }
-        for (int a = 1; a < pc; a++) {
-            float ky = pBY[a], kx = pBX[a]; int ki = pBI[a], j = a - 1;
-            while (j >= 0 && pBY[j] > ky) { pBY[j + 1] = pBY[j]; pBX[j + 1] = pBX[j]; pBI[j + 1] = pBI[j]; j--; }
-            pBY[j + 1] = ky; pBX[j + 1] = kx; pBI[j + 1] = ki;
-        }
-        for (int a = 0; a < pc; a++) {
-            int p = pBI[a];
-            Bitmap b = p < 16 ? pB : pA;
-            if (b == null) continue;
-            int ci = p < 16 ? p : P_A[p - 16];
-            int cw = b.getWidth() >> 2, ch = b.getHeight() >> 2;
-            srcR.set((ci & 3) * cw, (ci >> 2) * ch, ((ci & 3) + 1) * cw, ((ci >> 2) + 1) * ch);
-            float ps = P_S[p] * TS * zoom;
-            dstR.set((int) (pBX[a] - ps * 0.5f), (int) (pBY[a] - ps), (int) (pBX[a] + ps * 0.5f), (int) pBY[a]);
-            c.drawBitmap(b, srcR, dstR, pp);
-        }
-
-        // PASS 4 — additive glow
-        if (gGlow != null) {
-            int gw = gGlow.getWidth() >> 2, gh = gGlow.getHeight() >> 2;
-            for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
-                int g = gI[i];
-                if (g < 0) continue;
-                hexToWorld(q, r, HW);
-                float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
-                float gs = G_S[g] * TS * zoom;
-                srcR.set((g & 3) * gw, (g >> 2) * gh, ((g & 3) + 1) * gw, ((g >> 2) + 1) * gh);
-                dstR.set((int) (cx - gs * 0.5f), (int) (cy - gs * 0.5f), (int) (cx + gs * 0.5f), (int) (cy + gs * 0.5f));
-                c.drawBitmap(gGlow, srcR, dstR, gp);
-            }
         }
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
     }
