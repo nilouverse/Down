@@ -188,23 +188,12 @@ public final class SceneMap {
 
         if (qf < 10.5f) {                                   // ---- ASHEN FIELDS ----
             ts = 0;
-            if (rf < -7.7f) ti = 15;                        // a16 void
-            else if (rf < -4.5f) {                          // a11/a12 cliff strata band
-                ti = 10 + ((h >>> 3) & 1);
-                if ((h >>> 10) % 100 < 6) pr = 16 + ((h >>> 14) & 1);   // pa1/pa2 boulders
-                if ((h >>> 13) % 1000 < 3) gl = 13;                     // g14 blue wisp
-            } else {                                        // walkable meadow
-                ti = 12;                                    // a13 scorched, one material
+            if (qf < MIN_Q || rf < MIN_R || rf > MAX_R) ti = 15;        // out-of-bounds void
+            else if (rf < -7.7f || rf > 15.2f) ti = 15;                 // void rims (N + S)
+            else if (rf < -4.5f || rf > 12.5f) ti = 10 + ((h >>> 3) & 1); // cliff strata rims
+            else {                                        // walkable meadow
+                ti = 5;                                     // a6 pebbled ash, one material
                 rot = (h >>> 12) & 3;                       // 0/90/180/270
-                if ((h >>> 4) % 1000 < 6) gl = 6;                       // g7 stray sparks
-                if (qf > -5f && qf < 12f && rf > -3f && rf < 2f
-                        && n2 > 0.6f && (h >>> 4) % 100 < 9)
-                    gl = ((h >>> 9) & 1) == 0 ? 0 : 10;                 // g1/g11 ember veins
-                if ((h >>> 5) % 100 < 6) di = 6 + ((h >>> 17) & 1);     // pa7/pa8 patches
-                if (quality && (hB >>> 20) % 100 < 2) di = 8;           // pa9 hairline crack
-                if ((hB >>> 16) % 1000 < 7) pr = 18 + ((hB >>> 20) & 1); // pa5/pa6 bone piles
-                if ((hB >>> 22) % 1000 < 4) pr = 20;                    // pa13 dead shrub
-                if ((h >>> 20) % 1000 < 5) pr = 15;                     // pb16 ash mound
             }
         }
         // other regions: ts stays -1 -> flat zone color until composed.
