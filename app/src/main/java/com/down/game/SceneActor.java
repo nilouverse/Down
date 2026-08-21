@@ -1,6 +1,6 @@
 package com.down.game;
 
-public class StoryActor {
+public class SceneActor {
     public String name, kind, type, tag, alias;
     public boolean hidden;
     public int q, r;
