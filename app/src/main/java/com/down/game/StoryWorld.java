@@ -51,6 +51,11 @@ public final class StoryWorld {
     private final int[][] waveSpawnHexes = { {64,1},{68,1},{70,4},{68,7},{64,7},{63,4} };
     private final int[][] fodderHexes   = { {61,2},{61,6},{63,1},{63,7},{66,0},{68,8} };
 
+    // KILLNOTE: flash a note once on the n-th kill of an encounter.
+    private int killNoteN = -1;
+    private String killNoteTxt = null;
+    private int storyKills = 0;
+
     private final Context ctx;
     private final Sound snd;
     public SceneMap map;
@@ -180,8 +185,15 @@ public final class StoryWorld {
             sayLine(cmd.substring(4));
         } else if (cmd.startsWith("SPAWN ")) {
             String[] p = cmd.split(" ");
-            if (actors != null) actors.add(p[1], pi(p[2]), pi(p[3]),
-                    p.length > 4 ? p[4] : null, p.length > 5 ? p[5] : null);
+            if (actors != null && p.length > 3) {
+                String tag = null, alias = null;
+                if (p.length > 4) {
+                    if ("npc".equals(p[4]) || "ambient".equals(p[4])) tag = p[4];
+                    else alias = p[4];
+                }
+                if (p.length > 5) alias = p[5];
+                actors.add(p[1], pi(p[2]), pi(p[3]), tag, alias);
+            }
         } else if (cmd.startsWith("DESPAWN ")) {
             if (actors != null) actors.despawn(cmd.split(" ")[1]);
         } else if (cmd.startsWith("WALK ")) {
@@ -260,6 +272,11 @@ public final class StoryWorld {
                 pr.flat = cmd.startsWith("SCAR");
                 placedProps.add(pr);
             }
+        } else if (cmd.startsWith("KILLNOTE ")) {
+            String[] p = cmd.split(" ", 3);
+            killNoteN = pi(p[1]);
+            killNoteTxt = p.length > 2 ? p[2] : "";
+            storyKills = 0;
         } else if (cmd.startsWith("SFX ") || cmd.startsWith("AMBIENT ")) {
             // Sound law: never break the scene on missing audio.
             try { snd.play(cmd.split(" ")[1]); } catch (Exception e) {}
@@ -294,10 +311,11 @@ public final class StoryWorld {
         }
     }
 
-    // Generic speaker parse: first token = speaker key. No names live here.
+    // Generic speaker parse: first token = speaker key, underscores = spaces.
     private void sayLine(String rest) {
         int sp = rest.indexOf(' ');
         String speaker = sp < 0 ? rest : rest.substring(0, sp);
+        speaker = speaker.replace('_', ' ');
         String text = sp < 0 ? "" : rest.substring(sp + 1);
         if (gv != null) gv.showDialog(speaker, text);
     }
@@ -310,6 +328,7 @@ public final class StoryWorld {
 
     private void startEncounter() {
         encounterLive = true;
+        storyKills = 0;
         if (actors != null && gv != null) {
             for (int i = 0; i < actors.size(); i++) {
                 StoryActor a = actors.get(i);
@@ -322,6 +341,11 @@ public final class StoryWorld {
     }
 
     public void onEnemyDeath() {
+        storyKills++;
+        if (killNoteTxt != null && storyKills == killNoteN) {
+            if (gv != null) gv.flashNote(killNoteTxt);
+            killNoteTxt = null;
+        }
         if (reinforceKills >= 0 && reinforceKills < reinforceTarget) {
             reinforceKills++;
             if (gv.enemiesAlive() < 7) {
