@@ -25,6 +25,7 @@ public class Sound {
 
     private final HashMap<String, ArrayList<String>> sfxPaths = new HashMap<>();
     private final HashMap<String, ArrayList<String>> voicePaths = new HashMap<>();
+    private final HashMap<String, ArrayList<String>> ambientPaths = new HashMap<>();
 
     private final HashMap<String, ArrayList<Integer>> sfxLoaded = new HashMap<>();
     private final HashMap<Integer, String> loadIdToKey = new HashMap<>();
@@ -37,6 +38,15 @@ public class Sound {
     private final Queue<String> voiceQueue = new LinkedList<>();
     private String currentVoiceKey = null;
     private volatile boolean voicePreparing = false;
+
+    // Ambient bed layer — independent of voice and SFX. Silent-fail on missing assets.
+    private MediaPlayer ambientPlayer;
+    private String ambientKey = null;
+    private float ambientTargetVol = 0.75f;
+    private float ambientCurVol = 0f;
+    private Thread ambientFadeThread = null;
+    private volatile boolean ambientFadeStop = false;
+    private volatile boolean ambientPaused = false;
 
     private Context context;
     private SoundPool pool;
@@ -82,6 +92,17 @@ public class Sound {
                     if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
                     String base = f.substring(0, f.lastIndexOf('.'));
                     addPath(voicePaths, baseKey(base), "sounds/" + hero + "/" + f);
+                }
+            }
+            // Ambient folder: sounds/ambient/ — pure loops for scene beds.
+            String[] amb = context.getAssets().list("sounds/ambient");
+            if (amb != null) {
+                for (String f : amb) {
+                    if (f == null) continue;
+                    String low = f.toLowerCase(Locale.US);
+                    if (!low.endsWith(".ogg") && !low.endsWith(".wav")) continue;
+                    String base = f.substring(0, f.lastIndexOf('.'));
+                    addPath(ambientPaths, baseKey(base), "sounds/ambient/" + f);
                 }
             }
         } catch (Exception ignored) {}
@@ -173,12 +194,13 @@ public class Sound {
     public void play(String name) {
         if (name == null || context == null) return;
         String key = baseKey(name.toLowerCase(Locale.US));
-        if (voicePaths.containsKey(key)) playVoice(key);
-        else playSfx(key);
+        // Route: ambient keys go to the ambient bed layer, voice keys to voice, else SFX.
+        if (ambientPaths.containsKey(key)) { setAmbient(key); return; }
+        if (voicePaths.containsKey(key)) { playVoice(key); return; }
+        playSfx(key);
     }
 
     // Looping footsteps: plays while any unit moves, stops when idle.
-    // baseKey() strips trailing digits, so footsteps_running2.ogg etc. join the same pool.
     private int footStream = 0;
     public void setFootsteps(boolean on) {
         SoundPool p = pool;
@@ -270,12 +292,119 @@ public class Sound {
         }
     }
 
+    // =====================================================================
+    // AMBIENT BED LAYER — crossfades, loops, silent-fail on missing assets
+    // =====================================================================
+    public void setAmbient(String key) {
+        if (context == null) return;
+        if (key == null || key.isEmpty()) { stopAmbient(); return; }
+        if (key.equals(ambientKey) && ambientPlayer != null) return;
+
+        ArrayList<String> paths = ambientPaths.get(key);
+        if (paths == null || paths.isEmpty()) {
+            // Sound law: missing ambient must never break the scene.
+            stopAmbient();
+            return;
+        }
+        String path = paths.get(rnd.nextInt(paths.size()));
+
+        final MediaPlayer old = ambientPlayer;
+        final String oldKey = ambientKey;
+        ambientKey = key;
+
+        final MediaPlayer np = new MediaPlayer();
+        ambientPlayer = np;
+        np.setLooping(true);
+        np.setOnErrorListener((mp, w, x) -> {
+            if (mp == ambientPlayer) ambientKey = null;
+            try { mp.release(); } catch (Exception ignored) {}
+            return true;
+        });
+        np.setOnPreparedListener(mp -> {
+            mp.setVolume(0f, 0f);
+            try { mp.start(); } catch (Exception ignored) {}
+        });
+
+        try {
+            AssetFileDescriptor afd = context.getAssets().openFd(path);
+            np.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            afd.close();
+            np.prepareAsync();
+        } catch (Exception e) {
+            if (np == ambientPlayer) ambientKey = null;
+            try { np.release(); } catch (Exception ignored) {}
+            return;
+        }
+
+        // Crossfade: old -> 0, new -> target, over ~0.9s on a worker thread.
+        ambientFadeStop = true;
+        Thread prev = ambientFadeThread;
+        if (prev != null) {
+            try { prev.join(60); } catch (InterruptedException ignored) {}
+        }
+        ambientFadeStop = false;
+        ambientCurVol = 0f;
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                final long start = System.currentTimeMillis();
+                final long dur = 900;
+                while (!ambientFadeStop) {
+                    long e = System.currentTimeMillis() - start;
+                    float k = e / (float) dur; if (k > 1f) k = 1f;
+                    float inV = ambientTargetVol * k;
+                    float outV = ambientTargetVol * (1f - k);
+                    try { if (np.isPlaying()) np.setVolume(inV, inV); } catch (Exception ignored) {}
+                    try { if (old != null && old.isPlaying()) old.setVolume(outV, outV); } catch (Exception ignored) {}
+                    if (k >= 1f) break;
+                    try { Thread.sleep(30); } catch (InterruptedException ignored) {}
+                }
+                if (old != null) {
+                    try { old.stop(); } catch (Exception ignored) {}
+                    try { old.release(); } catch (Exception ignored) {}
+                }
+            }
+        }, "snd-ambient-fade");
+        t.setDaemon(true);
+        t.start();
+        ambientFadeThread = t;
+    }
+
+    public void stopAmbient() {
+        ambientKey = null;
+        ambientFadeStop = true;
+        MediaPlayer p = ambientPlayer;
+        ambientPlayer = null;
+        if (p != null) {
+            try { p.stop(); } catch (Exception ignored) {}
+            try { p.release(); } catch (Exception ignored) {}
+        }
+    }
+
+    public void pauseAmbient() {
+        ambientPaused = true;
+        MediaPlayer p = ambientPlayer;
+        if (p != null) { try { p.pause(); } catch (Exception ignored) {} }
+    }
+
+    public void resumeAmbient() {
+        if (!ambientPaused) return;
+        ambientPaused = false;
+        MediaPlayer p = ambientPlayer;
+        if (p != null) { try { p.start(); } catch (Exception ignored) {} }
+    }
+
+    public void setAmbientVolume(float v) {
+        if (v < 0f) v = 0f; if (v > 1f) v = 1f;
+        ambientTargetVol = v;
+    }
+
     public void stopAll() {
         SoundPool p = pool;
         if (p != null) p.autoPause();
         if (voicePlayer != null && voicePlayer.isPlaying()) {
             try { voicePlayer.pause(); } catch (Exception ignored) {}
         }
+        pauseAmbient();
     }
 
     public void resumeAll() {
@@ -284,6 +413,7 @@ public class Sound {
         if (voicePlayer != null && !voicePlayer.isPlaying() && currentVoiceKey != null) {
             try { voicePlayer.start(); } catch (Exception ignored) {}
         }
+        resumeAmbient();
     }
 
     public void destroy() {
@@ -296,6 +426,7 @@ public class Sound {
             try { voicePlayer.stop(); voicePlayer.release(); } catch (Exception ignored) {}
             voicePlayer = null;
         }
+        stopAmbient();
         synchronized (lock) {
             voiceQueue.clear();
             currentVoiceKey = null;
