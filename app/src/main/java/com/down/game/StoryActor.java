@@ -1,7 +1,7 @@
 package com.down.game;
 
 public class StoryActor {
-    public String name, kind, type;
+    public String name, kind, type, tag, alias;
     public boolean hidden;
     public int q, r;
     public float x, y;
@@ -14,19 +14,19 @@ public class StoryActor {
 
     private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
 
-    public StoryActor(String name, String kind, float x, float y, boolean hidden) {
-        this.name = name; 
-        this.kind = kind; 
-        this.type = kind; // Bridge for StoryWorld
-        this.x = x; 
+    public StoryActor(String name, String kind, String type, String tag, float x, float y, boolean hidden) {
+        this.name = name;
+        this.kind = kind;
+        this.type = type;
+        this.tag = tag;
+        this.x = x;
         this.y = y;
         this.hidden = hidden;
         this.walking = false;
     }
 
-    public boolean isEnemy() {
-        return "enemy".equals(kind);
-    }
+    public boolean isEnemy() { return "enemy".equals(kind); }
+    public boolean isWalking() { return walking; }
 
     public void setHex(int q, int r) {
         this.q = q; this.r = r;
