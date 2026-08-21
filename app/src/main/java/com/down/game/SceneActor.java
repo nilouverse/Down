@@ -14,7 +14,7 @@ public class SceneActor {
 
     private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
 
-    public StoryActor(String name, String kind, String type, String tag, float x, float y, boolean hidden) {
+    public SceneActor(String name, String kind, String type, String tag, float x, float y, boolean hidden) {
         this.name = name;
         this.kind = kind;
         this.type = type;
