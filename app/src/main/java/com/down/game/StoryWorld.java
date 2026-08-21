@@ -14,6 +14,9 @@ public final class StoryWorld {
         return inst;
     }
 
+    // Engine key for the playable hero slot. A stable token, not a display name.
+    public static final String PLAYER_KEY = "nilou";
+
     private static final int MAX_ZONES = 32;
     private final String[] zoneName = new String[MAX_ZONES];
     private final int[] zoneQ = new int[MAX_ZONES];
@@ -27,6 +30,8 @@ public final class StoryWorld {
 
     private final List<String> evQueue = new ArrayList<>(64);
     private boolean evActive = false;
+    private float waitT = 0;
+    private String waitWalk = null;
 
     private final HashMap<String, Boolean> flags = new HashMap<>(24);
 
@@ -50,10 +55,11 @@ public final class StoryWorld {
 
     public final float[] pt = new float[2];
 
-    private static final String[] SPEAKERS = {
-            "Wounded Soldier", "Thornborn Scout", "Carrion Infantry Leader",
-            "NilouZila", "Velkarya"
-    };
+    // Stored render-state. The view layer reads these; missing art = silent.
+    public String skyKey = "";
+    public boolean moltenOn, towersOn, hordeOn, flyersOn;
+    public boolean scatterSet;
+    public int scatterQ, scatterR, scatterRad, scatterN;
 
     private StoryWorld(Context ctx, Sound snd) {
         this.ctx = ctx.getApplicationContext();
@@ -68,8 +74,8 @@ public final class StoryWorld {
     private void parse(String file) {
         try {
             BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/" + file)));
-            String line; String curZone = null;
-            List<String> sink = null;
+            String line; String sink = null;
+            List<String> sinkList = null;
             while ((line = r.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
@@ -83,7 +89,7 @@ public final class StoryWorld {
                     zoneR2[i] = rad * rad;
                     zoneState[i] = 0;
                     zoneScript[i] = new ArrayList<>(24);
-                    curZone = p[1]; sink = zoneScript[i];
+                    sinkList = zoneScript[i];
                 } else if (line.startsWith("GATE ")) {
                     String[] p = line.split(" ");
                     int idx = findZone(p[1]);
@@ -94,9 +100,9 @@ public final class StoryWorld {
                     if (idx >= 0) zoneWait[idx] = p[2];
                 } else if (line.startsWith("ON_ENTER ")) {
                     int idx = findZone(line.split(" ")[1]);
-                    sink = idx >= 0 ? zoneScript[idx] : null;
-                } else if (sink != null) {
-                    sink.add(line);
+                    sinkList = idx >= 0 ? zoneScript[idx] : null;
+                } else if (sinkList != null) {
+                    sinkList.add(line);
                 }
             }
             r.close();
@@ -134,6 +140,14 @@ public final class StoryWorld {
         if (victory || !evActive) return;
         if (encounterLive) return;
         if (gv != null && gv.isDialogBlocking()) return;
+        if (waitT > 0) { waitT -= 1 / 60f; return; }
+        if (waitWalk != null) {
+            boolean w = PLAYER_KEY.equals(waitWalk)
+                    ? (gv != null && gv.isScriptWalking())
+                    : (actors != null && actors.isWalking(waitWalk));
+            if (w) return;
+            waitWalk = null;
+        }
         if (evQueue.isEmpty()) {
             evActive = false;
             rescanCurrentHex();
@@ -142,16 +156,98 @@ public final class StoryWorld {
         exec(evQueue.remove(0));
     }
 
+    private static int pi(String s) {
+        try { return Integer.parseInt(s); } catch (Exception e) { return 0; }
+    }
+    private static float pf(String s) {
+        try { return Float.parseFloat(s); } catch (Exception e) { return 0.8f; }
+    }
+    private static boolean isInt(String s) {
+        try { Integer.parseInt(s); return true; } catch (Exception e) { return false; }
+    }
+
     private void exec(String cmd) {
         if (cmd.startsWith("SAY ")) {
             sayLine(cmd.substring(4));
         } else if (cmd.startsWith("SPAWN ")) {
             String[] p = cmd.split(" ");
-            actors.spawn(p[1], Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+            if (actors != null) actors.add(p[1], pi(p[2]), pi(p[3]),
+                    p.length > 4 ? p[4] : null, p.length > 5 ? p[5] : null);
         } else if (cmd.startsWith("DESPAWN ")) {
-            actors.despawn(cmd.split(" ")[1]);
+            if (actors != null) actors.despawn(cmd.split(" ")[1]);
+        } else if (cmd.startsWith("WALK ")) {
+            String[] p = cmd.split(" ");
+            float dur = p.length > 4 ? pf(p[4]) : 0.8f;
+            if (PLAYER_KEY.equals(p[1])) {
+                if (gv != null) gv.scriptWalk(pi(p[2]), pi(p[3]), dur);
+                waitWalk = PLAYER_KEY;
+            } else if (actors != null) {
+                actors.walkTo(p[1], pi(p[2]), pi(p[3]), dur);
+            }
+        } else if (cmd.startsWith("EXIT ")) {
+            String[] p = cmd.split(" ");
+            if (actors != null) actors.exitTo(p[1], pi(p[2]), pi(p[3]));
+        } else if (cmd.startsWith("FACE ")) {
+            String[] p = cmd.split(" ");
+            if (actors != null) actors.setFacing(p[1], p.length > 2 && "left".equals(p[2]) ? -1f : 1f);
+        } else if (cmd.startsWith("WAIT_WALK ")) {
+            waitWalk = cmd.split(" ")[1];
+        } else if (cmd.startsWith("WAIT ")) {
+            waitT = pi(cmd.split(" ")[1]) / 1000f;
+        } else if (cmd.startsWith("TITLE ")) {
+            if (gv != null) gv.showTitle(cmd.substring(6));
+        } else if (cmd.startsWith("TELEPORT ")) {
+            String[] p = cmd.split(" ");
+            SceneMap.hexToWorld(pi(p[1]), pi(p[2]), pt);
+            if (gv != null) gv.shTeleport(pt[0], pt[1]);
+        } else if (cmd.startsWith("CAM_PAN ")) {
+            String[] p = cmd.split(" ");
+            SceneMap.hexToWorld(pi(p[1]), pi(p[2]), pt);
+            if (gv != null) gv.scriptCamPan(pt[0], pt[1], p.length > 3 ? pi(p[3]) : 1500);
+        } else if (cmd.startsWith("CAM_PUSH ")) {
+            String[] p = cmd.split(" ");
+            if (gv != null) gv.scriptCamPush(p.length > 2 ? pi(p[2]) : 700);
+        } else if (cmd.startsWith("CAM_FOLLOW ")) {
+            if (gv != null) gv.scriptCamFollow(cmd.split(" ")[1]);
+        } else if (cmd.startsWith("CAM_RELEASE")) {
+            if (gv != null) gv.scriptCamRelease();
+        } else if (cmd.startsWith("CAM_LOOK ")) {
+            String[] p = cmd.split(" ");
+            if (gv != null) gv.scriptCamLook(pi(p[1]), pi(p[2]),
+                    p.length > 3 ? Integer.parseInt(p[3]) : 3000);
+        } else if (cmd.startsWith("SKY ")) {
+            skyKey = cmd.split(" ")[1];
+        } else if (cmd.startsWith("LAYER ")) {
+            String[] p = cmd.split(" ");
+            if (p.length > 2 && "molten".equals(p[1])) moltenOn = "on".equals(p[2]);
+        } else if (cmd.startsWith("BACKDROP ")) {
+            String[] p = cmd.split(" ");
+            if (p.length > 2 && "towers_burning".equals(p[1])) towersOn = "on".equals(p[2]);
+        } else if (cmd.startsWith("HORDE ")) {
+            hordeOn = cmd.endsWith("on");
+        } else if (cmd.startsWith("FLYERS ")) {
+            flyersOn = cmd.endsWith("on");
+        } else if (cmd.startsWith("SCATTER ")) {
+            String[] p = cmd.split(" ");
+            if (p.length > 5) {
+                scatterSet = true;
+                scatterQ = pi(p[2]); scatterR = pi(p[3]);
+                scatterRad = pi(p[4]); scatterN = pi(p[5]);
+            }
+        } else if (cmd.startsWith("SFX ") || cmd.startsWith("AMBIENT ")) {
+            // Sound law: never break the scene on missing audio.
+            try { snd.play(cmd.split(" ")[1]); } catch (Exception e) {}
+        } else if (cmd.startsWith("FX ")) {
+            String[] p = cmd.split(" ");
+            if (gv == null) return;
+            if (p.length > 3 && isInt(p[2])) {
+                SceneMap.hexToWorld(pi(p[2]), pi(p[3]), pt);
+                gv.fxPoint(p[1], pt[0], pt[1]);
+            } else if (p.length > 2) {
+                gv.fxActor(p[1], p[2]);
+            }
         } else if (cmd.startsWith("FIGHT ")) {
-            int n = Integer.parseInt(cmd.split(" ")[1]);
+            int n = pi(cmd.split(" ")[1]);
             if (n > 8) pendingWave = n - 6;
             startEncounter();
         } else if (cmd.startsWith("REINFORCE ")) {
@@ -166,27 +262,18 @@ public final class StoryWorld {
             }
         } else if (cmd.startsWith("SETFLAG ")) {
             setFlag(cmd.split(" ")[1]);
-        } else if (cmd.startsWith("CAM_LOOK ")) {
-            String[] p = cmd.split(" ");
-            gv.scriptCamLook(Integer.parseInt(p[1]), Integer.parseInt(p[2]),
-                    p.length > 3 ? Integer.parseInt(p[3]) : 3000);
         } else if (cmd.startsWith("VICTORY")) {
             victory = true;
-            gv.onActComplete();
+            if (gv != null) gv.onActComplete();
         }
     }
 
+    // Generic speaker parse: first token = speaker key. No names live here.
     private void sayLine(String rest) {
-        String speaker = null, text = null;
-        for (String s : SPEAKERS) {
-            if (rest.startsWith(s + " ")) { speaker = s; text = rest.substring(s.length() + 1); break; }
-        }
-        if (speaker == null) {
-            int sp = rest.indexOf(' ');
-            if (sp < 0) { speaker = rest; text = ""; }
-            else { speaker = rest.substring(0, sp); text = rest.substring(sp + 1); }
-        }
-        gv.showDialog(speaker, text);
+        int sp = rest.indexOf(' ');
+        String speaker = sp < 0 ? rest : rest.substring(0, sp);
+        String text = sp < 0 ? "" : rest.substring(sp + 1);
+        if (gv != null) gv.showDialog(speaker, text);
     }
 
     private void runAction(String name, int ms) {
