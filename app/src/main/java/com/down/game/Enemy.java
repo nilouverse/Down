@@ -18,16 +18,37 @@ public class Enemy {
     public int poisonTurns = 0;
     public final Floater floater = new Floater();
 
+    // Heavy class — shield-bearing variant with mana + 2 attack forms
+    public boolean heavy = false;
+    public int mana = 100, maxMana = 100;
+    public int atkForm = 0;     // 0 = default, 1 = heavy blade combo, 2 = heavy nova
+    public int atkPos = 0;      // current position in the attack sequence
+    public float attackDuration = ATK_DUR;
+
+    // Heavy attack sequences (0-indexed frame indices within the heavy attack sheet)
+    // attack 1 — blade combo (9 frames)
+    // attack 2 — shield nova (6 frames)
+    public static final int[][] HEAVY_ATK_SEQ = {
+            { 0, 2, 3, 7, 6, 10, 4, 5, 0 },
+            { 0, 4, 2, 3, 5, 8 }
+    };
+    public static final int[] HEAVY_ATK_STRIKE = { 5, 5 };
+    public static final int[] HEAVY_ATK_DMG    = { 12, 15 };
+    public static final int[] HEAVY_ATK_MANA   = {  0, 60 };
+    public static final int[] HEAVY_ATK_RANGE  = {  1,  2 };
+    public static final float[] HEAVY_ATK_DUR  = { 0.95f, 1.10f };
+
+    public static final float MANA_REGEN = 30f;
+
     public int act = 0;
     public boolean planned = false;
     public boolean acted = false;
-    public int intent = 0; // 0 none, 1 will attack, 2 will advance
+    public int intent = 0;
     public int attacksPlanned = 0, attacksDone = 0;
     public float[] pathX = new float[7];
     public float[] pathY = new float[7];
     public int pathLen = 0, pathI = 0;
 
-    // seamless state crossfade (D1): prevF fades out while curF fades in
     public Frame curF, prevF;
     public float fadeT = 1f;
     public int lastGroup = -1;
@@ -42,6 +63,10 @@ public class Enemy {
         attackT = -1; struck = false;
         attacksPlanned = 0; attacksDone = 0;
         pathLen = 0; pathI = 0;
+        atkPos = 0;
+        if (heavy && mana < maxMana) {
+            mana = (int) Math.min(maxMana, mana + MANA_REGEN);
+        }
     }
 
     public void present(Frame f, int group, float dt) {
@@ -60,7 +85,7 @@ public class Enemy {
         }
     }
 
-    public void turnUpdate(float dt, float px, float py, boolean adjacent) {
+    public void turnUpdate(float dt, float px, float py, boolean adjacent, boolean inRange2) {
         switch (act) {
             case 0:
                 if (pathI < pathLen) {
@@ -80,10 +105,13 @@ public class Enemy {
                         if (pathI >= pathLen) floater.moving = false;
                     }
                 } else if (floater.state == 0) {
-                    if (attacksPlanned > 0 && adjacent) {
+                    boolean canStrike = (heavy && atkForm == 2) ? inRange2 : adjacent;
+                    if (attacksPlanned > 0 && canStrike) {
                         act = 1;
                         attackT = 0;
+                        atkPos = 0;
                         struck = false;
+                        attackDuration = heavy ? HEAVY_ATK_DUR[atkForm - 1] : ATK_DUR;
                         facing = px >= x ? 1 : -1;
                     } else {
                         act = 3;
@@ -95,11 +123,22 @@ public class Enemy {
                 floater.moving = false;
                 if (attackT >= 0) {
                     attackT += dt;
-                    if (attackT > ATK_DUR) {
+                    if (heavy) {
+                        int[] seq = HEAVY_ATK_SEQ[atkForm - 1];
+                        float t = attackT / attackDuration;
+                        int newPos = Math.min(seq.length - 1, (int) (t * seq.length));
+                        if (newPos > atkPos) atkPos = newPos;
+                    }
+                    if (attackT > attackDuration) {
                         attacksDone++;
                         struck = false;
-                        if (attacksDone < attacksPlanned && adjacent) {
+                        atkPos = 0;
+                        boolean nextAdjacent = (Math.abs(px - x) + Math.abs(py - y)) < 200f;
+                        boolean nextInRange2 = (Math.abs(px - x) + Math.abs(py - y)) < 400f;
+                        boolean canAgain = (heavy && atkForm == 2) ? nextInRange2 : nextAdjacent;
+                        if (attacksDone < attacksPlanned && canAgain) {
                             attackT = 0;
+                            attackDuration = heavy ? HEAVY_ATK_DUR[atkForm - 1] : ATK_DUR;
                         } else {
                             attackT = -1;
                             act = 3;
