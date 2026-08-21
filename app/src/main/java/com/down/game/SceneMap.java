@@ -16,10 +16,9 @@ import android.os.SystemClock;
 import java.io.InputStream;
 
 /**
- * Story-map compositor, hex-cut edition. Ground = squashed-hexagon cuts sampled
- * from square atlas cells via BitmapShader local matrices (AA edges, 1 call/hex).
- * ASHEN only for now: meadow = all 16 ash cells, random 60-degree spins + mirror;
- * cliff rims = cliff sheet; void = flat fill. No props/decals/glow yet.
+ * Story-map compositor, hex-cut edition. ASHEN first: meadow = 16 ash cells with
+ * random 60-degree spins + mirror; north/south/west rims = cliff lips; bodies
+ * (south-facing wall faces) hang below north rim, south rim and the SW corner.
  * draw() allocates ZERO objects.
  */
 public final class SceneMap {
@@ -29,13 +28,13 @@ public final class SceneMap {
     public static final int W_Q = MAX_Q - MIN_Q + 1, W_R = MAX_R - MIN_R + 1;
 
     private static final float TS = 128f, SQ3 = 1.7320508f, ROWY = 1.5f * HEX * SQUASH;
-    private static final int MAXT = 8192, PMAX = 1024;
+    private static final int MAXT = 8192;
     private static final float[] UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f, 0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
 
     private final boolean[] walkable = new boolean[W_Q * W_R];
-    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, gGlow, pA, pB;
-    private volatile Shader[] shaders = new Shader[5];
-    private final int[] cellW = new int[5], cellH = new int[5];
+    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, gGlow, pA, pB;
+    private volatile Shader[] shaders = new Shader[6];
+    private final int[] cellW = new int[6], cellH = new int[6];
     private volatile boolean ready, disposed;
     private final boolean quality;
     private boolean craterVisible;
@@ -46,19 +45,11 @@ public final class SceneMap {
     private final Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Rect srcR = new Rect(), dstR = new Rect();
     private final float[] HW = new float[2];
-    private final Bitmap[] sheets = new Bitmap[5];
+    private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
     private final Matrix mS = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
-            dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
-    private final float[] pBX = new float[PMAX], pBY = new float[PMAX];
-    private final int[] pBI = new int[PMAX];
-
-    private static final float[] D_S = {1.2f,1.4f,1.5f,1.4f,1.2f,1.0f,2.4f,2.4f,1.7f,1.6f,1.5f,1.6f,1.3f,1.2f,1.3f,1.4f};
-    private static final int[]   D_A = {255,255,235,255,255,255,90,90,150,170,180,180,255,255,235,140};
-    private static final float[] P_S = {1.6f,1.5f,2.6f,1.3f,2.2f,1.8f,2.0f,2.4f,1.6f,1.2f,1.4f,1.7f,1.2f,1.4f,1.6f,1.8f,1.6f,1.9f,1.2f,1.0f,1.4f};
-    private static final int[]   P_A = {0, 1, 4, 5, 12, 13};
-    private static final float[] G_S = {1.8f,2.0f,1.1f,1.1f,6.5f,2.8f,1.7f,3.2f,1.3f,2.2f,2.6f,1.2f,2.0f,1.3f,2.8f,1.0f};
+            bB = new int[MAXT], dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
 
     public SceneMap(Context ctx, boolean quality) {
         this.quality = quality;
@@ -73,14 +64,15 @@ public final class SceneMap {
                     ci = soften(flatten(dec(app, "map/city", true))),
                     cr = soften(flatten(dec(app, "map/crater", true))),
                     cl = soften(flatten(dec(app, "map/cliff", true))),
+                    bd = flatten(dec(app, "map/cliffbody", true)),
                     gl = dec(app, "map/glow", false),
                     pa = key(dec(app, "map/props_a", false)),
                     pb = key(dec(app, "map/props_b", false));
-            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(gl); recycle(pa); recycle(pb); return; }
-            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; gGlow = gl; pA = pa; pB = pb;
-            Bitmap[] all = { a, ro, ci, cr, cl };
-            Shader[] sh = new Shader[5];
-            for (int i = 0; i < 5; i++) if (all[i] != null) {
+            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(bd); recycle(gl); recycle(pa); recycle(pb); return; }
+            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; tBody = bd; gGlow = gl; pA = pa; pB = pb;
+            Bitmap[] all = { a, ro, ci, cr, cl, bd };
+            Shader[] sh = new Shader[6];
+            for (int i = 0; i < 6; i++) if (all[i] != null) {
                 sh[i] = new BitmapShader(all[i], Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
@@ -153,11 +145,11 @@ public final class SceneMap {
                 if (x >= cw - strip) { rr += r; rg += g; rb += bl; rN++; }
             }
             float ar = sr / (float) n, ag = sg / (float) n, ab = sb / (float) n;
-            float tR = tr / tN, tG = tg / tN, tB = tb / tN, bR = br / bN, bG = bg / bN, bB = bb / bN;
+            float tR = tr / tN, tG = tg / tN, tB = tb / tN, bR = br / bN, bG = bg / bN, bB2 = bb / bN;
             float lR = lr / lN, lG = lg / lN, lB = lb / lN, rR = rr / rN, rG = rg / rN, rB = rb / rN;
             for (int y = 0; y < ch; y++) {
                 float fy = y / (float) (ch - 1);
-                float vr = tR + (bR - tR) * fy, vg = tG + (bG - tG) * fy, vb = tB + (bB - tB) * fy;
+                float vr = tR + (bR - tR) * fy, vg = tG + (bG - tG) * fy, vb = tB + (bB2 - tB) * fy;
                 for (int x = 0; x < cw; x++) {
                     float fx = x / (float) (cw - 1);
                     float biasr = (vr + lR + (rR - lR) * fx) * 0.5f;
@@ -276,21 +268,22 @@ public final class SceneMap {
         return h & 0x7FFFFFFF;
     }
 
-    // ================= HEX COMPOSER (ASHEN only, terrain only) =================
+    // ================= HEX COMPOSER (ASHEN) =================
     private void computeHex(int i, int q, int r) {
         int h = h2(q, r, 7);
-        int ts = -1, ti = 0, rot = 0;
+        int ts = -1, ti = 0, rot = 0, body = 0;
         if (q <= 10) {
-            if (q < MIN_Q || r < MIN_R || r > MAX_R || r < -7.7f || r > 15.2f) ts = -1;   // void
-            else if (r < -4.5f || r > 12.5f) {                                // cliff rims
-                ts = 4; ti = (h >>> 4) & 15;
-                rot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);       // 0/180 + mirror
-            } else {                                                          // walkable meadow
-                ts = 0; ti = (h >>> 4) & 15;                                  // all 16 cells
-                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);       // 6 hex spins + mirror
-            }
+            int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);   // 0/180 + mirror
+            boolean westLip = q < MIN_Q && q >= MIN_Q - 2 && r >= -7 && r <= 15;
+            if (q < MIN_Q - 2 || r <= -8 || r >= 16) ts = -1;                 // void
+            else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; if (r >= 11) body = 1; }
+            else if (r <= -5) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim
+            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // south rim
+            else if (q < MIN_Q) ts = -1;                                     // west gap void
+            else { ts = 0; ti = (h >>> 4) & 15;                              // meadow
+                   rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         }
-        tS[i] = ts; tI[i] = ti; tR[i] = rot; dI[i] = -1; pI[i] = -1; gI[i] = -1;
+        tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
 
     private void hexPath(float cx, float cy, float s) {
@@ -302,7 +295,6 @@ public final class SceneMap {
         hexP.close();
     }
 
-    // Maps the chosen square cell into the hex cut: texture->screen local matrix.
     private void shaderHex(Canvas c, int sheet, int ti, int rot, float cx, float cy, float s) {
         Shader sh = shaders[sheet];
         if (sh == null) return;
@@ -330,7 +322,7 @@ public final class SceneMap {
         int q1 = (int) Math.floor((camX + halfW) / (SQ3 * HEX) - r0 / 2f) + 1;
         int n = (r1 - r0 + 1) * (q1 - q0 + 1);
         boolean full = ready && n <= MAXT;
-        sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater; sheets[4] = tCliff;
+        sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater; sheets[4] = tCliff; sheets[5] = tBody;
         if (full) {
             int i = 0;
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
@@ -348,6 +340,30 @@ public final class SceneMap {
                 continue;
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
+        }
+        // PASS 1b — cliff bodies: south-facing wall faces under the lips.
+        // Full cell height maps onto the wall quad, so strata courses stay level
+        // and continuous across hexes; random cell per hex for horizontal variety.
+        if (shaders[5] != null) {
+            int cw = cellW[5], ch = cellH[5];
+            float hw2 = SQ3 * HEX * 0.5f * zoom, wallH = ROWY * 1.8f * zoom;
+            tp.setShader(shaders[5]);
+            for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
+                if (full && bB[i] == 1) {
+                    hexToWorld(q, r, HW);
+                    float hx = (HW[0] - camX) * zoom + vw * 0.5f, hy = (HW[1] - camY) * zoom + vh * 0.5f;
+                    float rx = hx - hw2 - 0.5f, ry = hy + ROWY * 0.5f * zoom;
+                    float rw = hw2 * 2f + 1f;
+                    int ti = (h2(q, r, 7) >>> 4) & 15;
+                    mS.reset();
+                    mS.postTranslate(-((ti & 3) * cw), -((ti >> 2) * ch));
+                    mS.postScale(rw / cw, wallH / ch);
+                    mS.postTranslate(rx, ry);
+                    shaders[5].setLocalMatrix(mS);
+                    c.drawRect(rx, ry, rx + rw, ry + wallH, tp);
+                }
+            }
+            tp.setShader(null);
         }
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
     }
@@ -398,9 +414,9 @@ public final class SceneMap {
         ready = false;
         disposed = true;
         recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
-        recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
-        tAsh = tRoad = tCity = tCrater = tCliff = gGlow = pA = pB = craterGlow = null;
-        shaders = new Shader[5];
+        recycle(tBody); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
+        tAsh = tRoad = tCity = tCrater = tCliff = tBody = gGlow = pA = pB = craterGlow = null;
+        shaders = new Shader[6];
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
 }
