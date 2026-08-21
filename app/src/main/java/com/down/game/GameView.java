@@ -151,6 +151,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eGlideFr = new ArrayList<>();
     private final ArrayList<Frame> eGlowFr = new ArrayList<>();
     private final ArrayList<Frame> eAtkFr = new ArrayList<>();
+    private final ArrayList<Frame> eHeavyIdleFr = new ArrayList<>();
+    private final ArrayList<Frame> eHeavyGlideFr = new ArrayList<>();
+    private final ArrayList<Frame> eHeavyAtkFr = new ArrayList<>();
+
     private List<Bitmap> props, props2;
 
     private float runeX, runeY, runeT = 99;
@@ -250,6 +254,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static class AssetBundle {
         HashMap<String, List<Frame>> frames;
         ArrayList<Frame> eIdle, eGlide, eAtk;
+        ArrayList<Frame> eHeavyIdle, eHeavyGlide, eHeavyAtk;
         List<Bitmap> props, props2;
         Bitmap menuBg, keyBmp, coinBmp;
     }
@@ -290,6 +295,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/enemy_glide.png", 2, 2, 2), true, false));
             b.eAtk = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_attack.png", 2, 3, 2), false, false));
+            b.eHeavyIdle = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_heavy_idle.png", 2, 2, 4), false, true));
+            b.eHeavyGlide = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_heavy_glide.png", 2, 2, 2), true, false));
+            b.eHeavyAtk = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/enemy_heavy_attack.png", 3, 4, 2), false, false));
             b.props  = Sprites.trimBottom(
                     Sprites.cutSheet(c, "sprites/props.png",  2, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
@@ -394,6 +405,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         loadedFrames = b.frames;
         for (Hero h : roster) h.bind(b.frames);
         eIdleFr.addAll(b.eIdle); eGlideFr.addAll(b.eGlide); eAtkFr.addAll(b.eAtk);
+        eHeavyIdleFr.addAll(b.eHeavyIdle);
+        eHeavyGlideFr.addAll(b.eHeavyGlide);
+        eHeavyAtkFr.addAll(b.eHeavyAtk);
         props = b.props; props2 = b.props2;
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
 
@@ -653,6 +667,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private void spawnEnemy() {
+        boolean heavy = Math.random() < 0.3;
         for (int tries = 0; tries < 12; tries++) {
             float a = (float) (Math.random() * Math.PI * 2);
             float x = player.x + (float) Math.cos(a) * HEX * 7;
@@ -662,6 +677,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hexToWorld(IH_A[0], IH_A[1], FW_A);
             Enemy e = new Enemy();
             e.x = FW_A[0]; e.y = FW_A[1];
+            if (heavy) {
+                e.heavy = true;
+                e.hp = 60; e.maxHp = 60;
+                e.mana = 100; e.maxMana = 100;
+                e.weapon = 2;
+            }
             enemies.add(e);
             return;
         }
@@ -948,10 +969,20 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         worldToHex(tgt.x, tgt.y, IH_A);
         worldToHex(en.x, en.y, IH_B);
         int dist = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]);
-        if (dist <= 1) { en.attacksPlanned = 2; en.intent = 1; return; }
+        if (en.heavy && en.mana >= Enemy.HEAVY_ATK_MANA[1] && dist <= Enemy.HEAVY_ATK_RANGE[1]) {
+            en.atkForm = 2;
+            en.attacksPlanned = 1;
+            en.intent = 1;
+            return;
+        }
+        if (dist <= 1) {
+            en.atkForm = en.heavy ? 1 : 0;
+            en.attacksPlanned = en.heavy ? 1 : 2;
+            en.intent = 1;
+            return;
+        }
         int steps = dist - 1; if (steps > 3) steps = 3;
-        en.attacksPlanned = 1;
-        if (dist > 4) { steps = dist - 1; if (steps > 6) steps = 6; en.attacksPlanned = 0; }
+        en.attacksPlanned = en.heavy ? 1 : 1;
         int cq = IH_B[0], cr = IH_B[1];
         en.pathLen = 0;
         if (flow.get(hexKey(cq, cr)) != null) {
@@ -1008,6 +1039,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         player = a;
         voice = a.hero.voice;
         resetFightKeepParty();
+        // Guarantee at least one heavy in the opening wave so it's testable immediately.
+        boolean hasHeavy = false;
+        for (Enemy e : enemies) if (e.heavy) { hasHeavy = true; break; }
+        if (!hasHeavy && !enemies.isEmpty()) {
+            Enemy e = enemies.get(0);
+            e.heavy = true;
+            e.hp = 60; e.maxHp = 60;
+            e.mana = 100; e.maxMana = 100;
+            e.weapon = 2;
+        }
         state = STATE_GAME;
     }
 
@@ -1021,6 +1062,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         player = a;
         voice = h.voice;
         resetFightKeepParty();
+        // Guarantee at least one heavy in the opening wave so it's testable immediately.
+        boolean hasHeavy = false;
+        for (Enemy e : enemies) if (e.heavy) { hasHeavy = true; break; }
+        if (!hasHeavy && !enemies.isEmpty()) {
+            Enemy e = enemies.get(0);
+            e.heavy = true;
+            e.hp = 60; e.maxHp = 60;
+            e.mana = 100; e.maxMana = 100;
+            e.weapon = 2;
+        }
         state = STATE_GAME;
     }
 
@@ -1447,18 +1498,64 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 worldToHex(tgt.x, tgt.y, IH_A);
                 worldToHex(active.x, active.y, IH_B);
                 boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
+                boolean inR2 = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= Enemy.HEAVY_ATK_RANGE[1];
                 boolean wasAttacking = active.attacking();
-                int prevAttacksDone = active.attacksDone;
-                active.turnUpdate(dt, tgt.x, tgt.y, adj);
-                if ((!wasAttacking && active.attacking()) || (active.attacksDone > prevAttacksDone && active.attacking())) {
+                int prevAtkPos = active.atkPos;
+                active.turnUpdate(dt, tgt.x, tgt.y, adj, inR2);
+                if ((!wasAttacking && active.attacking())) {
                     sound.play(active.weapon == 1 ? "claw" : "swing");
                 }
-                if (active.attacking() && active.attackT > 0.45f && !active.struck) {
+                // Strike detection: light uses time-fraction; heavy uses sequence index.
+                boolean didStrike = false;
+                if (active.attacking() && !active.struck) {
+                    if (active.heavy) {
+                        int[] seq = Enemy.HEAVY_ATK_SEQ[active.atkForm - 1];
+                        int strikeAt = Enemy.HEAVY_ATK_STRIKE[active.atkForm - 1];
+                        if (active.atkPos > prevAtkPos && active.atkPos >= strikeAt) didStrike = true;
+                    } else {
+                        if (active.attackT > 0.45f) didStrike = true;
+                    }
+                }
+                if (didStrike) {
                     active.struck = true;
-                    if (adj) {
-                        tgt.hp -= 10;
+                    if (active.heavy && active.atkForm == 2) {
+                        // Nova: hits all heroes within 2 hexes.
+                        active.mana -= Enemy.HEAVY_ATK_MANA[1];
+                        sound.play("blast");
+                        spawnBlast(active.x, active.y);
+                        shakeT = 0.22f;
+                        zoomPunch = 0.12f;
+                        worldToHex(active.x, active.y, IH_A);
+                        for (Player p : party) {
+                            if (p.hp <= 0) continue;
+                            worldToHex(p.x, p.y, IH_B);
+                            if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= Enemy.HEAVY_ATK_RANGE[1]) {
+                                spawnSlash(p.x, p.y);
+                                p.hp -= Enemy.HEAVY_ATK_DMG[1];
+                                addDmg(p.x, p.y - PLAYER_H - 20, -Enemy.HEAVY_ATK_DMG[1]);
+                                hurtT = 0.4f;
+                                sound.play("hurt");
+                                sound.play(p.hero.voice + "_hurt");
+                                post(hapticRun);
+                                if (p.hp <= 30 && !p.cried) {
+                                    p.cried = true;
+                                    sound.play(p.hero.voice + "_wounded");
+                                }
+                            }
+                        }
+                        boolean allDead = true;
+                        for (Player p : party) if (p.hp > 0) allDead = false;
+                        if (allDead) {
+                            deadT = 2f;
+                            sound.play(player.hero.voice + "_death");
+                        }
+                    } else if (adj) {
+                        // Single-target (light enemy, or heavy blade combo).
+                        sound.play(active.weapon == 1 ? "claw" : "swing");
+                        int dmg = active.heavy ? Enemy.HEAVY_ATK_DMG[0] : 10;
+                        tgt.hp -= dmg;
                         hurtT = 0.3f;
-                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -10);
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hurt");
                         sound.play(tgt.hero.voice + "_hurt");
                         post(hapticRun);
@@ -2164,32 +2261,47 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
 
     private Frame pickEnemyFrame(Enemy en) {
-        if (en.attacking() && !eAtkFr.isEmpty()) {
-            float pos = (en.attackT / Enemy.ATK_DUR) * eAtkFr.size();
-            int i = (int) pos;
-            if (i < 0) i = 0;
-            if (i >= eAtkFr.size()) i = eAtkFr.size() - 1;
-            return eAtkFr.get(i);
+        if (en.attacking()) {
+            java.util.List<Frame> pool = en.heavy ? eHeavyAtkFr : eAtkFr;
+            if (pool.isEmpty()) return null;
+            int i;
+            if (en.heavy) {
+                int[] seq = Enemy.HEAVY_ATK_SEQ[en.atkForm - 1];
+                int p = Math.min(seq.length - 1, en.atkPos);
+                i = seq[p];
+                if (i >= pool.size()) i = pool.size() - 1;
+            } else {
+                float pos = (en.attackT / Enemy.ATK_DUR) * pool.size();
+                i = (int) pos;
+                if (i < 0) i = 0;
+                if (i >= pool.size()) i = pool.size() - 1;
+            }
+            return pool.get(i);
         }
-        if (en.floater.state == 0 && !eIdleFr.isEmpty()) {
-            return eIdleFr.get(((int) (en.animT * 3f)) % eIdleFr.size());
+        if (en.floater.state == 0) {
+            java.util.List<Frame> pool = en.heavy ? eHeavyIdleFr : eIdleFr;
+            if (!pool.isEmpty()) return pool.get(((int) (en.animT * 3f)) % pool.size());
         }
-        if (eGlideFr.size() >= 4) {
+        java.util.List<Frame> gPool = en.heavy ? eHeavyGlideFr : eGlideFr;
+        if (gPool.size() >= 4) {
             Floater f = en.floater;
-            if (f.state == 1) return eGlideFr.get(f.t < 0.1f ? 3 : 1);
+            if (f.state == 1) return gPool.get(f.t < 0.1f ? 3 : 1);
             if (f.state == 2) {
                 int i = 1 + ((int) (en.animT * 6f)) % 2;
-                return eGlideFr.get(i);
+                return gPool.get(i);
             }
-            return eGlideFr.get(f.t < 0.06f ? 2 : f.t < 0.12f ? 1 : f.t < 0.17f ? 3 : 0);
+            return gPool.get(f.t < 0.06f ? 2 : f.t < 0.12f ? 1 : f.t < 0.17f ? 3 : 0);
         }
         return null;
     }
 
     private int enemyGroup(Enemy en) {
-        if (en.attacking()) return 10;
-        if (en.floater.state == 0) return 0;
-        return 1 + en.floater.state;
+        if (en.attacking()) {
+            int base = en.heavy ? 30 : 10;
+            return base + en.atkForm;
+        }
+        if (en.floater.state == 0) return en.heavy ? 20 : 0;
+        return (en.heavy ? 21 : 1) + en.floater.state;
     }
 
     private void drawEnemy(Canvas cv, Enemy en) {
@@ -2240,6 +2352,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
             rf.right = rf.left + bw * (en.hp / (float)en.maxHp);
             paint.setColor(C_BLOOD); cv.drawRoundRect(rf, 4, 4, paint);
+
+            if (en.heavy) {
+                float mtop = y - ENEMY_H * zoom - 12;
+                float mbw = 90, mbh = 5;
+                rf.set(x - mbw/2, mtop, x + mbw/2, mtop + mbh);
+                paint.setColor(0xCC050508); cv.drawRoundRect(rf, 3, 3, paint);
+                rf.right = rf.left + mbw * (en.mana / (float)en.maxMana);
+                paint.setColor(C_VIOLET); cv.drawRoundRect(rf, 3, 3, paint);
+            }
 
             // C2: intent telegraph
             if (en.intent == 1) {
@@ -2957,6 +3078,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         SceneMap.hexToWorld(q, r, hw);
         Enemy e = new Enemy();
         e.x = hw[0]; e.y = hw[1];
+        if ("infantry".equals(type)) {
+            e.heavy = true;
+            e.hp = 60; e.maxHp = 60;
+            e.mana = 100; e.maxMana = 100;
+            e.weapon = 2;
+        }
         enemies.add(e);
     }
     public void refreshDock() { fanDirty = true; }
