@@ -338,7 +338,7 @@ public final class SceneMap {
         c.save();
         hexPath(cx, cy, s * 1.02f);
         c.clipPath(hexP);
-        dstR.set(cx - s, cy - s * 0.62f, cx + s, cy + s * 0.62f);
+        dstR.set((int)(cx - s), (int)(cy - s * 0.62f), (int)(cx + s), (int)(cy + s * 0.62f));
         c.drawBitmap(b, wallSrc, dstR, tp);
         c.restore();
     }
