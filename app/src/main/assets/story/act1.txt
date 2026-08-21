@@ -1,60 +1,20 @@
 # ACT ONE — continuous-map trigger script.
 # Zones fire once unless gated.
-# Display text = SAY lines only. Everything else is picture or sound.
+# Display text = SAY lines only.
 # NOTE: the cliff-top ledge is staging ground only — never player-walkable.
 
 ZONE opening 0 7 2
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
-# ---- the plain under a bruised sky (far below the ledge) --------
-SKY bruised
-LAYER molten on
-BACKDROP towers_burning on
-HORDE on
-FLYERS on
-AMBIENT plain_battlefield
-SFX war_horn_far
-CAM_PAN 2 -14 2600
-WAIT 2600
-
-# ---- the littered dead -------------------------------------------
-SCATTER corpse 1 -8 4 8
-SPAWN risen 0 2 ambient
-SPAWN risen 5 3 ambient
-SFX corpse_moan_far
-ACTION shake 140
-
-# ---- her, on the ledge --------------------------------------------
-TELEPORT 1 -9
-CAM_PAN 1 -9 1400
-CAM_FOLLOW nilou
-FX nilou hand_crackle
-SFX dark_crackle_low
-WAIT 900
-SFX march_thunder
-SFX warbeast_roar_far
-ACTION shake 260
-SFX terror_shriek_far
-WAIT 1200
-
-# ---- the scan --------------------------------------------------------
 SAY NilouZila I can see the banners of Mordethail from here. The Carrion Kings. And those—
-CAM_PUSH nilou 700
-WAIT 700
 SAY NilouZila Thornborn. I watched Vorvexis flay their elders alive two centuries ago. Apparently the children remembered.
-SFX explosion_far
-FX debris_arc 2 -14
-ACTION shake 500
-WAIT 600
 SAY NilouZila Eastern wall. Gone.
 
-# ---- the report (they climb the cliff path) -------------------------
 SFX footsteps_gravel_far
 SPAWN vex 1 -5 npc
 SPAWN soldier 0 -5 npc s1
 SPAWN soldier 2 -5 npc s2
-FX vex bleed
 WALK vex 1 -8 1.6
 WALK s1 0 -8 1.6
 WALK s2 2 -8 1.6
@@ -75,21 +35,12 @@ SAY NilouZila Everything is death today. At least this way I choose where.
 EXIT vex 1 -5
 EXIT s1 0 -5
 EXIT s2 2 -5
-SFX footsteps_gravel_far
-CAM_RELEASE
-CAM_PAN 2 -14 1200
-WAIT 800
 
-# ---- the descent: she glides off the ledge ----------------------------
 SAY NilouZila Four hundred years I've knelt at her feet.
-CAM_PUSH nilou 600
-WAIT 600
-GLIDE nilou 1 0 1.2
+WALK nilou 1 0 1.8
 WAIT_WALK nilou
-CAM_RELEASE
 SAY NilouZila I didn't claw my way out of the Pit of Screaming Souls, survive the Binding Trials, and bury my rivals one by one just to watch her empire turn to ash from a cliff.
 
-# ---- cockroaches ---------------------------------------------------------
 SPAWN enemy 4 0 e0
 SPAWN enemy -2 1 e1
 SPAWN enemy 4 3 e2
@@ -102,9 +53,22 @@ WAIT 1400
 SAY NilouZila Thornborn. Of course they survived. Cockroaches, all of them.
 FIGHT 4
 
-# ---- venom -------------------------------------------------------------
 SAY NilouZila Venom. Naturally.
-WAIT 500
 SAY NilouZila Paralytic. Slow-acting. I give it an hour before it reaches my spine.
 SAY NilouZila Plenty can happen in an hour.
 SETFLAG ashen_cleared
+
+# ---- the gate mouth -------------------------------------------------
+ZONE gate_mouth 34 -5 3
+GATE gate_mouth ashen_cleared
+ON_ENTER gate_mouth
+PROP city 0 38 -5 1.2 1
+SPAWN infantry 40 -5
+SPAWN infantry 41 -5
+SPAWN infantry 42 -5
+SPAWN infantry 43 -5
+SPAWN infantry 42 -6
+SPAWN infantry 42 -4
+SPAWN beast 44 -5
+FIGHT 7
+SETFLAG gate_open
