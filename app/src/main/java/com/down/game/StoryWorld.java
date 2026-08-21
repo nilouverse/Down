@@ -86,6 +86,29 @@ public final class StoryWorld {
         this.map = map; this.actors = actors; this.gv = gv;
     }
 
+    // Fresh act: zones, flags, props, counters. Called on every story entry.
+    public void reload() {
+        zoneCount = 0;
+        flags.clear();
+        placedProps.clear();
+        evQueue.clear();
+        evActive = false;
+        waitT = 0;
+        waitWalk = null;
+        victory = false;
+        encounterLive = false;
+        reinforceKills = -1;
+        reinforceTarget = 0;
+        pendingWave = 0;
+        scatterSet = false;
+        killNoteN = -1;
+        killNoteTxt = null;
+        storyKills = 0;
+        lastPQ = Integer.MIN_VALUE;
+        lastPR = Integer.MIN_VALUE;
+        parse("act1.txt");
+    }
+
     private void parse(String file) {
         try {
             BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/" + file)));
