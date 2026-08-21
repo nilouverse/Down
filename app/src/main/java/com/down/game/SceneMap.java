@@ -449,7 +449,7 @@ public final class SceneMap {
             int p = pBI[a];
             Bitmap b = p < 16 ? pB : pA;
             if (b == null) continue;
-            cell(p < 16 ? p : P_A[p - 16]);
+            cell(b, p < 16 ? p : P_A[p - 16]);
             float s = P_S[p] * TS * zoom, x = pBX[a], y = pBY[a];
             dstR.set((int) (x - s * 0.5f), (int) (y - s), (int) (x + s * 0.5f), (int) y); // bottom edge = ground
             c.drawBitmap(b, srcR, dstR, pp);
@@ -464,7 +464,7 @@ public final class SceneMap {
                     float s = G_S[g] * TS * zoom;
                     float cx = (tx * TS + TS * 0.5f - camX) * zoom + vw * 0.5f;
                     float cy = (ty * TS + TS * 0.5f - camY) * zoom + vh * 0.5f;
-                    cell(g);
+                    cell(gGlow, g);
                     dstR.set((int) (cx - s * 0.5f), (int) (cy - s * 0.5f), (int) (cx + s * 0.5f), (int) (cy + s * 0.5f));
                     c.drawBitmap(gGlow, srcR, dstR, gp);
                 }
