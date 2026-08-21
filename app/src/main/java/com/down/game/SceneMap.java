@@ -49,7 +49,8 @@ public final class SceneMap {
     private final Path hexP = new Path();
     private final Matrix mS = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
-            bB = new int[MAXT], dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
+            bB = new int[MAXT], fF = new int[MAXT], dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
+    private int lr0, lr1, lq0, lq1;
 
     public SceneMap(Context ctx, boolean quality) {
         this.quality = quality;
@@ -240,7 +241,7 @@ public final class SceneMap {
     private void buildWalkability() {
         for (int r = MIN_R; r <= MAX_R; r++) for (int q = MIN_Q; q <= MAX_Q; q++) {
             boolean w;
-            if (q <= 10) w = r >= -4 && r <= 12;
+            if (q <= 10) w = r >= -2 && r <= 12;
             else if (q <= 36) { float t = (q - 11) / 25f; w = Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t; }
             else if (q <= 60) w = r >= -6 && r <= 12 && (r % 5 == 0 || q % 6 == 0 || insidePlaza(q, r)) && !insideRubble(q, r);
             else if (q <= 78) { float dx = (q - 66) / 10f, dy = (r - 4) / 8f; w = dx * dx + dy * dy <= 1f || (q >= 56 && q <= 78 && r >= 2 && r <= 6); }
@@ -271,19 +272,19 @@ public final class SceneMap {
     // ================= HEX COMPOSER (ASHEN) =================
     private void computeHex(int i, int q, int r) {
         int h = h2(q, r, 7);
-        int ts = -1, ti = 0, rot = 0, body = 0;
+        int ts = -1, ti = 0, rot = 0, body = 0, front = 0;
         if (q <= 10) {
             int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);   // 0/180 + mirror
             boolean westLip = q < MIN_Q && q >= MIN_Q - 2 && r >= -7 && r <= 15;
             if (q < MIN_Q - 2 || r <= -8 || r >= 16) ts = -1;                 // void
-            else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; if (r >= 11) body = 1; }
+            else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
             else if (r <= -5) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim
-            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // south rim
+            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim (over actors)
             else if (q < MIN_Q) ts = -1;                                     // west gap void
             else { ts = 0; ti = (h >>> 4) & 15;                              // meadow
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         }
-        tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; dI[i] = -1; pI[i] = -1; gI[i] = -1;
+        tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; fF[i] = front; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
 
     private void hexPath(float cx, float cy, float s) {
@@ -322,6 +323,7 @@ public final class SceneMap {
         int q1 = (int) Math.floor((camX + halfW) / (SQ3 * HEX) - r0 / 2f) + 1;
         int n = (r1 - r0 + 1) * (q1 - q0 + 1);
         boolean full = ready && n <= MAXT;
+        lr0 = r0; lr1 = r1; lq0 = q0; lq1 = q1;
         sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater; sheets[4] = tCliff; sheets[5] = tBody;
         if (full) {
             int i = 0;
@@ -333,7 +335,7 @@ public final class SceneMap {
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
             int ts = full ? tS[i] : -1;
-            if (ts < 0 || shaders[ts] == null) {
+            if (ts < 0 || shaders[ts] == null || (full && fF[i] == 1)) {
                 tp.setColor(fallback(HW[0], HW[1]));
                 hexPath(cx, cy, s);
                 c.drawPath(hexP, tp);
@@ -341,31 +343,53 @@ public final class SceneMap {
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
-        // PASS 1b — cliff bodies: south-facing wall faces under the lips.
-        // Full cell height maps onto the wall quad, so strata courses stay level
-        // and continuous across hexes; random cell per hex for horizontal variety.
+        // PASS 1b — cliff bodies as hex-fitted wall rows: top half + bottom half
+        // of the cell stacked on rows r+1 / r+2, strata continuous, tessellates.
         if (shaders[5] != null) {
-            int cw = cellW[5], ch = cellH[5];
-            float hw2 = SQ3 * HEX * 0.5f * zoom, wallH = ROWY * 1.8f * zoom;
-            tp.setShader(shaders[5]);
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
-                if (full && bB[i] == 1) {
-                    hexToWorld(q, r, HW);
-                    float hx = (HW[0] - camX) * zoom + vw * 0.5f, hy = (HW[1] - camY) * zoom + vh * 0.5f;
-                    float rx = hx - hw2 - 0.5f, ry = hy + ROWY * 0.5f * zoom;
-                    float rw = hw2 * 2f + 1f;
-                    int ti = (h2(q, r, 7) >>> 4) & 15;
-                    mS.reset();
-                    mS.postTranslate(-((ti & 3) * cw), -((ti >> 2) * ch));
-                    mS.postScale(rw / cw, wallH / ch);
-                    mS.postTranslate(rx, ry);
-                    shaders[5].setLocalMatrix(mS);
-                    c.drawRect(rx, ry, rx + rw, ry + wallH, tp);
-                }
+                if (!full || bB[i] != 1 || fF[i] == 1) continue;
+                int ti = (h2(q, r, 7) >>> 4) & 15;
+                hexToWorld(q, r + 1, HW);
+                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0f, 0.5f);
+                hexToWorld(q, r + 2, HW);
+                wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0.5f, 1f);
             }
-            tp.setShader(null);
         }
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
+    }
+
+    private void wallHex(Canvas c, int ti, float cx, float cy, float s, float fy0, float fy1) {
+        Shader sh = shaders[5];
+        if (sh == null) return;
+        int cw = cellW[5], ch = cellH[5];
+        mS.reset();
+        mS.postTranslate(-((ti & 3) * cw), -(((ti >> 2) + fy0) * ch));
+        mS.postScale(2f / cw, 1.2f / (ch * (fy1 - fy0)));
+        mS.postScale(s, s);
+        mS.postTranslate(cx, cy - 0.6f * s);
+        sh.setLocalMatrix(mS);
+        tp.setShader(sh);
+        hexPath(cx, cy, s * 1.02f);
+        c.drawPath(hexP, tp);
+        tp.setShader(null);
+    }
+
+    // South rim (lip + body) rendered AFTER actors so the near edge occludes them.
+    public void drawFront(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        if (!ready) return;
+        float s = HEX * zoom * 1.07f;
+        int w = lq1 - lq0 + 1;
+        for (int r = lr0; r <= lr1; r++) for (int q = lq0; q <= lq1; q++) {
+            int i = (r - lr0) * w + (q - lq0);
+            if (fF[i] != 1) continue;
+            hexToWorld(q, r, HW);
+            shaderHex(c, 4, tI[i], tR[i], (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+            int ti = (h2(q, r, 7) >>> 4) & 15;
+            hexToWorld(q, r + 1, HW);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0f, 0.5f);
+            hexToWorld(q, r + 2, HW);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, 0.5f, 1f);
+        }
     }
 
     private int fallback(float wx, float wy) {
