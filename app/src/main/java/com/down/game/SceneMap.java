@@ -16,9 +16,11 @@ import android.os.SystemClock;
 import java.io.InputStream;
 
 /**
- * Story-map compositor, hex-cut edition. ASHEN first: meadow = 16 ash cells with
- * random 60-degree spins + mirror; north/south/west rims = cliff lips; bodies
- * (south-facing wall faces) hang below north rim, south rim and the SW corner.
+ * Story-map compositor, hex-cut edition. ASHEN first: meadow = ash cells with
+ * random 60-degree spins + mirror; north plateau = staged ledge (drawn, never
+ * walkable); north/south/west rims = cliff lips; bodies (south-facing wall
+ * faces) hang below north rim, south rim and the SW corner.
+ * Road band uses the path tile. Everything else stays fallback until designed.
  * draw() allocates ZERO objects.
  */
 public final class SceneMap {
@@ -32,9 +34,9 @@ public final class SceneMap {
     private static final float[] UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f, 0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
 
     private final boolean[] walkable = new boolean[W_Q * W_R];
-    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, tPlaza, gGlow, pA, pB;
-    private volatile Shader[] shaders = new Shader[7];
-    private final int[] cellW = new int[7], cellH = new int[7];
+    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, gGlow, pA, pB;
+    private volatile Shader[] shaders = new Shader[6];
+    private final int[] cellW = new int[6], cellH = new int[6];
     private volatile boolean ready, disposed;
     private final boolean quality;
     private boolean craterVisible;
@@ -45,7 +47,7 @@ public final class SceneMap {
     private final Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Rect srcR = new Rect(), dstR = new Rect();
     private final float[] HW = new float[2];
-    private final Bitmap[] sheets = new Bitmap[7];
+    private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
     private final Matrix mS = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
@@ -63,18 +65,17 @@ public final class SceneMap {
             Bitmap a = soften(flatten(dec(app, "map/ash", true))),
                     ro = soften(flatten(dec(app, "map/path", true))),
                     ci = soften(flatten(dec(app, "map/cobble", true))),
-                    pl = soften(flatten(dec(app, "map/plaza", true))),
                     cr = soften(flatten(dec(app, "map/crater", true))),
                     cl = soften(flatten(dec(app, "map/cliff", true))),
                     bd = flatten(dec(app, "map/cliffbody", true)),
                     gl = dec(app, "map/glow", false),
                     pa = key(dec(app, "map/props_a", false)),
                     pb = key(dec(app, "map/props_b", false));
-            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(pl); recycle(cr); recycle(cl); recycle(bd); recycle(gl); recycle(pa); recycle(pb); return; }
-            tAsh = a; tRoad = ro; tCity = ci; tPlaza = pl; tCrater = cr; tCliff = cl; tBody = bd; gGlow = gl; pA = pa; pB = pb;
-            Bitmap[] all = { a, ro, ci, cr, cl, bd, pl };
-            Shader[] sh = new Shader[7];
-            for (int i = 0; i < 7; i++) if (all[i] != null) {
+            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(bd); recycle(gl); recycle(pa); recycle(pb); return; }
+            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; tBody = bd; gGlow = gl; pA = pa; pB = pb;
+            Bitmap[] all = { a, ro, ci, cr, cl, bd };
+            Shader[] sh = new Shader[6];
+            for (int i = 0; i < 6; i++) if (all[i] != null) {
                 sh[i] = new BitmapShader(all[i], Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
@@ -242,7 +243,7 @@ public final class SceneMap {
     private void buildWalkability() {
         for (int r = MIN_R; r <= MAX_R; r++) for (int q = MIN_Q; q <= MAX_Q; q++) {
             boolean w;
-            // cliff-top plateau (r <= -8) is staging ground only: drawn, never walkable.
+            // cliff-top plateau (r <= -8) is staged: drawn, never player-walkable.
             if (q <= 10) w = r >= -2 && r <= 12;
             else if (q <= 36) { float t = (q - 11) / 25f; w = Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t; }
             else if (q <= 60) w = (q <= 41 && r >= -7 && r <= -3)
@@ -284,21 +285,14 @@ public final class SceneMap {
             else if (r <= -5 && r >= -7) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim lip
             else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim (over actors)
             else if (q < MIN_Q) ts = -1;                                     // west gap void
-            else { ts = 0; ti = (h >>> 4) & 15;                              // plateau (r<=-8) + meadow
+            else { ts = 0; ti = (h >>> 4) & 15;                              // plateau (r<=-8) + ashen meadow
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         } else if (q <= 36) {
             float t = (q - 11) / 25f;
-            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; }     // descent road
-            else { ts = 0; ti = (h >>> 4) & 15; rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
-        } else if (q <= 60) {
-            if (insidePlaza(q, r)) { ts = 6; ti = (h >>> 4) & 15; }                                  // plaza
-            else if (r % 5 == 0 || q % 6 == 0) { ts = 2; ti = (h >>> 4) & 15; }                     // city streets
-            else { ts = 0; ti = (h >>> 4) & 15; rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }  // drifted blocks
-        } else if (q <= 78) {
-            ts = 6; ti = (h >>> 4) & 15;                                                             // courtyard
-        } else {
-            ts = 0; ti = (h >>> 4) & 15; rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; }     // descent road (path tile)
+            // flanks stay fallback until the designer draws them
         }
+        // q > 36 stays fallback until the city section is designed
         tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; fF[i] = front; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
 
@@ -339,7 +333,7 @@ public final class SceneMap {
         int n = (r1 - r0 + 1) * (q1 - q0 + 1);
         boolean full = ready && n <= MAXT;
         lr0 = r0; lr1 = r1; lq0 = q0; lq1 = q1;
-        sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater; sheets[4] = tCliff; sheets[5] = tBody; sheets[6] = tPlaza;
+        sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater; sheets[4] = tCliff; sheets[5] = tBody;
         if (full) {
             int i = 0;
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
@@ -455,9 +449,9 @@ public final class SceneMap {
         ready = false;
         disposed = true;
         recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
-        recycle(tBody); recycle(tPlaza); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
-        tAsh = tRoad = tCity = tCrater = tCliff = tBody = tPlaza = gGlow = pA = pB = craterGlow = null;
-        shaders = new Shader[7];
+        recycle(tBody); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
+        tAsh = tRoad = tCity = tCrater = tCliff = tBody = gGlow = pA = pB = craterGlow = null;
+        shaders = new Shader[6];
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
 }
