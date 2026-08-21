@@ -200,11 +200,14 @@ public final class SceneMap {
 
         if (qf < 10.5f) {                                   // ---- ASHEN FIELDS ----
             ts = 0;
-            ti = 12;                                        // a13 scorched black, uniform field
-            if (rf < -4.5f) {                               // (old cliff band — now a13 too)
+            if (rf < -7.7f) ti = 15;                        // void (restored)
+            else if (rf < -4.5f) {                          // cliff strata band (restored)
+                ti = 10 + ((h >>> 3) & 1);
                 if ((h >>> 10) % 100 < 6) pr = 16 + ((h >>> 14) & 1);   // boulders at cliff base
                 if ((h >>> 13) % 1000 < 3) gl = 13;                     // rare blue wisp
             } else {
+                ti = 12;                                    // walkable = a13 scorched only
+                rot = (h >>> 12) & 3;                       // random 0/90/180/270 spin
                 if ((h >>> 4) % 1000 < 6) gl = 6;                       // stray ember sparks
                 if (qf > -5f && qf < 12f && rf > -3f && rf < 2f && n2 > 0.6f
                         && (h >>> 4) % 100 < 26)                        // ember veins ~10% of band
@@ -366,28 +369,31 @@ public final class SceneMap {
             for (int ty = y0; ty <= y1; ty++)
                 for (int tx = x0; tx <= x1; tx++, i++) computeTile(i, tx, ty);
         }
-        float sz = TS * zoom + 1.5f, half = sz * 0.5f;     // ~1px screen overlap kills seams
-        // PASS 1 — terrain
+        // PASS 1 — terrain: exact-fit tiles, shared boundaries, ZERO overdraw
         for (int ty = y0, i = 0; ty <= y1; ty++) {
             for (int tx = x0; tx <= x1; tx++, i++) {
                 float sx = (tx * TS - camX) * zoom + vw * 0.5f;
                 float sy = (ty * TS - camY) * zoom + vh * 0.5f;
+                int L = (int) Math.floor(sx), T = (int) Math.floor(sy);
+                int R = (int) Math.floor(sx + TS * zoom), B = (int) Math.floor(sy + TS * zoom);
                 Bitmap b = full ? sheets[tS[i]] : null;
                 if (b == null) {
                     tp.setColor(fallback(tx, ty));
-                    dstR.set((int) (sx - 0.75f), (int) (sy - 0.75f), (int) (sx + sz), (int) (sy + sz));
+                    dstR.set(L, T, R, B);
                     c.drawRect(dstR, tp);
                     continue;
                 }
                 cell(tI[i]);
                 if (tR[i] == 0) {
-                    dstR.set((int) (sx - 0.75f), (int) (sy - 0.75f), (int) (sx + sz), (int) (sy + sz));
+                    dstR.set(L, T, R, B);
                     c.drawBitmap(b, srcR, dstR, tp);
                 } else {
+                    int w = R - L, hgt = B - T;
                     c.save();
-                    c.translate(sx + TS * zoom * 0.5f, sy + TS * zoom * 0.5f);
+                    c.translate((L + R) * 0.5f, (T + B) * 0.5f);
                     c.rotate(tR[i] * 90f);
-                    dstR.set((int) -half, (int) -half, (int) half, (int) half);
+                    if ((tR[i] & 1) == 1) dstR.set(-(hgt >> 1), -(w >> 1), (hgt + 1) >> 1, (w + 1) >> 1);
+                    else dstR.set(-(w >> 1), -(hgt >> 1), (w + 1) >> 1, (hgt + 1) >> 1);
                     c.drawBitmap(b, srcR, dstR, tp);
                     c.restore();
                 }
