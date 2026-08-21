@@ -383,7 +383,7 @@ public final class SceneMap {
                     c.drawRect(dstR, tp);
                     continue;
                 }
-                cell(tI[i]);
+                cell(b, tI[i]);
                 if (tR[i] == 0) {
                     dstR.set(L, T, R, B);
                     c.drawBitmap(b, srcR, dstR, tp);
@@ -416,7 +416,7 @@ public final class SceneMap {
                     float cy = (ty * TS + TS * 0.5f - camY) * zoom + vh * 0.5f
                             + (((h >>> 16) & 255) / 255f - 0.5f) * TS * 0.4f * zoom;
                     pp.setAlpha(D_A[d]);
-                    cell(ci);
+                    cell(b, ci);
                     dstR.set((int) (cx - s * 0.5f), (int) (cy - s * 0.5f), (int) (cx + s * 0.5f), (int) (cy + s * 0.5f));
                     c.drawBitmap(b, srcR, dstR, pp);
                 }
@@ -473,9 +473,9 @@ public final class SceneMap {
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
     }
 
-    private void cell(int idx) {
-        int cx = (idx & 3) * CELL, cy = (idx >> 2) * CELL;
-        srcR.set(cx, cy, cx + CELL, cy + CELL);
+    private void cell(Bitmap b, int idx) {
+        int cw = b.getWidth() >> 2, ch = b.getHeight() >> 2;
+        srcR.set((idx & 3) * cw, (idx >> 2) * ch, ((idx & 3) + 1) * cw, ((idx >> 2) + 1) * ch);
     }
 
     private int fallback(int tx, int ty) {
