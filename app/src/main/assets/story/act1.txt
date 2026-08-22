@@ -1,25 +1,25 @@
 # ACT ONE — continuous-map trigger script.
 # Zones fire once unless gated.
 # Display text = SAY lines only.
-# NOTE: meeting staged at the western cliff wall; gate at the ashen exit.
+# NOTE: meeting inside the ashen valley at the western cliff wall; gate at the ashen exit.
 
 ZONE opening 0 7 2
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
-TELEPORT nilou -28 4
+TELEPORT nilou -26 6
 
 SAY NilouZila I can see the banners of Mordethail from here. The Carrion Kings. And those—
 SAY NilouZila Thornborn. I watched Vorvexis flay their elders alive two centuries ago. Apparently the children remembered.
 SAY NilouZila Eastern wall. Gone.
 
 SFX footsteps_gravel_far
-SPAWN vex -31 2 npc
-SPAWN soldier -31 5 npc s1
-SPAWN soldier -31 1 npc s2
-WALK vex -29 3 1.6
-WALK s1 -29 5 1.6
-WALK s2 -29 2 1.6
+SPAWN vex -31 4 npc
+SPAWN soldier -31 7 npc s1
+SPAWN soldier -31 3 npc s2
+WALK vex -28 5 2.0
+WALK s1 -28 7 2.0
+WALK s2 -28 4 2.0
 WAIT_WALK vex
 FACE nilou left
 SAY Vex Mistress! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
@@ -34,19 +34,19 @@ SAY Vex What about you?
 SAY NilouZila I'm going to the courtyard.
 SAY Vex That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
-EXIT vex -31 2
-EXIT s1 -31 5
-EXIT s2 -31 1
+EXIT vex -31 4
+EXIT s1 -31 7
+EXIT s2 -31 3
 
 SAY NilouZila Four hundred years I've knelt at her feet.
 SAY NilouZila I didn't claw my way out of the Pit of Screaming Souls, survive the Binding Trials, and bury my rivals one by one just to watch her empire turn to ash from a cliff.
 
 # (two turns later, they walk in from the east)
 WAIT_TURNS 2
-SPAWN enemy -16 2 e0
-SPAWN enemy -16 6 e1
-SPAWN enemy -20 0 e2
-SPAWN enemy -20 8 e3
+SPAWN enemy -14 4 e0
+SPAWN enemy -14 8 e1
+SPAWN enemy -16 2 e2
+SPAWN enemy -16 10 e3
 KILLNOTE 4 four taken DOWN.
 FIGHT 4
 
