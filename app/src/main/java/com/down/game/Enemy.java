@@ -24,6 +24,7 @@ public class Enemy {
 
     public int mana = 100, maxMana = 100;
     public int atkForm = 0;
+    public int beastForm = 1;  // 1=lunge, 2=slam, 3=bite
     public int atkPos = 0;
     public float attackDuration = ATK_DUR;
 
@@ -37,6 +38,16 @@ public class Enemy {
     public static final int[] HEAVY_ATK_RANGE  = {  1,  2 };
     public static final float[] HEAVY_ATK_DUR  = { 0.95f, 1.10f };
     public static final int BEAST_DMG = 18;
+
+    // Beast attack forms: 1 = lunge, 2 = slam, 3 = bite
+    public static final int[][] BEAST_ATK_SEQ = {
+            { 0, 1, 2, 3, 1, 4, 5 },  // lunge
+            { 0, 1, 2, 3, 4 },        // slam
+            { 0, 4, 1, 5 }            // bite: 1->5->2->6
+    };
+    public static final int[] BEAST_ATK_STRIKE = { 3, 3, 2 };
+    public static final int[] BEAST_ATK_DMG = { 18, 18, 15 };
+    public static final float[] BEAST_ATK_DUR = { 0.9f, 1.1f, 0.85f };
 
     public static final float MANA_REGEN = 30f;
 
@@ -111,7 +122,14 @@ public class Enemy {
                         attackT = 0;
                         atkPos = 0;
                         struck = false;
-                        attackDuration = heavy ? HEAVY_ATK_DUR[atkForm - 1] : ATK_DUR;
+                        if (beast) {
+                            beastForm = (Math.random() < 0.4f) ? 3 : (Math.random() < 0.6f ? 2 : 1);
+                            attackDuration = BEAST_ATK_DUR[beastForm - 1];
+                        } else if (heavy) {
+                            attackDuration = HEAVY_ATK_DUR[atkForm - 1];
+                        } else {
+                            attackDuration = ATK_DUR;
+                        }
                         facing = px >= x ? 1 : -1;
                     } else {
                         act = 3;
@@ -128,6 +146,11 @@ public class Enemy {
                         float t = attackT / attackDuration;
                         int newPos = Math.min(seq.length - 1, (int) (t * seq.length));
                         if (newPos > atkPos) atkPos = newPos;
+                    } else if (beast) {
+                        int[] seq = BEAST_ATK_SEQ[beastForm - 1];
+                        float t = attackT / attackDuration;
+                        int newPos = Math.min(seq.length - 1, (int) (t * seq.length));
+                        if (newPos > atkPos) atkPos = newPos;
                     }
                     if (attackT > attackDuration) {
                         attacksDone++;
@@ -138,7 +161,14 @@ public class Enemy {
                         boolean canAgain = (heavy && atkForm == 2) ? nextInRange2 : nextAdjacent;
                         if (attacksDone < attacksPlanned && canAgain) {
                             attackT = 0;
-                            attackDuration = heavy ? HEAVY_ATK_DUR[atkForm - 1] : ATK_DUR;
+                            if (beast) {
+                                beastForm = (Math.random() < 0.4f) ? 3 : (Math.random() < 0.6f ? 2 : 1);
+                                attackDuration = BEAST_ATK_DUR[beastForm - 1];
+                            } else if (heavy) {
+                                attackDuration = HEAVY_ATK_DUR[atkForm - 1];
+                            } else {
+                                attackDuration = ATK_DUR;
+                            }
                         } else {
                             attackT = -1;
                             act = 3;
