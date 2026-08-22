@@ -134,6 +134,31 @@ public class Sprites {
         return out;
     }
 
+    // C6: crop every frame to its visible alpha bounds so drawn size = art size.
+    public static List<Bitmap> tightCrop(List<Bitmap> src) {
+        List<Bitmap> out = new ArrayList<>();
+        for (Bitmap b : src) {
+            if (b == null || b.isRecycled()) { out.add(b); continue; }
+            int w = b.getWidth(), h = b.getHeight();
+            int[] px = new int[w * h];
+            b.getPixels(px, 0, w, 0, 0, w, h);
+            int x0 = w, y0 = h, x1 = -1, y1 = -1;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    if ((px[y * w + x] >>> 24) > 16) {
+                        if (x < x0) x0 = x;
+                        if (x > x1) x1 = x;
+                        if (y < y0) y0 = y;
+                        if (y > y1) y1 = y;
+                    }
+                }
+            }
+            if (x1 < 0) { out.add(b); continue; }
+            out.add(Bitmap.createBitmap(b, x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+        }
+        return out;
+    }
+
     // ----- Pre-tint cache (P3): avoids per-frame ColorFilter allocations -----
     private static final Map<Long, Bitmap> TINT_CACHE = new HashMap<>();
     private static final Paint TINT_PAINT = new Paint();
