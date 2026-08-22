@@ -125,6 +125,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private Story story;
     private boolean storyFight;
     private boolean storyMode;
+    private boolean storyTest;
     private final RectF chapterBtn = new RectF();
     private boolean camSnap;
     private int menuPress;
@@ -344,17 +345,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             b.eSoldierGlide = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/soldier_glide.png", 2, 2, 2), true, false));
             b.props  = Sprites.trimBottom(
-                    Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 4), 0.9f);
+                    Sprites.cutSheet(c, "map/props_a.png", 4, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
-                    Sprites.cutSheet(c, "sprites/props_b.png", 4, 4, 4), 0.9f);
+                    Sprites.cutSheet(c, "map/props_b.png", 4, 4, 4), 0.9f);
             b.propsCity = Sprites.trimBottom(
-                    Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 4), 0.9f);
-            b.propsAF = Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 2);
-            b.propsBF = Sprites.cutSheet(c, "sprites/props_b.png", 4, 4, 2);
-            b.propsCF = Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 2);
+                    Sprites.cutSheet(c, "map/props_city.png", 2, 4, 4), 0.9f);
+            b.propsAF = Sprites.cutSheet(c, "map/props_a.png", 4, 4, 2);
+            b.propsBF = Sprites.cutSheet(c, "map/props_b.png", 4, 4, 2);
+            b.propsCF = Sprites.cutSheet(c, "map/props_city.png", 2, 4, 2);
             scrubFringe(b.props); scrubFringe(b.props2); scrubFringe(b.propsCity);
             scrubFringe(b.propsAF); scrubFringe(b.propsBF); scrubFringe(b.propsCF);
-            b.gate = Sprites.cutSheet(c, "sprites/props_gate.png", 2, 4, 2);
+            b.gate = Sprites.cutSheet(c, "map/props_gate.png", 2, 4, 2);
             scrubFringe(b.gate);
             scrubFrames(b.eBeastIdle); scrubFrames(b.eBeastGlide); scrubFrames(b.eBeastAtk);
             scrubFrames(b.eSoldierIdle); scrubFrames(b.eSoldierGlide);
@@ -792,7 +793,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             Integer bt = bleedTurns.get(p);
             if (bt != null && bt > 0) {
                 int bd = bleedDmg.get(p);
-                p.hp -= bd;
+                if (!storyTest) p.hp -= bd;
                 addDmg(p.x, p.y - PLAYER_H - 20, -bd, C_BLOOD);
                 sound.play("hit");
                 bleedTurns.put(p, bt - 1);
@@ -1125,31 +1126,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
     }
 
-    private void startTest() {
-        party.clear();
-        Player a = new Player(); a.hero = roster[0];
-        Player b = new Player(); b.hero = roster[1];
-        worldToHex(640, 640, IH_A);
-        hexToWorld(IH_A[0], IH_A[1], FW_A);
-        a.x = a.targetX = FW_A[0]; a.y = a.targetY = FW_A[1];
-        hexToWorld(IH_A[0] + 1, IH_A[1], FW_A);
-        b.x = b.targetX = FW_A[0]; b.y = b.targetY = FW_A[1];
-        party.add(a); party.add(b);
-        player = a;
-        voice = a.hero.voice;
-        resetFightKeepParty();
-        // Guarantee at least one heavy in the opening wave so it's testable immediately.
-        boolean hasHeavy = false;
-        for (Enemy e : enemies) if (e.heavy) { hasHeavy = true; break; }
-        if (!hasHeavy && !enemies.isEmpty()) {
-            Enemy e = enemies.get(0);
-            e.heavy = true;
-            e.hp = 60; e.maxHp = 60;
-            e.mana = 100; e.maxMana = 100;
-            e.weapon = 2;
-        }
-        state = STATE_GAME;
-    }
+    // legacy sandbox test mode removed — story test mode replaces it.
 
     private void startGame(Hero h) {
         party.clear();
@@ -1691,7 +1668,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         for (int i = 0; i < 4; i++)
                             spawnPuff(tgt.x + (float) (Math.random() * 50 - 25), tgt.y + (float) (Math.random() * 14 - 7));
                         int dmg = Enemy.BEAST_ATK_DMG[0];
-                        tgt.hp -= dmg;
+                        if (!storyTest) tgt.hp -= dmg;
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hit");
@@ -1712,7 +1689,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         shakeT = Math.max(shakeT, 0.3f);
                         zoomPunch = 0.15f;
                         int dmg = Enemy.BEAST_ATK_DMG[1];
-                        tgt.hp -= dmg;
+                        if (!storyTest) tgt.hp -= dmg;
                         bleedTurns.put(tgt, 2);
                         bleedDmg.put(tgt, (int)(dmg * 0.2f));
                         hurtT = 0.4f;
@@ -1733,7 +1710,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         shakeT = Math.max(shakeT, 0.1f);
                         spawnSlash(tgt.x, tgt.y);
                         int dmg = Enemy.BEAST_ATK_DMG[2];
-                        tgt.hp -= dmg;
+                        if (!storyTest) tgt.hp -= dmg;
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hit");
@@ -1759,7 +1736,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                             worldToHex(p.x, p.y, IH_B);
                             if (hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= Enemy.HEAVY_ATK_RANGE[1]) {
                                 spawnSlash(p.x, p.y);
-                                p.hp -= Enemy.HEAVY_ATK_DMG[1];
+                                if (!storyTest) p.hp -= Enemy.HEAVY_ATK_DMG[1];
                                 addDmg(p.x, p.y - PLAYER_H - 20, -Enemy.HEAVY_ATK_DMG[1]);
                                 hurtT = 0.4f;
                                 sound.play("hit");
@@ -1784,7 +1761,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         // Single-target (light enemy, or heavy blade combo).
                         sound.play(active.weapon == 1 ? "claw" : "swing");
                         int dmg = active.heavy ? Enemy.HEAVY_ATK_DMG[0] : 10;
-                        tgt.hp -= dmg;
+                        if (!storyTest) tgt.hp -= dmg;
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hit");
@@ -1828,6 +1805,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (!d.active) continue;
             d.t += dt;
             if (d.t > 0.8f) d.active = false;
+        }
+        if (storyTest) {
+            for (Player p : party) { p.hp = Math.max(p.hp, 1); p.cried = false; }
         }
         boolean heroMoving = false;
         for (Player p : party) if (p.isMoving()) { heroMoving = true; break; }
@@ -1907,9 +1887,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         menuBtnTest.set(W / 2f - bw / 2, H * 0.52f, W / 2f + bw / 2, H * 0.52f + bh);
         menuBtnStory.set(W / 2f - bw / 2, H * 0.52f + bh + gap,
                 W / 2f + bw / 2, H * 0.52f + bh * 2 + gap);
-        drawMenuButton(cv, menuBtnTest, "TEST MODE", C_MAGENTA,
+        drawMenuButton(cv, menuBtnTest, "STORY - TEST", C_MAGENTA,
                 menuPress == 1, assetsReady);
-        drawMenuButton(cv, menuBtnStory, "STORY MODE", 0xFF7d78a0,
+        drawMenuButton(cv, menuBtnStory, "STORY - PLAY", 0xFF7d78a0,
                 menuPress == 2, assetsReady);
 
         if (!assetsReady) drawLoader(cv);
@@ -1994,9 +1974,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (act == MotionEvent.ACTION_UP) {
             if (menuPress == 1 && menuBtnTest.contains(e.getX(), e.getY())) {
                 sound.play("ui");
-                startTest();
+                storyTest = true;
+                startStory();
             }
-            if (menuPress == 2 && menuBtnStory.contains(e.getX(), e.getY())) startStory();
+            if (menuPress == 2 && menuBtnStory.contains(e.getX(), e.getY())) {
+                sound.play("ui");
+                storyTest = false;
+                startStory();
+            }
             menuPress = 0;
             return true;
         }
@@ -2328,8 +2313,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 if (a == 0) continue;
                 int r = (c >> 16) & 255, g = (c >> 8) & 255, bl = c & 255;
                 int ex = (r < bl ? r : bl) - g;
-                if (ex > 60) px[p] = 0;
-                else if (ex > 30) px[p] = (c & 0x00FFFFFF) | ((a / 2) << 24);
+                int lum = r + g + bl;
+                if (ex > 60 || (ex > 25 && lum < 480)) px[p] = 0;
+                else if (ex > 25) px[p] = (c & 0x00FFFFFF) | ((a / 2) << 24);
             }
             b.setPixels(px, 0, w, 0, 0, w, h);
             f.bmp = b;
@@ -2797,8 +2783,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
         if (en.floater.state == 0) {
             if (en.beast && !eBeastIdleFr.isEmpty()) {
-                int bucket = (int) (en.animT * 3f);
-                return eBeastIdleFr.get(h2(bucket, 13, 21) % eBeastIdleFr.size());
+                return eBeastIdleFr.get(((int) (en.animT * 3f)) % eBeastIdleFr.size());
             }
             java.util.List<Frame> pool = en.heavy ? eHeavyIdleFr : eIdleFr;
             if (!pool.isEmpty()) return pool.get(((int) (en.animT * 3f)) % pool.size());
