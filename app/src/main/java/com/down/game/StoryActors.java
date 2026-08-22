@@ -70,6 +70,11 @@ public class StoryActors {
         if (a != null) a.moveToHex(q, r, dur);
     }
 
+    public void glideTo(String key, int q, int r, float dur) {
+        StoryActor a = get(key);
+        if (a != null) a.moveToHex(q, r, dur, true);
+    }
+
     public void exitTo(String key, int q, int r) {
         StoryActor a = get(key);
         if (a != null) { a.moveToHex(q, r, 0.6f); a.hidden = true; }
@@ -118,11 +123,15 @@ public class StoryActors {
 
     private void drawActor(Canvas cv, StoryActor a, float camX, float camY, float zoom, int W, int H, float t) {
         float sx = (a.x - camX) * zoom + W / 2f;
-        float sy = (a.y - camY) * zoom + H / 2f;
+        float sy = (a.y - camY) * zoom + H / 2f - a.lift * zoom;
         float h = getHeight(a.kind) * zoom;
         float w = h * 0.55f;
+        float shrink = 1f - (a.lift / 150f) * 0.35f;
         shadowPaint.setColor(0x66000000);
-        cv.drawOval(sx - w * 0.62f, sy - h * 0.12f - 18f * zoom, sx + w * 0.62f, sy - 18f * zoom, shadowPaint);
+        shadowPaint.setAlpha((int) (0x66 * shrink));
+        cv.drawOval(sx - w * 0.62f * shrink, sy + a.lift * zoom - h * 0.12f - 18f * zoom,
+                sx + w * 0.62f * shrink, sy + a.lift * zoom - 18f * zoom, shadowPaint);
+        shadowPaint.setAlpha(0x66);
 
         cv.save();
         cv.translate(sx, sy);
@@ -244,6 +253,7 @@ public class StoryActors {
 
     private static String kindFromName(String name) {
         if ("nilou".equalsIgnoreCase(name) || "vex".equalsIgnoreCase(name)) return "hero";
+        if ("sabrina".equalsIgnoreCase(name)) return "soldier";
         if ("vel".equalsIgnoreCase(name)) return "vel";
         if ("ws".equalsIgnoreCase(name)) return "ws";
         if ("soldier".equalsIgnoreCase(name)) return "soldier";
