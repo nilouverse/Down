@@ -164,6 +164,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eSoldierIdleFr = new ArrayList<>();
     private final ArrayList<Frame> eSoldierGlideFr = new ArrayList<>();
     private List<Bitmap> propsGate;
+    private final HashSet<Enemy> biteFired = new HashSet<>();
+    private final float[] biteX = new float[4], biteY = new float[4], biteT0 = new float[4];
+    private final boolean[] biteOn = new boolean[4];
+    private int biteSlot = 0;
     private Frame[] arrEnIdle, arrEnGlide, arrInfIdle, arrInfGlide,
             arrBeastIdle, arrBeastGlide, arrSoldierIdle, arrSoldierGlide;
     private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
@@ -1453,6 +1457,20 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (scriptZoom) {
             zoom += (zoomTarget - zoom) * (1 - (float) Math.exp(-dt * 4f));
         }
+        for (int i = 0; i < enemies.size(); i++) {
+            Enemy en = enemies.get(i);
+            if (en.beast && en.attackT > 0.01f && en.attackT < en.attackDuration) {
+                if (en.beastForm == 3 && !biteFired.contains(en)
+                        && en.attackT > en.attackDuration * 0.5f) {
+                    biteFired.add(en);
+                    sound.play("beast_bite");
+                    Player tgt = nearestAlive(en.x, en.y);
+                    if (tgt != null) spawnBite(tgt.x, tgt.y);
+                }
+            } else if (en.attackT <= 0.01f) {
+                biteFired.remove(en);
+            }
+        }
 
         if (!panning && !player.isMoving() && camMode == 0 && !swActive && (flingX != 0 || flingY != 0)) {
             camX += flingX * dt;
@@ -1626,15 +1644,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 if ((!wasAttacking && active.attacking())) {
                     sound.play(active.weapon == 1 ? "claw" : "swing");
                     if (active.beast) {
-                        active.attackDuration = active.atkForm == 1 ? 1.6f : 1.4f;
+                        active.attackDuration = active.beastForm == 1 ? Enemy.BEAST_ATK_DUR[0] : (active.beastForm == 2 ? Enemy.BEAST_ATK_DUR[1] : Enemy.BEAST_ATK_DUR[2]);
                         sound.play("beast_attack");
-                        sound.play(active.atkForm == 1 ? "beast_lunge" : "beast_slam");
-                        if (active.atkForm == 1) beginBeastLeap(active, tgt);
+                        sound.play(active.beastForm == 1 ? "beast_lunge" : (active.beastForm == 2 ? "beast_slam" : "beast_bite"));
+                        if (active.beastForm == 1) beginBeastLeap(active, tgt);
                     }
                 }
                 if (active.beast && active.attacking()) stepBeastLeap(active, tgt);
                 else if (active.beast) leapOff.remove(active);
-                // Strike detection: light uses time-fraction; heavy uses sequence index.
+                // Strike detection
                 boolean didStrike = false;
                 if (active.attacking() && !active.struck) {
                     if (active.heavy) {
@@ -1643,24 +1661,26 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         int strikeAt = Enemy.HEAVY_ATK_STRIKE[form - 1];
                         if (active.atkPos > prevAtkPos && active.atkPos >= strikeAt) didStrike = true;
                     } else if (active.beast) {
-                        if (active.atkForm == 1 && active.attackT > 0.55f) didStrike = true;
-                        if (active.atkForm == 2 && active.attackT > 0.8f) didStrike = true;
+                        int[] seq = Enemy.BEAST_ATK_SEQ[active.beastForm - 1];
+                        int strikeAt = Enemy.BEAST_ATK_STRIKE[active.beastForm - 1];
+                        if (active.atkPos > prevAtkPos && active.atkPos >= strikeAt) didStrike = true;
                     } else {
                         if (active.attackT > 0.45f) didStrike = true;
                     }
                 }
                 if (didStrike) {
                     active.struck = true;
-                    if (active.beast && active.atkForm == 1) {
-                        // Leap slam: lands on the target hex.
+                    if (active.beast && active.beastForm == 1) {
+                        // Lunge
                         sound.play("swing");
                         shakeT = Math.max(shakeT, 0.15f);
                         spawnSlash(tgt.x, tgt.y);
                         for (int i = 0; i < 4; i++)
                             spawnPuff(tgt.x + (float) (Math.random() * 50 - 25), tgt.y + (float) (Math.random() * 14 - 7));
-                        tgt.hp -= BEAST_B1_DMG;
+                        int dmg = Enemy.BEAST_ATK_DMG[0];
+                        tgt.hp -= dmg;
                         hurtT = 0.3f;
-                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -BEAST_B1_DMG);
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hit");
                         if (tgt.hp > 0) {
                             sound.play("hurt");
@@ -1671,18 +1691,19 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         boolean allDeadB1 = true;
                         for (Player p : party) if (p.hp > 0) allDeadB1 = false;
                         if (allDeadB1) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
-                    } else if (active.beast && active.atkForm == 2) {
-                        // Full-mana slam: huge hit + bleed.
+                    } else if (active.beast && active.beastForm == 2) {
+                        // Slam
                         active.mana = 0;
                         sound.play("blast");
                         spawnBlast(active.x, active.y);
                         shakeT = Math.max(shakeT, 0.3f);
                         zoomPunch = 0.15f;
-                        tgt.hp -= BEAST_B2_DMG;
+                        int dmg = Enemy.BEAST_ATK_DMG[1];
+                        tgt.hp -= dmg;
                         bleedTurns.put(tgt, 2);
-                        bleedDmg.put(tgt, BEAST_B2_DMG * BEAST_BLEED_PCT / 100);
+                        bleedDmg.put(tgt, (int)(dmg * 0.2f));
                         hurtT = 0.4f;
-                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -BEAST_B2_DMG);
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hit");
                         if (tgt.hp > 0) {
                             sound.play("hurt");
@@ -1693,6 +1714,25 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         boolean allDeadB2 = true;
                         for (Player p : party) if (p.hp > 0) allDeadB2 = false;
                         if (allDeadB2) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
+                    } else if (active.beast && active.beastForm == 3) {
+                        // Bite
+                        sound.play("swing");
+                        shakeT = Math.max(shakeT, 0.1f);
+                        spawnSlash(tgt.x, tgt.y);
+                        int dmg = Enemy.BEAST_ATK_DMG[2];
+                        tgt.hp -= dmg;
+                        hurtT = 0.3f;
+                        addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
+                        sound.play("hit");
+                        if (tgt.hp > 0) {
+                            sound.play("hurt");
+                            sound.play(tgt.hero.voice + "_hurt");
+                            post(hapticRun);
+                            if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        }
+                        boolean allDeadB3 = true;
+                        for (Player p : party) if (p.hp > 0) allDeadB3 = false;
+                        if (allDeadB3) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
                     } else if (active.heavy && active.atkForm == 2) {
                         // Nova: hits all heroes within 2 hexes.
                         active.mana -= Enemy.HEAVY_ATK_MANA[1];
@@ -1730,7 +1770,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     } else if (adj) {
                         // Single-target (light enemy, or heavy blade combo).
                         sound.play(active.weapon == 1 ? "claw" : "swing");
-                        int dmg = active.heavy ? Enemy.HEAVY_ATK_DMG[0] : (active.beast ? Enemy.BEAST_DMG : 10);
+                        int dmg = active.heavy ? Enemy.HEAVY_ATK_DMG[0] : 10;
                         tgt.hp -= dmg;
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
@@ -2217,6 +2257,46 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return (l == null || l.isEmpty()) ? null : l.get(i % l.size());
     }
 
+    private Player nearestAlive(float x, float y) {
+        Player best = null; float bd = 1e18f;
+        for (Player p : party) {
+            if (p.hp <= 0) continue;
+            float d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+            if (d < bd) { bd = d; best = p; }
+        }
+        return best;
+    }
+
+    private void spawnBite(float x, float y) {
+        int i = biteSlot++ & 3;
+        biteX[i] = x; biteY[i] = y; biteT0[i] = loadT; biteOn[i] = true;
+    }
+
+    // Jaw-snap: two fang arcs closing fast, impact flash at the snap.
+    private void drawBites(Canvas cv) {
+        for (int i = 0; i < 4; i++) {
+            if (!biteOn[i]) continue;
+            float age = loadT - biteT0[i];
+            if (age > 0.3f || age < 0) { biteOn[i] = false; continue; }
+            float k = age / 0.3f;
+            float x = sx(biteX[i]), y = sy(biteY[i]) - PLAYER_H * 0.5f * zoom;
+            float open = (1f - k) * 26f * zoom + 4f * zoom;
+            paint.setAlpha((int) (255 * (1f - k * 0.6f)));
+            paint.setColor(0xfff2f6f0);
+            paint.setStrokeWidth(5f * zoom);
+            paint.setStyle(Paint.Style.STROKE);
+            cv.drawArc(x - 20f * zoom, y - open - 18f * zoom, x + 20f * zoom, y - open + 18f * zoom, 20, 140, false, paint);
+            cv.drawArc(x - 20f * zoom, y + open - 18f * zoom, x + 20f * zoom, y + open + 18f * zoom, 200, 140, false, paint);
+            paint.setStyle(Paint.Style.FILL);
+            if (k > 0.75f) {
+                paint.setColor(0xffe8ffb0);
+                paint.setAlpha((int) ((k - 0.75f) / 0.25f * 200));
+                cv.drawCircle(x, y, 14f * zoom, paint);
+            }
+            paint.setAlpha(255);
+        }
+    }
+
     // Some sheets ship with a DARK magenta key that the standard keyer only
     // half-removes. Hard-scrub frame pools that are props-in-disguise.
     private static void scrubFrames(List<Frame> l) {
@@ -2652,10 +2732,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private Frame pickEnemyFrame(Enemy en) {
         if (en.attacking()) {
             if (en.beast) {
-                java.util.List<Frame> pool = en.atkForm == 1 ? eBeastGlideFr : eBeastAtkFr;
+                java.util.List<Frame> pool = en.beastForm == 1 ? eBeastGlideFr : eBeastAtkFr;
                 if (pool.isEmpty()) return null;
                 int i;
-                if (en.atkForm == 1) {
+                if (en.beastForm == 1) {
                     float t = en.attackT;
                     if (t < 0.10f) i = 0;       // A1
                     else if (t < 0.25f) i = 4;  // B1
@@ -2667,7 +2747,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     else if (t < 1.30f) i = 0;  // A1
                     else i = (((int) (en.animT * 10f)) % 2 == 0) ? 1 : 5; // jump-back shuffle
                 } else {
-                    int[] seq = { 0, 1, 2, 3, 1, 4, 5 };
+                    int[] seq = Enemy.BEAST_ATK_SEQ[en.beastForm - 1];
                     float fps = eAtkFr.isEmpty() ? 6f : (eAtkFr.size() / Enemy.ATK_DUR);
                     int p = (int) (en.attackT * fps);
                     if (p > seq.length - 1) p = seq.length - 1;
@@ -2943,6 +3023,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         drawSorted(cv);
         if (storyMode && actors != null)
             actors.draw(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, loadT);
+        drawBites(cv);
         if (storyMode && map != null)
             map.drawFront(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H);
         drawParticles(cv);
