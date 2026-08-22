@@ -133,36 +133,24 @@ public class StoryActors {
         cv.translate(sx, sy);
         cv.scale(a.facing, 1f);
 
-        // walk cycle uses glide frames when available; idle otherwise.
-        Frame[] pool = (a.walking && a.glideFrames != null && a.glideFrames.length > 0)
-                ? a.glideFrames : a.idleFrames;
+        // Walking = glide pool with a two-frame crossfade (same read as combat).
+        boolean gliding = a.walking && a.glideFrames != null && a.glideFrames.length > 1;
+        Frame[] pool = gliding ? a.glideFrames : a.idleFrames;
         if (pool != null && pool.length > 0) {
-            int idx = (int) (t * (a.walking ? 6f : 8f)) % pool.length;
-            Frame f = pool[idx];
-            Bitmap bmp = f.bmp;
-            if (bmp != null && !bmp.isRecycled()) {
-                float s = h / f.ref;
-                if (f.vCrop) {
-                    frameSrc.set(0, f.top, bmp.getWidth(), f.top + f.ch);
-                    dstRect.set(-bmp.getWidth() * s / 2f, -f.ch * s, bmp.getWidth() * s / 2f, 0);
-                } else if (f.cCenter) {
-                    int wl = Math.max(0, f.rgt - f.ww);
-                    int wr = f.rgt;
-                    if (wl >= wr || f.top + f.ch > bmp.getHeight()) {
-                        frameSrc.set(0, 0, bmp.getWidth(), bmp.getHeight());
-                        dstRect.set(-bmp.getWidth() * s / 2f, -bmp.getHeight() * s,
-                                bmp.getWidth() * s / 2f, 0);
-                    } else {
-                        frameSrc.set(wl, f.top, wr, f.top + f.ch);
-                        float right = f.ww * s / 2f;
-                        dstRect.set(right - (wr - wl) * s, -f.ch * s, right, 0);
-                    }
-                } else {
-                    frameSrc.set(0, 0, bmp.getWidth(), bmp.getHeight());
-                    dstRect.set(-bmp.getWidth() * s / 2f, -bmp.getHeight() * s,
-                            bmp.getWidth() * s / 2f, 0);
-                }
-                cv.drawBitmap(bmp, frameSrc, dstRect, bitmapPaint);
+            if (gliding) {
+                float pos = t * 6f;
+                int n = pool.length;
+                int i0 = ((int) pos) % n;
+                int i1 = (i0 + 1) % n;
+                float fr = pos - (int) pos;
+                float k = (fr - 0.65f) / 0.35f;
+                if (k < 0) k = 0;
+                if (k > 1) k = 1;
+                drawFr(cv, pool[i0], h, 255);
+                if (k > 0.02f) drawFr(cv, pool[i1], h, (int) (k * 255));
+            } else {
+                int idx = (int) (t * 8f) % pool.length;
+                drawFr(cv, pool[idx], h, 255);
             }
             cv.restore();
             return;
@@ -195,6 +183,36 @@ public class StoryActors {
             cv.drawOval(-w * 0.9f, -h * 0.42f, w * 0.9f, -h * 0.10f, bodyPaint);
         }
         cv.restore();
+    }
+
+    private void drawFr(Canvas cv, Frame f, float h, int alpha) {
+        if (f == null) return;
+        Bitmap bmp = f.bmp;
+        if (bmp == null || bmp.isRecycled()) return;
+        float s = h / f.ref;
+        bitmapPaint.setAlpha(alpha);
+        if (f.vCrop) {
+            frameSrc.set(0, f.top, bmp.getWidth(), f.top + f.ch);
+            dstRect.set(-bmp.getWidth() * s / 2f, -f.ch * s, bmp.getWidth() * s / 2f, 0);
+        } else if (f.cCenter) {
+            int wl = Math.max(0, f.rgt - f.ww);
+            int wr = f.rgt;
+            if (wl >= wr || f.top + f.ch > bmp.getHeight()) {
+                frameSrc.set(0, 0, bmp.getWidth(), bmp.getHeight());
+                dstRect.set(-bmp.getWidth() * s / 2f, -bmp.getHeight() * s,
+                        bmp.getWidth() * s / 2f, 0);
+            } else {
+                frameSrc.set(wl, f.top, wr, f.top + f.ch);
+                float right = f.ww * s / 2f;
+                dstRect.set(right - (wr - wl) * s, -f.ch * s, right, 0);
+            }
+        } else {
+            frameSrc.set(0, 0, bmp.getWidth(), bmp.getHeight());
+            dstRect.set(-bmp.getWidth() * s / 2f, -bmp.getHeight() * s,
+                    bmp.getWidth() * s / 2f, 0);
+        }
+        cv.drawBitmap(bmp, frameSrc, dstRect, bitmapPaint);
+        bitmapPaint.setAlpha(255);
     }
 
     private float getHeight(String kind) {
