@@ -70,6 +70,11 @@ public class StoryActors {
         if (a != null) a.moveToHex(q, r, dur);
     }
 
+    public void walkVia(String key, int q, int r, int vq, int vr, float dur) {
+        StoryActor a = get(key);
+        if (a != null) a.moveToHexVia(q, r, vq, vr, dur);
+    }
+
     public void glideTo(String key, int q, int r, float dur) {
         StoryActor a = get(key);
         if (a != null) a.moveToHex(q, r, dur, true);
@@ -137,12 +142,10 @@ public class StoryActors {
         cv.translate(sx, sy);
         cv.scale(a.facing, 1f);
 
-        // Frame-based animation: walking uses glide with crossfade, idle uses idle frames
         Frame[] pool = (a.walking && a.glideFrames != null && a.glideFrames.length > 1)
                 ? a.glideFrames : a.idleFrames;
         if (pool != null && pool.length > 0) {
             if (a.walking && a.glideFrames != null && a.glideFrames.length > 1) {
-                // Walking: crossfade between two frames (same as combat)
                 float pos = t * 6f;
                 int n = pool.length;
                 int i0 = ((int) pos) % n;
@@ -154,7 +157,6 @@ public class StoryActors {
                 drawFr(cv, pool[i0], h, 255);
                 if (k > 0.02f) drawFr(cv, pool[i1], h, (int) (k * 255));
             } else {
-                // Idle: cycle at 8fps (same as combat)
                 int idx = (int) (t * 8f) % pool.length;
                 drawFr(cv, pool[idx], h, 255);
             }
@@ -162,7 +164,6 @@ public class StoryActors {
             return;
         }
 
-        // Fallback silhouette if no frames bound
         float top = -h;
         bodyPath.reset();
         bodyPath.moveTo(0, top);
