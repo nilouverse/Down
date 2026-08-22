@@ -1039,7 +1039,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return;
         }
         int steps = dist - 1; if (steps > 3) steps = 3;
-        en.attacksPlanned = en.heavy ? 1 : 1;
+        en.attacksPlanned = 1;
+        if (en.heavy) en.atkForm = 1;
         int cq = IH_B[0], cr = IH_B[1];
         en.pathLen = 0;
         if (flow.get(hexKey(cq, cr)) != null) {
@@ -1143,7 +1144,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             actors = new StoryActors();
         }
         sw().attach(map, actors, this);
-        sw().restoreState();
+        sw().reload();
 
         party.clear();
         Player a = new Player(); a.hero = roster[0];
@@ -1600,8 +1601,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 boolean didStrike = false;
                 if (active.attacking() && !active.struck) {
                     if (active.heavy) {
-                        int[] seq = Enemy.HEAVY_ATK_SEQ[active.atkForm - 1];
-                        int strikeAt = Enemy.HEAVY_ATK_STRIKE[active.atkForm - 1];
+                        int form = active.atkForm < 1 ? 1 : active.atkForm;
+                        int[] seq = Enemy.HEAVY_ATK_SEQ[form - 1];
+                        int strikeAt = Enemy.HEAVY_ATK_STRIKE[form - 1];
                         if (active.atkPos > prevAtkPos && active.atkPos >= strikeAt) didStrike = true;
                     } else if (active.beast) {
                         if (active.atkForm == 1 && active.attackT > 0.55f) didStrike = true;
@@ -2582,7 +2584,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (pool.isEmpty()) return null;
             int i;
             if (en.heavy) {
-                int[] seq = Enemy.HEAVY_ATK_SEQ[en.atkForm - 1];
+                int form = en.atkForm < 1 ? 1 : en.atkForm;
+                int[] seq = Enemy.HEAVY_ATK_SEQ[form - 1];
                 int p = Math.min(seq.length - 1, en.atkPos);
                 i = seq[p];
                 if (i >= pool.size()) i = pool.size() - 1;
