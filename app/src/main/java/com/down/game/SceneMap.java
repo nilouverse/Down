@@ -18,10 +18,9 @@ import java.io.InputStream;
 /**
  * Story-map compositor, hex-cut edition. ASHEN first: meadow = ash cells with
  * random 60-degree spins + mirror; north plateau = staged ledge (drawn, never
- * walkable); north/south/west rims = cliff lips; bodies (south-facing wall
- * faces) hang below north rim, south rim and the SW corner as stacked halves
- * of their body cell (top half on row r+1, bottom half on row r+2).
- * Road band uses the path tile. Everything else stays fallback until designed.
+ * walkable); north/south/west rims = cliff lips; bodies hang below rim rows as
+ * stacked halves of their body cell. Road band uses the path tile. A thin
+ * textured trail crosses the meadow from the spawn cliff to the gate mouth.
  * draw() allocates ZERO objects.
  */
 public final class SceneMap {
@@ -42,6 +41,7 @@ public final class SceneMap {
     private final boolean quality;
     private boolean craterVisible;
     private Bitmap craterGlow;
+    private volatile Bitmap pathStrip;
 
     private final Paint tp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
     private final Paint gp = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -81,6 +81,7 @@ public final class SceneMap {
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
             shaders = sh;
+            bakePathStrip();
             ready = true;
         } }, "map-load");
         loader.setDaemon(true);
@@ -281,20 +282,18 @@ public final class SceneMap {
         if (q <= 10) {
             int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);   // 0/180 + mirror
             boolean westLip = q == MIN_Q - 1 && r >= -7 && r <= 15;
-            if (q < MIN_Q - 1 || r <= -13 || r >= 16) ts = -1;                // void (the plain beyond the ledge)
+            if (q < MIN_Q - 1 || r <= -13 || r >= 16) ts = -1;                // void
             else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
             else if (r <= -5 && r >= -7) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim lip
-            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim (over actors)
-            else if (q < MIN_Q) ts = -1;                                     // west gap void
-            else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; } // cliff-top ledge = cliff blocks
+            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim
+            else if (q < MIN_Q) ts = -1;
+            else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; } // cliff-top ledge
             else { ts = 0; ti = (h >>> 4) & 15;                              // ashen meadow
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         } else if (q <= 36) {
             float t = (q - 11) / 25f;
-            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; }     // descent road (path tile)
-            // flanks stay fallback until the designer draws them
+            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; }     // descent road
         }
-        // q > 36 stays fallback until the city section is designed
         tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; fF[i] = front; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
 
@@ -326,8 +325,6 @@ public final class SceneMap {
         tp.setShader(null);
     }
 
-    // Cliff body: explicit source-rect clip of the chosen cell's top or bottom
-    // half into the hex. No shader, no clamping — strata stay continuous.
     private void wallHex(Canvas c, int ti, float cx, float cy, float s, boolean topHalf) {
         Bitmap b = tBody;
         if (b == null || b.isRecycled()) return;
@@ -342,6 +339,59 @@ public final class SceneMap {
         dstR.set((int)(cx - s), (int)(cy - s * 0.62f), (int)(cx + s), (int)(cy + s * 0.62f));
         c.drawBitmap(b, wallSrc, dstR, tp);
         c.restore();
+    }
+
+    // ================= THIN ASHEN TRAIL =================
+    // gentle S-curve from the spawn cliff (-26,6) to the gate mouth (11,2)
+    private static float trailR(float q) {
+        float t = (q + 26f) / 37f;
+        if (t < 0f) t = 0f;
+        if (t > 1f) t = 1f;
+        float e = t * t * (3f - 2f * t);
+        float wob = (float) Math.sin(q * 0.30f) * 0.6f + (float) Math.sin(q * 0.13f + 1.7f) * 0.35f;
+        return 6f - 4f * e + wob * (e * (1f - e));
+    }
+
+    private void bakePathStrip() {
+        if (tRoad == null) return;
+        int cw = cellW[1], ch = cellH[1];
+        if (cw <= 0 || ch <= 0) return;
+        Bitmap s = Bitmap.createBitmap(512, 96, Bitmap.Config.RGB_565);
+        Canvas c = new Canvas(s);
+        Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+        Rect src = new Rect(0, ch >> 2, cw, ch - (ch >> 2));
+        Rect dst = new Rect(0, 0, 512, 96);
+        c.drawBitmap(tRoad, src, dst, p);
+        pathStrip = s;
+    }
+
+    private void drawTrail(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        Bitmap s = pathStrip;
+        if (s == null) return;
+        float colX = HEX * SQ3, rowY = HEX * 1.5f * SQUASH;
+        float half = 30f;
+        float step = 32f;
+        float q = -27f;
+        while (q < 11.5f) {
+            float r = trailR(q);
+            float wx = colX * (q + r * 0.5f);
+            float wy = rowY * r;
+            float sxp = (wx - camX) * zoom + vw * 0.5f;
+            if (sxp > -80f && sxp < vw + 80f) {
+                float syp = (wy - camY) * zoom + vh * 0.5f;
+                float wpx = step * zoom + 1f;
+                tp.setColor(0xFF0d0710);
+                dstR.set((int) sxp - 1, (int) (syp - (half + 5f) * zoom),
+                         (int) (sxp + wpx + 1), (int) (syp + (half + 5f) * zoom));
+                c.drawRect(dstR, tp);
+                int u0 = ((int) (wx / step)) & 15;
+                srcR.set(u0 * 32, 0, u0 * 32 + 32, 96);
+                dstR.set((int) sxp, (int) (syp - half * zoom),
+                         (int) (sxp + wpx), (int) (syp + half * zoom));
+                c.drawBitmap(s, srcR, dstR, tp);
+            }
+            q += step / colX;
+        }
     }
 
     // ================= DRAW (zero allocation) =================
@@ -372,12 +422,13 @@ public final class SceneMap {
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
-        // PASS 1b — cliff bodies: top half on row r+1, bottom half on row r+2.
+        drawTrail(c, camX, camY, zoom, vw, vh);
+        // PASS 1b — cliff bodies
         if (tBody != null) {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
                 if (!full || bB[i] != 1 || fF[i] == 1) continue;
                 int ti = (h2(q, r, 7) >>> 4) & 15;
-                int dq = q < MIN_Q ? -1 : 0;                     // west wall hangs west of its lip
+                int dq = q < MIN_Q ? -1 : 0;
                 hexToWorld(q + dq, r + 1, HW);
                 wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true);
                 hexToWorld(q + dq, r + 2, HW);
@@ -453,7 +504,9 @@ public final class SceneMap {
         disposed = true;
         recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
         recycle(tBody); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
+        recycle(pathStrip);
         tAsh = tRoad = tCity = tCrater = tCliff = tBody = gGlow = pA = pB = craterGlow = null;
+        pathStrip = null;
         shaders = new Shader[6];
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
