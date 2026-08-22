@@ -45,6 +45,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private static final long FRAME_NS = 16666667L;
     private static final float ZOOM_MIN = 0.9f, ZOOM_MAX = 2.0f;
     private static final int GROUND_COL = 0xFF0a0608;
+    private static final float[] FOG_UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f,
+            0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
 
     private static final int C_INK = 0xFF0a0608;
     private static final int C_BLOOD = 0xFFb3102a;
@@ -90,6 +92,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private float zoomPunch = 0f;
 
     private String lastSceneName = "";
+    private final char[] posBuf = new char[16];
     public SceneMap map;
     public StoryActors actors;
     private float camLookX, camLookY, camLookT;
@@ -164,13 +167,16 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eBeastAtkFr = new ArrayList<>();
     private final ArrayList<Frame> eSoldierIdleFr = new ArrayList<>();
     private final ArrayList<Frame> eSoldierGlideFr = new ArrayList<>();
+    private final ArrayList<Frame> eSabrinaIdleFr = new ArrayList<>();
+    private final ArrayList<Frame> eSabrinaGlideFr = new ArrayList<>();
     private List<Bitmap> propsGate;
     private final HashSet<Enemy> biteFired = new HashSet<>();
     private final float[] biteX = new float[4], biteY = new float[4], biteT0 = new float[4];
     private final boolean[] biteOn = new boolean[4];
     private int biteSlot = 0;
     private Frame[] arrEnIdle, arrEnGlide, arrInfIdle, arrInfGlide,
-            arrBeastIdle, arrBeastGlide, arrSoldierIdle, arrSoldierGlide;
+            arrBeastIdle, arrBeastGlide, arrSoldierIdle, arrSoldierGlide,
+            arrSabrinaIdle, arrSabrinaGlide;
     private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
     private final HashMap<String, Frame[]> heroSheets = new HashMap<>();
     private final HashMap<String, Frame[]> heroGlide = new HashMap<>();
@@ -282,6 +288,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         ArrayList<Frame> eHeavyIdle, eHeavyGlide, eHeavyAtk;
         ArrayList<Frame> eBeastIdle, eBeastGlide, eBeastAtk;
         ArrayList<Frame> eSoldierIdle, eSoldierGlide;
+        ArrayList<Frame> eSabrinaIdle, eSabrinaGlide;
         List<Bitmap> gate;
         List<Bitmap> props, props2, propsCity;
         List<Bitmap> propsAF, propsBF, propsCF;
@@ -344,6 +351,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/soldier_idle.png", 2, 2, 4), false, true));
             b.eSoldierGlide = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/soldier_glide.png", 2, 2, 2), true, false));
+            b.eSabrinaIdle = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/sabrina_idle.png", 2, 2, 4), false, true));
+            b.eSabrinaGlide = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/sabrina_glide.png", 2, 2, 2), true, false));
             b.props  = Sprites.trimBottom(
                     Sprites.cutSheet(c, "map/props_a.png", 4, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
@@ -355,7 +366,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             b.propsCF = Sprites.cutSheet(c, "map/props_city.png", 2, 4, 2);
             scrubFringe(b.props); scrubFringe(b.props2); scrubFringe(b.propsCity);
             scrubFringe(b.propsAF); scrubFringe(b.propsBF); scrubFringe(b.propsCF);
-            b.gate = Sprites.cutSheet(c, "map/props_gate.png", 2, 4, 2);
+            b.gate = Sprites.tightCrop(Sprites.cutSheet(c, "map/props_gate.png", 2, 4, 2));
             scrubFringe(b.gate);
             scrubFrames(b.eBeastIdle); scrubFrames(b.eBeastGlide); scrubFrames(b.eBeastAtk);
             scrubFrames(b.eSoldierIdle); scrubFrames(b.eSoldierGlide);
@@ -474,6 +485,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         eBeastAtkFr.addAll(b.eBeastAtk);
         eSoldierIdleFr.addAll(b.eSoldierIdle);
         eSoldierGlideFr.addAll(b.eSoldierGlide);
+        eSabrinaIdleFr.addAll(b.eSabrinaIdle);
+        eSabrinaGlideFr.addAll(b.eSabrinaGlide);
         props = b.props; props2 = b.props2; propsCity = b.propsCity;
         propsAF = b.propsAF; propsBF = b.propsBF; propsCF = b.propsCF;
         propsGate = b.gate;
@@ -485,6 +498,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         arrBeastGlide = eBeastGlideFr.toArray(new Frame[0]);
         arrSoldierIdle = eSoldierIdleFr.toArray(new Frame[0]);
         arrSoldierGlide = eSoldierGlideFr.toArray(new Frame[0]);
+        arrSabrinaIdle = eSabrinaIdleFr.toArray(new Frame[0]);
+        arrSabrinaGlide = eSabrinaGlideFr.toArray(new Frame[0]);
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
 
         for (int i = 0; i < 3; i++) spawnEnemy();
@@ -2195,7 +2210,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             d.kind = 0;
             d.pr = b;
             d.ax = pr.x; d.ay = pr.y;
-            d.s = (TH * 1.9f * pr.scale) / b.getHeight();
+            float hh = TH * 1.9f * pr.scale;
+            if (pr.sheet == 3) {
+                // C6: the gate spans the path section top-to-bottom; scale = nudge knob.
+                float t = (pr.q - 11f) / 25f;
+                if (t < 0f) t = 0f;
+                if (t > 1f) t = 1f;
+                hh = (2f * (2.6f - 0.8f * t) * (HEX * 1.5f * SQUASH)) * pr.scale;
+            }
+            d.s = hh / b.getHeight();
             d.y = pr.y;
             d.obj = pr.flip ? Boolean.TRUE : null;
             drawList.add(d);
@@ -2327,6 +2350,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         Frame[] f = heroSheets.get(type);
         if (f != null) return f;
         if ("soldier".equals(type)) return arrSoldierIdle;
+        if ("sabrina".equals(type)) return arrSabrinaIdle;
         if ("infantry".equals(type)) return arrInfIdle;
         if ("beast".equals(type)) return arrBeastIdle;
         if ("enemy".equals(type)) return arrEnIdle;
@@ -2336,6 +2360,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         Frame[] g = heroGlide.get(type);
         if (g != null) return g;
         if ("soldier".equals(type)) return arrSoldierGlide;
+        if ("sabrina".equals(type)) return arrSabrinaGlide;
         if ("infantry".equals(type)) return arrInfGlide;
         if ("beast".equals(type)) return arrBeastGlide;
         if ("enemy".equals(type)) return arrEnGlide;
@@ -3032,6 +3057,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         drawBites(cv);
         if (storyMode && map != null)
             map.drawFront(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H);
+        if (storyMode && !storyTest) drawFog(cv);
         drawParticles(cv);
 
         drawBlasts(cv);
@@ -3068,6 +3094,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             story.drawTitle(cv, W, H, paint, fLogo);
             story.drawHud(cv, W, H, paint, fBody, fLogo);
         }
+        if (storyMode && storyTest) drawPosCard(cv);
 
         if (hurtT > 0) {
             paint.setColor(C_BRIGHT);
@@ -3122,6 +3149,59 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
 
         if (storyMode) sw().drawOver(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, quality, loadT);
+    }
+
+    private void drawFog(Canvas cv) {
+        float z = zoom + zoomPunch;
+        float halfW = W / (2f * z), halfH = H / (2f * z);
+        float rowY = HEX * 1.5f * SQUASH;
+        float colX = HEX * 1.7320508f;
+        int r0 = (int) Math.floor((camY - halfH) / rowY) - 1;
+        int r1 = (int) Math.floor((camY + halfH) / rowY) + 1;
+        int q0 = (int) Math.floor((camX - halfW) / colX - r1 / 2f) - 1;
+        int q1 = (int) Math.floor((camX + halfW) / colX - r0 / 2f) + 1;
+        float s = HEX * z * 1.07f;
+        paint.setColor(0xFF070409);
+        for (int r = r0; r <= r1; r++) {
+            for (int q = q0; q <= q1; q++) {
+                if (sw().explored(q, r)) continue;
+                SceneMap.hexToWorld(q, r, FW_A);
+                float cx = sx(FW_A[0]), cy = sy(FW_A[1]);
+                hexPath.reset();
+                for (int k = 0; k < 6; k++) {
+                    float x = cx + FOG_UH[k * 2] * s;
+                    float y = cy + FOG_UH[k * 2 + 1] * s;
+                    if (k == 0) hexPath.moveTo(x, y); else hexPath.lineTo(x, y);
+                }
+                hexPath.close();
+                cv.drawPath(hexPath, paint);
+            }
+        }
+    }
+
+    private int putInt(char[] buf, int off, int v) {
+        if (v < 0) { buf[off++] = '-'; v = -v; }
+        int st = off;
+        do { buf[off++] = (char) ('0' + v % 10); v /= 10; } while (v > 0);
+        for (int i = st, j = off - 1; i < j; i++, j--) {
+            char t = buf[i]; buf[i] = buf[j]; buf[j] = t;
+        }
+        return off;
+    }
+
+    private void drawPosCard(Canvas cv) {
+        worldToHex(player.x, player.y, IH_A);
+        int n = putInt(posBuf, 0, IH_A[0]);
+        posBuf[n++] = ' ';
+        n = putInt(posBuf, n, IH_A[1]);
+        paint.setTypeface(fBody);
+        paint.setTextSize(24);
+        float tw = paint.measureText(posBuf, 0, n);
+        paint.setColor(0xCC0e0709);
+        rf.set(16, 16, 16 + tw + 24, 56);
+        cv.drawRoundRect(rf, 10, 10, paint);
+        paint.setColor(0xAAefe6dd);
+        cv.drawText(posBuf, 0, n, 28, 44, paint);
     }
 
     private void layoutDock() {
@@ -3246,6 +3326,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (e.getActionMasked() == MotionEvent.ACTION_UP) story.tap();
             return true;
         }
+        // C3: the auto-scene owns every touch until it hands control back.
+        if (storyMode && !storyFight && sw().cutsceneHold()) return true;
         int act = e.getActionMasked();
 
         if (act == MotionEvent.ACTION_DOWN) {
@@ -3469,6 +3551,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (story != null) { story.title = t; story.titleT = 0f; }
     }
     public boolean isScriptWalking() { return swActive; }
+    public void scriptFace(int dir) { player.facing = dir; }
     public void scriptWalk(int q, int r, float dur) {
         SceneMap.hexToWorld(q, r, FW_A);
         swFromX = player.x; swFromY = player.y;
