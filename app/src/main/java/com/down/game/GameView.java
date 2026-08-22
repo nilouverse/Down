@@ -183,7 +183,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final HashMap<Player, Integer> bleedTurns = new HashMap<>();
     private final HashMap<Player, Integer> bleedDmg = new HashMap<>();
     private static final int BEAST_B1_DMG = 14, BEAST_B2_DMG = 30,
-            BEAST_B1_RANGE = 3, BEAST_BLEED_PCT = 20, BEAST_MANA_REGEN = 30;
+            BEAST_B1_RANGE = 5, BEAST_BLEED_PCT = 20, BEAST_MANA_REGEN = 30;
 
     private List<Bitmap> props, props2, propsCity;
     private List<Bitmap> propsAF, propsBF, propsCF;
@@ -346,7 +346,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             b.eBeastGlide.addAll(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_beast_glide_b.png", 2, 2, 2), true, false));
             b.eBeastAtk = new ArrayList<>(Sprites.buildFrames(
-                    Sprites.cutSheet(c, "sprites/enemy_beast_attack.png", 2, 4, 2), false, false));
+                    Sprites.cutSheet(c, "sprites/enemy_beast_attack.png", 2, 3, 2), false, false));
             b.eSoldierIdle = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/soldier_idle.png", 2, 2, 4), false, true));
             b.eSoldierGlide = new ArrayList<>(Sprites.buildFrames(
@@ -1086,7 +1086,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             return;
         }
         if (en.beast) {
-            if (en.mana >= en.maxMana && dist <= 1) { en.atkForm = 2; en.attacksPlanned = 1; en.intent = 1; return; }
+            if (dist <= 1) {
+                en.atkForm = (en.mana >= en.maxMana) ? 2 : 3;
+                en.attacksPlanned = 1; en.intent = 1; return;
+            }
             if (dist <= BEAST_B1_RANGE) { en.atkForm = 1; en.attacksPlanned = 1; en.intent = 1; return; }
         }
         if (dist <= 1) {
@@ -1641,10 +1644,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 worldToHex(active.x, active.y, IH_B);
                 boolean adj = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) == 1;
                 boolean inR2 = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= Enemy.HEAVY_ATK_RANGE[1];
+                boolean inLunge = hexDist(IH_A[0], IH_A[1], IH_B[0], IH_B[1]) <= BEAST_B1_RANGE;
                 boolean wasAttacking = active.attacking();
                 boolean wasMoving = active.floater.moving;
                 int prevAtkPos = active.atkPos;
-                active.turnUpdate(dt, tgt.x, tgt.y, adj, inR2);
+                active.turnUpdate(dt, tgt.x, tgt.y, adj, inR2, inLunge);
                 if (active.beast && active.floater.moving && !wasMoving) sound.play("beast_move");
                 if ((!wasAttacking && active.attacking())) {
                     sound.play(active.weapon == 1 ? "claw" : "swing");
