@@ -127,15 +127,18 @@ public class StoryActors {
         float h = getHeight(a.kind) * zoom;
         float w = h * 0.55f;
         shadowPaint.setColor(0x66000000);
-        cv.drawOval(sx - w * 0.62f, sy - h * 0.12f, sx + w * 0.62f, sy, shadowPaint);
+        cv.drawOval(sx - w * 0.62f, sy - h * 0.12f - 18f * zoom, sx + w * 0.62f, sy - 18f * zoom, shadowPaint);
 
         cv.save();
         cv.translate(sx, sy);
         cv.scale(a.facing, 1f);
 
-        if (a.idleFrames != null && a.idleFrames.length > 0) {
-            int idx = (int) (t * 8f) % a.idleFrames.length;
-            Frame f = a.idleFrames[idx];
+        // walk cycle uses glide frames when available; idle otherwise.
+        Frame[] pool = (a.walking && a.glideFrames != null && a.glideFrames.length > 0)
+                ? a.glideFrames : a.idleFrames;
+        if (pool != null && pool.length > 0) {
+            int idx = (int) (t * (a.walking ? 6f : 8f)) % pool.length;
+            Frame f = pool[idx];
             Bitmap bmp = f.bmp;
             if (bmp != null && !bmp.isRecycled()) {
                 float s = h / f.ref;
@@ -188,7 +191,6 @@ public class StoryActors {
             cv.drawCircle(w * 0.22f, top + h * 0.28f, 3f * zoom, bodyPaint);
         }
         if ("beast".equals(a.kind)) {
-            // quadruped read: low wide body hint
             bodyPaint.setColor(0xff140a08);
             cv.drawOval(-w * 0.9f, -h * 0.42f, w * 0.9f, -h * 0.10f, bodyPaint);
         }
@@ -199,6 +201,7 @@ public class StoryActors {
         if ("vel".equals(kind)) return 250f;
         if ("ws".equals(kind)) return 190f;
         if ("npc".equals(kind)) return 195f;
+        if ("soldier".equals(kind)) return 200f;
         if ("ambient".equals(kind)) return 165f;
         if ("beast".equals(kind)) return 260f;
         return 175f;
@@ -208,6 +211,7 @@ public class StoryActors {
         if ("vel".equals(kind)) return 0xffb07cff;
         if ("ws".equals(kind)) return 0xff34e3d6;
         if ("npc".equals(kind)) return 0xffb7a6ab;
+        if ("soldier".equals(kind)) return 0xff8a9096;
         if ("ambient".equals(kind)) return 0xff6f8f6a;
         if ("beast".equals(kind)) return 0xff7a1a10;
         return 0;
@@ -216,6 +220,7 @@ public class StoryActors {
     private int bodyColor(String kind) {
         if ("vel".equals(kind)) return 0xff1a0a24;
         if ("ws".equals(kind)) return 0xff120a0e;
+        if ("soldier".equals(kind)) return 0xff14161a;
         if ("ambient".equals(kind)) return 0xff0d120c;
         if ("beast".equals(kind)) return 0xff140a08;
         return 0xff101418;
@@ -225,6 +230,7 @@ public class StoryActors {
         if ("nilou".equalsIgnoreCase(name) || "vex".equalsIgnoreCase(name)) return "hero";
         if ("vel".equalsIgnoreCase(name)) return "vel";
         if ("ws".equalsIgnoreCase(name)) return "ws";
+        if ("soldier".equalsIgnoreCase(name)) return "soldier";
         if ("beast".equalsIgnoreCase(name)) return "beast";
         return "enemy";
     }
