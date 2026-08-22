@@ -286,7 +286,8 @@ public final class SceneMap {
             else if (r <= -5 && r >= -7) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim lip
             else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim (over actors)
             else if (q < MIN_Q) ts = -1;                                     // west gap void
-            else { ts = 0; ti = (h >>> 4) & 15;                              // plateau (r<=-8) + ashen meadow
+            else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; } // cliff-top ledge = cliff blocks
+            else { ts = 0; ti = (h >>> 4) & 15;                              // ashen meadow
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         } else if (q <= 36) {
             float t = (q - 11) / 25f;
