@@ -1,26 +1,29 @@
 # ACT ONE — continuous-map trigger script.
-# Zones fire once unless gated.
-# Display text = SAY lines only.
-# NOTE: meeting inside the ashen valley at the western cliff wall; gate at the ashen exit.
+# Lines above the first ZONE = act-level set dressing (run at start).
+# Zones fire once unless gated. Display text = SAY lines only.
+
+PROP gate 7 11 2 1.9 1
 
 ZONE opening 0 7 2
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
 TELEPORT -26 6
+ZOOM 1.9 700
 
 SAY NilouZila I can see the banners of Mordethail from here. The Carrion Kings. And those—
 SAY NilouZila Thornborn. I watched Vorvexis flay their elders alive two centuries ago. Apparently the children remembered.
 SAY NilouZila Eastern wall. Gone.
 
-SFX footsteps_gravel_far
-SPAWN vex -31 4 npc
-SPAWN soldier -31 7 npc s1
-SPAWN soldier -31 3 npc s2
-WALK vex -28 5 2.0
-WALK s1 -28 7 2.0
-WALK s2 -28 4 2.0
-WAIT_WALK vex
+SFX_LOOP footsteps_walk 5
+WAIT 3000
+SFX_LOOP footsteps_walk 2
+WAIT 2000
+
+SPAWN vex -28 5 npc
+SPAWN soldier -28 7 npc s1
+SPAWN soldier -28 4 npc s2
+ZOOM 1.25 800
 FACE nilou left
 SAY Vex Mistress! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
 SAY NilouZila How many came through the gate?
@@ -34,9 +37,14 @@ SAY Vex What about you?
 SAY NilouZila I'm going to the courtyard.
 SAY Vex That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
-EXIT vex -31 4
-EXIT s1 -31 7
-EXIT s2 -31 3
+
+WALK vex -36 6 2.2
+WALK s1 -36 8 2.2
+WALK s2 -36 3 2.2
+WAIT_WALK vex
+DESPAWN vex
+DESPAWN s1
+DESPAWN s2
 
 SAY NilouZila Four hundred years I've knelt at her feet.
 SAY NilouZila I didn't claw my way out of the Pit of Screaming Souls, survive the Binding Trials, and bury my rivals one by one just to watch her empire turn to ash from a cliff.
@@ -50,6 +58,15 @@ SPAWN enemy -16 10 e3
 KILLNOTE 4 four taken DOWN.
 FIGHT 4
 
+# (the moment the fight ends: legion + beast take the gate, in full art)
+SPAWN infantry 13 2 i0
+SPAWN infantry 14 2 i1
+SPAWN infantry 15 2 i2
+SPAWN infantry 13 1 i3
+SPAWN infantry 13 3 i4
+SPAWN infantry 14 3 i5
+SPAWN beast 16 2 b0
+
 SAY NilouZila Venom. Naturally.
 SAY NilouZila Paralytic. Slow-acting. I give it an hour before it reaches my spine.
 SAY NilouZila Plenty can happen in an hour.
@@ -59,14 +76,6 @@ SETFLAG ashen_cleared
 ZONE gate_mouth 8 2 3
 GATE gate_mouth ashen_cleared
 ON_ENTER gate_mouth
-PROP city 0 11 2 1.2 1
-SPAWN infantry 13 2 i0
-SPAWN infantry 14 2 i1
-SPAWN infantry 15 2 i2
-SPAWN infantry 13 1 i3
-SPAWN infantry 13 3 i4
-SPAWN infantry 14 3 i5
-SPAWN beast 16 2 b0
 
 SAY Carrion_Infantry_Leader A lieutenant! She wears the marks! Take her alive — Mordethail wants the officers breathing!
 SAY NilouZila Come and try.
