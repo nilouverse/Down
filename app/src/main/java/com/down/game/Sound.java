@@ -39,7 +39,6 @@ public class Sound {
     private String currentVoiceKey = null;
     private volatile boolean voicePreparing = false;
 
-    // Ambient bed layer — independent of voice and SFX. Silent-fail on missing assets.
     private MediaPlayer ambientPlayer;
     private String ambientKey = null;
     private float ambientTargetVol = 0.75f;
@@ -71,10 +70,6 @@ public class Sound {
         l.add(path);
     }
 
-    // Universal scan: root files + every subfolder become SFX pools with random
-    // variants (trailing digits join the same key). Only two exceptions:
-    // hero folders -> streamed voice lines, "ambient" -> looping beds.
-    // Any future folder (beast, soldier, ...) works with zero code changes.
     private void scan() {
         try {
             String[] root = context.getAssets().list("sounds");
@@ -197,8 +192,6 @@ public class Sound {
         playSfx(key);
     }
 
-    // Looping footsteps: light for heroes, heavy for armored/normal enemies.
-    // Numbered variants (footsteps_light2.ogg …) join the same pool, random start.
     private int footLight = 0, footHeavy = 0;
     public void setFootstepsLight(boolean on) { footLoop(on, true); }
     public void setFootstepsHeavy(boolean on) { footLoop(on, false); }
@@ -221,6 +214,29 @@ public class Sound {
             try { p.stop(stream); } catch (Exception e) {}
             if (light) footLight = 0; else footHeavy = 0;
         }
+    }
+
+    // Timed loop: starts now, stops itself after `seconds`. Concurrent instances
+    // of the same key are allowed (footsteps doubled for the soldiers).
+    public void playLoopTimed(final String name, float seconds) {
+        if (name == null || seconds <= 0) return;
+        final SoundPool p = pool;
+        if (p == null) return;
+        final String key = baseKey(name.toLowerCase(Locale.US));
+        int id = 0;
+        synchronized (lock) {
+            ArrayList<Integer> l = sfxLoaded.get(key);
+            if (l != null && !l.isEmpty()) id = l.get(rnd.nextInt(l.size()));
+        }
+        if (id == 0) return;
+        final int stream = p.play(id, 0.9f, 0.9f, 0, -1, 1f);
+        if (stream == 0) return;
+        Thread t = new Thread(new Runnable() { public void run() {
+            try { Thread.sleep((long) (seconds * 1000f)); } catch (InterruptedException ignored) {}
+            try { p.stop(stream); } catch (Exception ignored) {}
+        } }, "snd-loop-timed");
+        t.setDaemon(true);
+        t.start();
     }
 
     private void playSfx(String key) {
@@ -297,9 +313,6 @@ public class Sound {
         }
     }
 
-    // =====================================================================
-    // AMBIENT BED LAYER — crossfades, loops, silent-fail on missing assets
-    // =====================================================================
     public void setAmbient(String key) {
         if (context == null) return;
         if (key == null || key.isEmpty()) { stopAmbient(); return; }
