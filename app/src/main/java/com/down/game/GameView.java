@@ -742,6 +742,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void endPlayerTurn() {
         sound.play("turn");
+        if (storyMode) sw().onPlayerTurnEnd();
         phase = PH_ENEMY; phaseT = 0;
         hexesShown = false; targetEnemy = null; attackRangeShown = 0;
         fanDirty = true; atkDirty = true;
@@ -1475,11 +1476,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                             hexesShown = false;
                             attackRangeShown = 0;
                             targetEnemy = null;
-                            sw().endEncounter();
-                        } else {
-                            sound.play(voice + "_victory");
-                            emberBurst();
                         }
+                        if (sw().encounterLive()) sw().endEncounter();
+                        else { sound.play(voice + "_victory"); emberBurst(); }
                     }
                 }
             }
