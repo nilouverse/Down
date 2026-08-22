@@ -757,6 +757,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 e.hp = 60; e.maxHp = 60;
                 e.mana = 100; e.maxMana = 100;
                 e.weapon = 2;
+                e.speed = 130f;
             }
             enemies.add(e);
             return;
@@ -1396,6 +1397,18 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             } else {
                 updateDirector(dt);
             }
+            for (Player p : party) p.update(dt);
+            for (Particle p : particlePool) {
+                if (!p.active) continue;
+                p.t += dt;
+                if (p.t >= p.life) { p.active = false; continue; }
+                p.vy += p.grav * dt;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+            }
+            for (Puff p : puffPool) if (p.active) { p.t += dt; if (p.t > 0.5f) p.active = false; }
+            for (Slash s : slashPool) if (s.active) { s.t += dt; if (s.t > 0.22f) s.active = false; }
+            for (Dmg d : dmgPool) if (d.active) { d.t += dt; if (d.t > 0.8f) d.active = false; }
             return;
         }
 
@@ -2727,6 +2740,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setColor(0xCC050508); cv.drawRoundRect(rf, 4, 4, paint);
         rf.right = rf.left + bw * (Math.max(0, pl.hp) / 100f);
         paint.setColor(C_BLOOD); cv.drawRoundRect(rf, 4, 4, paint);
+        if (pl == player) {
+            float mtop = top + bh + 3;
+            rf.set(sx(pl.x) - bw/2, mtop, sx(pl.x) + bw/2, mtop + 5);
+            paint.setColor(0xCC050508); cv.drawRoundRect(rf, 3, 3, paint);
+            rf.right = rf.left + bw * (Math.max(0, mana) / 100f);
+            paint.setColor(C_VIOLET); cv.drawRoundRect(rf, 3, 3, paint);
+        }
     }
 
     private Frame pickEnemyFrame(Enemy en) {
@@ -2783,20 +2803,21 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             java.util.List<Frame> pool = en.heavy ? eHeavyIdleFr : eIdleFr;
             if (!pool.isEmpty()) return pool.get(((int) (en.animT * 3f)) % pool.size());
         }
-        if (en.beast && eBeastGlideFr.size() >= 8) {
+        if (en.beast && !eBeastGlideFr.isEmpty()) {
             Floater f = en.floater;
+            int bn = eBeastGlideFr.size();
             if (f.state == 1) {
-                if (f.t < 0.10f) return eBeastGlideFr.get(0); // A1
-                if (f.t < 0.20f) return eBeastGlideFr.get(4); // B1
-                if (f.t < 0.30f) return eBeastGlideFr.get(7); // B4
-                return eBeastGlideFr.get(2);                  // A3
+                if (f.t < 0.10f) return eBeastGlideFr.get(0 % bn);
+                if (f.t < 0.20f) return eBeastGlideFr.get(4 % bn);
+                if (f.t < 0.30f) return eBeastGlideFr.get(7 % bn);
+                return eBeastGlideFr.get(2 % bn);
             }
             if (f.state == 2) {
-                return eBeastGlideFr.get((((int) (en.animT * 6f)) % 2 == 0) ? 1 : 5); // A2/B2
+                return eBeastGlideFr.get((((int) (en.animT * 6f)) % 2 == 0) ? 1 % bn : 5 % bn);
             }
-            if (f.t < 0.10f) return eBeastGlideFr.get(6); // B3
-            if (f.t < 0.20f) return eBeastGlideFr.get(3); // A4
-            return eBeastGlideFr.get(0);                  // A1
+            if (f.t < 0.10f) return eBeastGlideFr.get(6 % bn);
+            if (f.t < 0.20f) return eBeastGlideFr.get(3 % bn);
+            return eBeastGlideFr.get(0);
         }
         java.util.List<Frame> gPool = en.heavy ? eHeavyGlideFr : eGlideFr;
         if (gPool.size() >= 4) {
@@ -3642,10 +3663,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             e.hp = 60; e.maxHp = 60;
             e.mana = 100; e.maxMana = 100;
             e.weapon = 2;
+            e.speed = 130f;
         } else if ("beast".equals(type)) {
             e.beast = true;
             e.hp = 120; e.maxHp = 120;
-            e.speed = 160f;
+            e.speed = 110f;
         }
         enemies.add(e);
     }
