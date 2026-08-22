@@ -43,7 +43,7 @@ public class Enemy {
     public static final int[][] BEAST_ATK_SEQ = {
             { 0, 1, 2, 3, 1, 4, 5 },  // lunge
             { 0, 1, 2, 3, 4 },        // slam
-            { 0, 4, 1, 5 }            // bite: 1->5->2->6
+            { 0, 4, 1, 5 }            // bite
     };
     public static final int[] BEAST_ATK_STRIKE = { 3, 3, 2 };
     public static final int[] BEAST_ATK_DMG = { 18, 18, 15 };
@@ -84,7 +84,6 @@ public class Enemy {
         if (f == null) { curF = null; prevF = null; fadeT = 1f; lastGroup = -1; return; }
         if (group != lastGroup) {
             prevF = (curF != null && curF != f) ? curF : null;
-            curF = f;
             fadeT = (prevF != null) ? 0f : 1f;
             lastGroup = group;
         } else {
@@ -96,7 +95,8 @@ public class Enemy {
         }
     }
 
-    public void turnUpdate(float dt, float px, float py, boolean adjacent, boolean inRange2) {
+    public void turnUpdate(float dt, float px, float py,
+                           boolean adjacent, boolean inRange2, boolean inLunge) {
         switch (act) {
             case 0:
                 if (pathI < pathLen) {
@@ -116,14 +116,17 @@ public class Enemy {
                         if (pathI >= pathLen) floater.moving = false;
                     }
                 } else if (floater.state == 0) {
-                    boolean canStrike = (heavy && atkForm == 2) ? inRange2 : adjacent;
+                    boolean canStrike;
+                    if (beast) canStrike = (atkForm == 1) ? inLunge : adjacent;
+                    else canStrike = (heavy && atkForm == 2) ? inRange2 : adjacent;
                     if (attacksPlanned > 0 && canStrike) {
                         act = 1;
                         attackT = 0;
                         atkPos = 0;
                         struck = false;
                         if (beast) {
-                            beastForm = (Math.random() < 0.4f) ? 3 : (Math.random() < 0.6f ? 2 : 1);
+                            // the form follows the plan: 1=lunge, 2=slam, 3=bite
+                            beastForm = (atkForm >= 1 && atkForm <= 3) ? atkForm : 3;
                             attackDuration = BEAST_ATK_DUR[beastForm - 1];
                         } else if (heavy) {
                             attackDuration = HEAVY_ATK_DUR[atkForm - 1];
@@ -131,6 +134,21 @@ public class Enemy {
                             attackDuration = ATK_DUR;
                         }
                         facing = px >= x ? 1 : -1;
+                    } else if (attacksPlanned > 0) {
+                        // can't strike from here: step closer instead of stalling
+                        float dx = px - x, dy = py - y;
+                        float d2 = dx * dx + dy * dy;
+                        if (d2 > 64f) {
+                            floater.moving = true;
+                            float d = (float) Math.sqrt(d2);
+                            float step = Math.min(d, speed * dt);
+                            x += dx / d * step;
+                            y += dy / d * step;
+                            if (dx < -0.05f) facing = -1;
+                            if (dx >  0.05f) facing =  1;
+                        } else {
+                            act = 3;
+                        }
                     } else {
                         act = 3;
                     }
@@ -158,13 +176,12 @@ public class Enemy {
                         atkPos = 0;
                         boolean nextAdjacent = (Math.abs(px - x) + Math.abs(py - y)) < 200f;
                         boolean nextInRange2 = (Math.abs(px - x) + Math.abs(py - y)) < 400f;
-                        boolean canAgain = (heavy && atkForm == 2) ? nextInRange2 : nextAdjacent;
+                        boolean canAgain;
+                        if (beast) canAgain = false; // one committed attack per turn
+                        else canAgain = (heavy && atkForm == 2) ? nextInRange2 : nextAdjacent;
                         if (attacksDone < attacksPlanned && canAgain) {
                             attackT = 0;
-                            if (beast) {
-                                beastForm = (Math.random() < 0.4f) ? 3 : (Math.random() < 0.6f ? 2 : 1);
-                                attackDuration = BEAST_ATK_DUR[beastForm - 1];
-                            } else if (heavy) {
+                            if (heavy) {
                                 attackDuration = HEAVY_ATK_DUR[atkForm - 1];
                             } else {
                                 attackDuration = ATK_DUR;
