@@ -119,11 +119,6 @@ public class StoryActors {
     private void drawActor(Canvas cv, StoryActor a, float camX, float camY, float zoom, int W, int H, float t) {
         float sx = (a.x - camX) * zoom + W / 2f;
         float sy = (a.y - camY) * zoom + H / 2f;
-        float bob = (float) Math.sin(t * 3f + a.bobT) * 4.5f * zoom;
-        if ("ambient".equals(a.kind)) {
-            bob = (((int) (t * 9f + a.bobT * 7f)) % 2 == 0 ? 2.5f : -1.5f) * zoom;
-        }
-        sy += bob;
         float h = getHeight(a.kind) * zoom;
         float w = h * 0.55f;
         shadowPaint.setColor(0x66000000);
@@ -133,11 +128,12 @@ public class StoryActors {
         cv.translate(sx, sy);
         cv.scale(a.facing, 1f);
 
-        // Walking = glide pool with a two-frame crossfade (same read as combat).
-        boolean gliding = a.walking && a.glideFrames != null && a.glideFrames.length > 1;
-        Frame[] pool = gliding ? a.glideFrames : a.idleFrames;
+        // Frame-based animation: walking uses glide with crossfade, idle uses idle frames
+        Frame[] pool = (a.walking && a.glideFrames != null && a.glideFrames.length > 1)
+                ? a.glideFrames : a.idleFrames;
         if (pool != null && pool.length > 0) {
-            if (gliding) {
+            if (a.walking && a.glideFrames != null && a.glideFrames.length > 1) {
+                // Walking: crossfade between two frames (same as combat)
                 float pos = t * 6f;
                 int n = pool.length;
                 int i0 = ((int) pos) % n;
@@ -149,6 +145,7 @@ public class StoryActors {
                 drawFr(cv, pool[i0], h, 255);
                 if (k > 0.02f) drawFr(cv, pool[i1], h, (int) (k * 255));
             } else {
+                // Idle: cycle at 8fps (same as combat)
                 int idx = (int) (t * 8f) % pool.length;
                 drawFr(cv, pool[idx], h, 255);
             }
@@ -156,6 +153,7 @@ public class StoryActors {
             return;
         }
 
+        // Fallback silhouette if no frames bound
         float top = -h;
         bodyPath.reset();
         bodyPath.moveTo(0, top);
