@@ -10,6 +10,8 @@ public class StoryActor {
     public float walkT, walkDuration;
     public float bobT;
     public float facing = 1f;
+    public boolean glide;
+    public float lift;
     public Frame[] idleFrames;
     public Frame[] glideFrames;
 
@@ -34,9 +36,14 @@ public class StoryActor {
         this.x = hexX(q, r);
         this.y = hexY(q, r);
         this.walking = false;
+        this.lift = 0f;
     }
 
     public void moveToHex(int q, int r, float duration) {
+        moveToHex(q, r, duration, false);
+    }
+
+    public void moveToHex(int q, int r, float duration, boolean glide) {
         this.fromX = this.x;
         this.fromY = this.y;
         this.toX = hexX(q, r);
@@ -45,6 +52,8 @@ public class StoryActor {
         this.walkDuration = Math.max(0.01f, duration);
         this.walkT = 0f;
         this.walking = true;
+        this.glide = glide;
+        this.lift = 0f;
         // align facing with the move direction, same as gameplay
         if (toX < fromX - 0.05f) facing = -1f;
         else if (toX > fromX + 0.05f) facing = 1f;
@@ -52,13 +61,14 @@ public class StoryActor {
 
     public void update(float dt) {
         bobT += dt;
-        if (!walking) return;
+        if (!walking) { lift = 0f; return; }
         walkT += dt;
         float t = Math.min(1f, walkT / walkDuration);
         float ease = t * t * (3f - 2f * t);
         x = fromX + (toX - fromX) * ease;
         y = fromY + (toY - fromY) * ease;
-        if (t >= 1f) { x = toX; y = toY; walking = false; }
+        lift = glide ? (float) Math.sin(t * 3.14159f) * 150f : 0f;
+        if (t >= 1f) { x = toX; y = toY; walking = false; lift = 0f; glide = false; }
     }
 
     private static float hexX(int q, int r) { return HEX * SQRT3 * (q + r * 0.5f); }
