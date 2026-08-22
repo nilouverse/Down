@@ -45,6 +45,9 @@ public class StoryActor {
         this.walkDuration = Math.max(0.01f, duration);
         this.walkT = 0f;
         this.walking = true;
+        // align facing with the move direction, same as gameplay
+        if (toX < fromX - 0.05f) facing = -1f;
+        else if (toX > fromX + 0.05f) facing = 1f;
     }
 
     public void update(float dt) {
