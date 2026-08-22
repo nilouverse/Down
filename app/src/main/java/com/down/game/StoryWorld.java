@@ -17,8 +17,9 @@ public final class StoryWorld {
     public static final String PLAYER_KEY = "nilou";
 
     public static class Prop {
-        public int sheet;   // 0 = props_a, 1 = props_b, 2 = props_city
+        public int sheet;   // 0 = props_a, 1 = props_b, 2 = props_city, 3 = gate
         public int idx;
+        public int q, r;
         public float x, y;
         public float scale;
         public boolean flip;
@@ -36,6 +37,7 @@ public final class StoryWorld {
     private final List<String>[] zoneScript = new ArrayList[MAX_ZONES];
     private int zoneCount = 0;
 
+    private final List<String> bootScript = new ArrayList<>(8);
     private final List<String> evQueue = new ArrayList<>(64);
     private boolean evActive = false;
     private float waitT = 0;
@@ -67,6 +69,7 @@ public final class StoryWorld {
     private boolean sceneEvent = false;
 
     public final float[] pt = new float[2];
+    private final int[] HW2 = new int[2];
     public final ArrayList<Prop> placedProps = new ArrayList<>();
 
     public String skyKey = "";
@@ -78,6 +81,7 @@ public final class StoryWorld {
         this.ctx = ctx.getApplicationContext();
         this.snd = snd;
         parse("act1.txt");
+        runBoot();
     }
 
     public void attach(SceneMap map, StoryActors actors, GameView gv) {
@@ -88,6 +92,7 @@ public final class StoryWorld {
         zoneCount = 0;
         flags.clear();
         placedProps.clear();
+        bootScript.clear();
         evQueue.clear();
         evActive = false;
         waitT = 0;
@@ -105,12 +110,18 @@ public final class StoryWorld {
         lastPQ = Integer.MIN_VALUE;
         lastPR = Integer.MIN_VALUE;
         parse("act1.txt");
+        runBoot();
+    }
+
+    // Act-level set dressing: PROP/SCAR lines above the first ZONE run at start.
+    private void runBoot() {
+        for (int i = 0; i < bootScript.size(); i++) exec(bootScript.get(i));
     }
 
     private void parse(String file) {
         try {
             BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open("story/" + file)));
-            String line; List<String> sinkList = null;
+            String line; List<String> sinkList = bootScript;
             while ((line = r.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
@@ -252,9 +263,15 @@ public final class StoryWorld {
         } else if (cmd.startsWith("TELEPORT ")) {
             String[] p = cmd.split(" ");
             int i = 1;
-            if (p.length > 3 && PLAYER_KEY.equals(p[1])) i = 2;   // tolerate the player token
+            if (p.length > 3 && PLAYER_KEY.equals(p[1])) i = 2;
             SceneMap.hexToWorld(pi(p[i]), pi(p[i + 1]), pt);
             if (gv != null) gv.shTeleport(pt[0], pt[1]);
+        } else if (cmd.startsWith("ZOOM ")) {
+            String[] p = cmd.split(" ");
+            if (gv != null) gv.scriptZoom(pf(p[1]), p.length > 2 ? pi(p[2]) : 600);
+        } else if (cmd.startsWith("SFX_LOOP ")) {
+            String[] p = cmd.split(" ");
+            try { snd.playLoopTimed(p[1], p.length > 2 ? pf(p[2]) : 3f); } catch (Exception e) {}
         } else if (cmd.startsWith("CAM_PAN ")) {
             String[] p = cmd.split(" ");
             SceneMap.hexToWorld(pi(p[1]), pi(p[2]), pt);
@@ -293,9 +310,10 @@ public final class StoryWorld {
             String[] p = cmd.split(" ");
             if (p.length > 4) {
                 Prop pr = new Prop();
-                pr.sheet = "a".equals(p[1]) ? 0 : ("b".equals(p[1]) ? 1 : 2);
+                pr.sheet = "a".equals(p[1]) ? 0 : ("b".equals(p[1]) ? 1 : ("gate".equals(p[1]) ? 3 : 2));
                 pr.idx = pi(p[2]);
-                SceneMap.hexToWorld(pi(p[3]), pi(p[4]), pt);
+                pr.q = pi(p[3]); pr.r = pi(p[4]);
+                SceneMap.hexToWorld(pr.q, pr.r, pt);
                 pr.x = pt[0]; pr.y = pt[1];
                 pr.scale = p.length > 5 ? pf(p[5]) : 1f;
                 pr.flip = p.length > 6 && "1".equals(p[6]);
@@ -427,7 +445,24 @@ public final class StoryWorld {
     public void restoreState() {}
 
     public static boolean sceneWalkable(float x, float y) {
-        return inst == null || inst.map == null ? true : inst.map.walkWorld(x, y);
+        if (inst == null) return true;
+        if (inst.map != null && !inst.map.walkWorld(x, y)) return false;
+        return !inst.propBlockedWorld(x, y);
+    }
+
+    // Gate footprint: arch hex stays open, the wall zigzag north/south blocks.
+    private boolean propBlockedWorld(float x, float y) {
+        SceneMap.worldToHex(x, y, HW2);
+        int q = HW2[0], r = HW2[1];
+        for (int i = 0; i < placedProps.size(); i++) {
+            Prop pr = placedProps.get(i);
+            if (pr.sheet != 3) continue;
+            int gq = pr.q, gr = pr.r;
+            if (q == gq && r == gr) continue;
+            if (q == gq && (r == gr - 1 || r == gr + 1)) return true;
+            if (q == gq + 1 && (r == gr - 2 || r == gr + 2)) return true;
+        }
+        return false;
     }
 
     public boolean takeSceneEvent() {
