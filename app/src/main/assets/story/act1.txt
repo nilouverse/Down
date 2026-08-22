@@ -7,7 +7,7 @@ ZONE opening 0 7 2
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
-TELEPORT nilou -26 6
+TELEPORT -26 6
 
 SAY NilouZila I can see the banners of Mordethail from here. The Carrion Kings. And those—
 SAY NilouZila Thornborn. I watched Vorvexis flay their elders alive two centuries ago. Apparently the children remembered.
