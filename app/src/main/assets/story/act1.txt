@@ -9,7 +9,8 @@ ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
 TELEPORT -26 6
-ZOOM 1.9 700
+FACE nilou left
+ZOOM 2.0 700
 
 SAY NilouZila I can see the banners of Mordethail from here. The Carrion Kings. And those—
 SAY NilouZila Thornborn. I watched Vorvexis flay their elders alive two centuries ago. Apparently the children remembered.
@@ -20,11 +21,16 @@ WAIT 3000
 SFX_LOOP footsteps_walk 2
 WAIT 2000
 
-SPAWN vex -28 5 npc
-SPAWN soldier -28 7 npc s1
-SPAWN soldier -28 4 npc s2
+# (they arrive from the east, already in position when we pull back)
+SPAWN vex -20 5 npc
+SPAWN soldier -20 8 npc s1
+SPAWN soldier -20 3 npc s2
+WALK vex -24 5 2.0
+WALK s1 -24 7 2.0
+WALK s2 -24 3 2.0
+WAIT_WALK vex
 ZOOM 1.25 800
-FACE nilou left
+FACE nilou right
 SAY Vex Mistress! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
 SAY NilouZila How many came through the gate?
 SAY Vex Hundreds. Maybe thousands. They're not stopping to fight — they're just pouring in and spreading.
@@ -38,9 +44,10 @@ SAY NilouZila I'm going to the courtyard.
 SAY Vex That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
 
-WALK vex -36 6 2.2
-WALK s1 -36 8 2.2
-WALK s2 -36 3 2.2
+# (they walk off east, real movement, off-screen, then despawn)
+WALK vex -16 5 2.2
+WALK s1 -16 8 2.2
+WALK s2 -16 3 2.2
 WAIT_WALK vex
 DESPAWN vex
 DESPAWN s1
