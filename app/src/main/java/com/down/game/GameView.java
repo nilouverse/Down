@@ -168,6 +168,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             arrBeastIdle, arrBeastGlide, arrSoldierIdle, arrSoldierGlide;
     private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
     private final HashMap<String, Frame[]> heroSheets = new HashMap<>();
+    private final HashMap<String, Frame[]> heroGlide = new HashMap<>();
     private final HashMap<Player, Integer> bleedTurns = new HashMap<>();
     private final HashMap<Player, Integer> bleedDmg = new HashMap<>();
     private static final int BEAST_B1_DMG = 14, BEAST_B2_DMG = 30,
@@ -351,6 +352,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             scrubFringe(b.propsAF); scrubFringe(b.propsBF); scrubFringe(b.propsCF);
             b.gate = Sprites.cutSheet(c, "sprites/props_gate.png", 2, 4, 2);
             scrubFringe(b.gate);
+            scrubFrames(b.eBeastIdle); scrubFrames(b.eBeastGlide); scrubFrames(b.eBeastAtk);
+            scrubFrames(b.eSoldierIdle); scrubFrames(b.eSoldierGlide);
             b.menuBg = decodeSampled(c, "art/hero.webp", 1024);
             b.keyBmp = decodeRaw(c, "art/button.webp");
             b.coinBmp = decodeRaw(c, "art/coin.webp");
@@ -453,6 +456,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             h.bind(b.frames);
             if (!h.idleFrames.isEmpty())
                 heroSheets.put(h.voice, h.idleFrames.toArray(new Frame[0]));
+            List<Frame> gl = b.frames.get(h.keyPrefix + h.glideSheet);
+            if (gl != null && !gl.isEmpty())
+                heroGlide.put(h.voice, gl.toArray(new Frame[0]));
         }
         eIdleFr.addAll(b.eIdle); eGlideFr.addAll(b.eGlide); eAtkFr.addAll(b.eAtk);
         eHeavyIdleFr.addAll(b.eHeavyIdle);
@@ -1020,14 +1026,17 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void hurtEnemy(Enemy en, int dmg) {
         if (en.dead) return;
+        boolean dying = en.hp - dmg <= 0;
         en.hp -= dmg;
         en.hitFlash = 0.25f;
         addDmg(en.x, en.y - ENEMY_H - 20, dmg);
         sound.play("hit");
-        if (dmg >= en.maxHp * 0.7f) {
-            sound.play(en.gender == 1 ? "female_cry" : "male_cry");
-        } else {
-            sound.play(en.beast ? "beast_hurt" : (en.gender == 1 ? "female_hurt" : "male_hurt"));
+        if (!dying) {
+            if (dmg >= en.maxHp * 0.7f) {
+                sound.play(en.gender == 1 ? "female_cry" : "male_cry");
+            } else {
+                sound.play(en.beast ? "beast_hurt" : (en.gender == 1 ? "female_hurt" : "male_hurt"));
+            }
         }
 
         if (en.hp <= 0) {
@@ -1375,9 +1384,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
         if (storyMode && story != null && story.dialogUp) {
-            if (scriptZoom) {
-                zoom += (zoomTarget - zoom) * (1 - (float) Math.exp(-dt * 4f));
-            }
             if (camMode == 0) {
                 if (!camSnap && H > 0) { camX = player.x; camY = player.y - (H * 0.28f) / zoom; camSnap = true; }
                 float kk = 1 - (float) Math.exp(-dt * 8);
@@ -1656,10 +1662,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -BEAST_B1_DMG);
                         sound.play("hit");
-                        sound.play("hurt");
-                        sound.play(tgt.hero.voice + "_hurt");
-                        post(hapticRun);
-                        if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        if (tgt.hp > 0) {
+                            sound.play("hurt");
+                            sound.play(tgt.hero.voice + "_hurt");
+                            post(hapticRun);
+                            if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        }
                         boolean allDeadB1 = true;
                         for (Player p : party) if (p.hp > 0) allDeadB1 = false;
                         if (allDeadB1) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
@@ -1676,10 +1684,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         hurtT = 0.4f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -BEAST_B2_DMG);
                         sound.play("hit");
-                        sound.play("hurt");
-                        sound.play(tgt.hero.voice + "_hurt");
-                        post(hapticRun);
-                        if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        if (tgt.hp > 0) {
+                            sound.play("hurt");
+                            sound.play(tgt.hero.voice + "_hurt");
+                            post(hapticRun);
+                            if (tgt.hp <= 30 && !tgt.cried) { tgt.cried = true; sound.play(tgt.hero.voice + "_wounded"); }
+                        }
                         boolean allDeadB2 = true;
                         for (Player p : party) if (p.hp > 0) allDeadB2 = false;
                         if (allDeadB2) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
@@ -1700,12 +1710,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                                 addDmg(p.x, p.y - PLAYER_H - 20, -Enemy.HEAVY_ATK_DMG[1]);
                                 hurtT = 0.4f;
                                 sound.play("hit");
-                                sound.play("hurt");
-                                sound.play(p.hero.voice + "_hurt");
-                                post(hapticRun);
-                                if (p.hp <= 30 && !p.cried) {
-                                    p.cried = true;
-                                    sound.play(p.hero.voice + "_wounded");
+                                if (p.hp > 0) {
+                                    sound.play("hurt");
+                                    sound.play(p.hero.voice + "_hurt");
+                                    post(hapticRun);
+                                    if (p.hp <= 30 && !p.cried) {
+                                        p.cried = true;
+                                        sound.play(p.hero.voice + "_wounded");
+                                    }
                                 }
                             }
                         }
@@ -1723,12 +1735,14 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         hurtT = 0.3f;
                         addDmg(tgt.x, tgt.y - PLAYER_H - 20, -dmg);
                         sound.play("hit");
-                        sound.play("hurt");
-                        sound.play(tgt.hero.voice + "_hurt");
-                        post(hapticRun);
-                        if (tgt.hp <= 30 && !tgt.cried) {
-                            tgt.cried = true;
-                            sound.play(tgt.hero.voice + "_wounded");
+                        if (tgt.hp > 0) {
+                            sound.play("hurt");
+                            sound.play(tgt.hero.voice + "_hurt");
+                            post(hapticRun);
+                            if (tgt.hp <= 30 && !tgt.cried) {
+                                tgt.cried = true;
+                                sound.play(tgt.hero.voice + "_wounded");
+                            }
                         }
                         boolean allDead = true;
                         for (Player p : party) if (p.hp > 0) allDead = false;
@@ -2132,8 +2146,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             StoryWorld.Prop pr = sw.placedProps.get(i);
             if (pr.flat) continue;
             List<Bitmap> list = propList(pr.sheet, false);
+            int idx = pr.idx;
+            if (pr.sheet == 3 && (list == null || list.isEmpty())) { list = propsCity; idx = 0; }
             if (list == null || list.isEmpty()) continue;
-            Bitmap b = list.get(pr.idx % list.size());
+            Bitmap b = list.get(idx % list.size());
             if (b == null || b.isRecycled()) continue;
             float px = sx(pr.x), py = sy(pr.y);
             if (px < -300 || px > W + 300 || py < -300 || py > H + 300) continue;
@@ -2201,6 +2217,32 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return (l == null || l.isEmpty()) ? null : l.get(i % l.size());
     }
 
+    // Some sheets ship with a DARK magenta key that the standard keyer only
+    // half-removes. Hard-scrub frame pools that are props-in-disguise.
+    private static void scrubFrames(List<Frame> l) {
+        if (l == null) return;
+        for (int i = 0; i < l.size(); i++) {
+            Frame f = l.get(i);
+            if (f == null || f.bmp == null || f.bmp.isRecycled()) continue;
+            Bitmap b = f.bmp.copy(Bitmap.Config.ARGB_8888, true);
+            if (b == null) continue;
+            int w = b.getWidth(), h = b.getHeight();
+            int[] px = new int[w * h];
+            b.getPixels(px, 0, w, 0, 0, w, h);
+            for (int p = 0; p < px.length; p++) {
+                int c = px[p];
+                int a = (c >>> 24) & 255;
+                if (a == 0) continue;
+                int r = (c >> 16) & 255, g = (c >> 8) & 255, bl = c & 255;
+                int ex = (r < bl ? r : bl) - g;
+                if (ex > 60) px[p] = 0;
+                else if (ex > 30) px[p] = (c & 0x00FFFFFF) | ((a / 2) << 24);
+            }
+            b.setPixels(px, 0, w, 0, 0, w, h);
+            f.bmp = b;
+        }
+    }
+
     // Universal story-actor sheet binding: heroes first, then every enemy kind.
     private Frame[] idlePoolFor(String type) {
         Frame[] f = heroSheets.get(type);
@@ -2212,6 +2254,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         return null;
     }
     private Frame[] glidePoolFor(String type) {
+        Frame[] g = heroGlide.get(type);
+        if (g != null) return g;
         if ("soldier".equals(type)) return arrSoldierGlide;
         if ("infantry".equals(type)) return arrInfGlide;
         if ("beast".equals(type)) return arrBeastGlide;
@@ -2624,8 +2668,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     else i = (((int) (en.animT * 10f)) % 2 == 0) ? 1 : 5; // jump-back shuffle
                 } else {
                     int[] seq = { 0, 1, 2, 3, 1, 4, 5 };
-                    float k = Math.min(0.999f, en.attackT / en.attackDuration);
-                    i = seq[(int) (k * seq.length)];
+                    float fps = eAtkFr.isEmpty() ? 6f : (eAtkFr.size() / Enemy.ATK_DUR);
+                    int p = (int) (en.attackT * fps);
+                    if (p > seq.length - 1) p = seq.length - 1;
+                    i = seq[p];
                 }
                 if (i >= pool.size()) i = pool.size() - 1;
                 return pool.get(i);
@@ -2636,7 +2682,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (en.heavy) {
                 int form = en.atkForm < 1 ? 1 : en.atkForm;
                 int[] seq = Enemy.HEAVY_ATK_SEQ[form - 1];
-                int p = Math.min(seq.length - 1, en.atkPos);
+                float fps = eAtkFr.isEmpty() ? 6f : (eAtkFr.size() / Enemy.ATK_DUR);
+                int p = (int) (en.attackT * fps);
+                if (p > seq.length - 1) p = seq.length - 1;
                 i = seq[p];
                 if (i >= pool.size()) i = pool.size() - 1;
             } else {
@@ -2649,7 +2697,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
         if (en.floater.state == 0) {
             if (en.beast && !eBeastIdleFr.isEmpty()) {
-                int bucket = (int) (en.animT * 2.5f);
+                int bucket = (int) (en.animT * 3f);
                 return eBeastIdleFr.get(h2(bucket, 13, 21) % eBeastIdleFr.size());
             }
             java.util.List<Frame> pool = en.heavy ? eHeavyIdleFr : eIdleFr;
@@ -3318,7 +3366,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hexesShown = false;
             return true;
         }
-        if (tryMoveTo(TW_A[0], TW_A[1])) return true;
+        if (hexesShown && tryMoveTo(TW_A[0], TW_A[1])) return true;
         return true;
     }
 
