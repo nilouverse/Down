@@ -113,7 +113,6 @@ public final class StoryWorld {
         runBoot();
     }
 
-    // Act-level set dressing: PROP/SCAR lines above the first ZONE run at start.
     private void runBoot() {
         for (int i = 0; i < bootScript.size(); i++) exec(bootScript.get(i));
     }
@@ -198,6 +197,14 @@ public final class StoryWorld {
                     : (actors != null && actors.isWalking(waitWalk));
             if (w) return;
             waitWalk = null;
+        }
+        // Never speak over movement: hold the queue while anyone is mid-step.
+        if (gv != null && gv.isScriptWalking()) return;
+        if (actors != null) {
+            for (int i = 0; i < actors.size(); i++) {
+                StoryActor a = actors.get(i);
+                if (!a.hidden && a.walking) return;
+            }
         }
         if (evQueue.isEmpty()) {
             evActive = false;
@@ -450,7 +457,6 @@ public final class StoryWorld {
         return !inst.propBlockedWorld(x, y);
     }
 
-    // Gate footprint: arch hex stays open, the wall zigzag north/south blocks.
     private boolean propBlockedWorld(float x, float y) {
         SceneMap.worldToHex(x, y, HW2);
         int q = HW2[0], r = HW2[1];
