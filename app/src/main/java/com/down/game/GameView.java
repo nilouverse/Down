@@ -2652,7 +2652,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         float br = idle ? (float) Math.sin(en.animT * 1.7f) : 0f;
         float sw = 45 * zoom * bs * (1f - 0.045f * br);
         paint.setAlpha(220);
-        rf.set(x - sw, y - sw * 0.36f, x + sw, y + sw * 0.36f);
+        rf.set(x - sw, y - sw * 0.36f - 18f * zoom, x + sw, y + sw * 0.36f - 18f * zoom);
         cv.drawBitmap(shadowBmp, null, rf, paint);
         paint.setAlpha(255);
 
