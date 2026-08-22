@@ -251,7 +251,9 @@ public final class StoryWorld {
             if (gv != null) gv.showTitle(cmd.substring(6));
         } else if (cmd.startsWith("TELEPORT ")) {
             String[] p = cmd.split(" ");
-            SceneMap.hexToWorld(pi(p[1]), pi(p[2]), pt);
+            int i = 1;
+            if (p.length > 3 && PLAYER_KEY.equals(p[1])) i = 2;   // tolerate the player token
+            SceneMap.hexToWorld(pi(p[i]), pi(p[i + 1]), pt);
             if (gv != null) gv.shTeleport(pt[0], pt[1]);
         } else if (cmd.startsWith("CAM_PAN ")) {
             String[] p = cmd.split(" ");
