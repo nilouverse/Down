@@ -136,6 +136,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private float camX, camY;
     private float zoom = 1.25f;
+    private float zoomTarget = 1.25f;
+    private boolean scriptZoom;
     private boolean exploring;
     private float exploreT;
     private float downX = -9999, downY, lastPX, lastPY;
@@ -159,6 +161,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eBeastIdleFr = new ArrayList<>();
     private final ArrayList<Frame> eBeastGlideFr = new ArrayList<>();
     private final ArrayList<Frame> eBeastAtkFr = new ArrayList<>();
+    private final ArrayList<Frame> eSoldierIdleFr = new ArrayList<>();
+    private final ArrayList<Frame> eSoldierGlideFr = new ArrayList<>();
+    private List<Bitmap> propsGate;
+    private Frame[] arrEnIdle, arrEnGlide, arrInfIdle, arrInfGlide,
+            arrBeastIdle, arrBeastGlide, arrSoldierIdle, arrSoldierGlide;
     private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
     private final HashMap<String, Frame[]> heroSheets = new HashMap<>();
     private final HashMap<Player, Integer> bleedTurns = new HashMap<>();
@@ -268,6 +275,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         ArrayList<Frame> eIdle, eGlide, eAtk;
         ArrayList<Frame> eHeavyIdle, eHeavyGlide, eHeavyAtk;
         ArrayList<Frame> eBeastIdle, eBeastGlide, eBeastAtk;
+        ArrayList<Frame> eSoldierIdle, eSoldierGlide;
+        List<Bitmap> gate;
         List<Bitmap> props, props2, propsCity;
         List<Bitmap> propsAF, propsBF, propsCF;
         Bitmap menuBg, keyBmp, coinBmp;
@@ -325,6 +334,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/enemy_beast_glide_b.png", 2, 2, 2), true, false));
             b.eBeastAtk = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_beast_attack.png", 2, 4, 2), false, false));
+            b.eSoldierIdle = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/soldier_idle.png", 2, 2, 4), false, true));
+            b.eSoldierGlide = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "sprites/soldier_glide.png", 2, 2, 2), true, false));
             b.props  = Sprites.trimBottom(
                     Sprites.cutSheet(c, "sprites/props_a.png", 4, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
@@ -336,6 +349,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             b.propsCF = Sprites.cutSheet(c, "sprites/props_city.png", 2, 4, 2);
             scrubFringe(b.props); scrubFringe(b.props2); scrubFringe(b.propsCity);
             scrubFringe(b.propsAF); scrubFringe(b.propsBF); scrubFringe(b.propsCF);
+            b.gate = Sprites.cutSheet(c, "sprites/props_gate.png", 2, 4, 2);
+            scrubFringe(b.gate);
             b.menuBg = decodeSampled(c, "art/hero.webp", 1024);
             b.keyBmp = decodeRaw(c, "art/button.webp");
             b.coinBmp = decodeRaw(c, "art/coin.webp");
@@ -446,8 +461,19 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         eBeastIdleFr.addAll(b.eBeastIdle);
         eBeastGlideFr.addAll(b.eBeastGlide);
         eBeastAtkFr.addAll(b.eBeastAtk);
+        eSoldierIdleFr.addAll(b.eSoldierIdle);
+        eSoldierGlideFr.addAll(b.eSoldierGlide);
         props = b.props; props2 = b.props2; propsCity = b.propsCity;
         propsAF = b.propsAF; propsBF = b.propsBF; propsCF = b.propsCF;
+        propsGate = b.gate;
+        arrEnIdle = eIdleFr.toArray(new Frame[0]);
+        arrEnGlide = eGlideFr.toArray(new Frame[0]);
+        arrInfIdle = eHeavyIdleFr.toArray(new Frame[0]);
+        arrInfGlide = eHeavyGlideFr.toArray(new Frame[0]);
+        arrBeastIdle = eBeastIdleFr.toArray(new Frame[0]);
+        arrBeastGlide = eBeastGlideFr.toArray(new Frame[0]);
+        arrSoldierIdle = eSoldierIdleFr.toArray(new Frame[0]);
+        arrSoldierGlide = eSoldierGlideFr.toArray(new Frame[0]);
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
 
         for (int i = 0; i < 3; i++) spawnEnemy();
@@ -1317,8 +1343,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 for (int i = 0; i < actors.size(); i++) {
                     StoryActor a = actors.get(i);
                     if (a.idleFrames == null) {
-                        Frame[] f = heroSheets.get(a.type);
-                        if (f != null) a.idleFrames = f;
+                        a.idleFrames = idlePoolFor(a.type);
+                        a.glideFrames = glidePoolFor(a.type);
                     }
                 }
             }
@@ -1349,6 +1375,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             }
         }
         if (storyMode && story != null && story.dialogUp) {
+            if (scriptZoom) {
+                zoom += (zoomTarget - zoom) * (1 - (float) Math.exp(-dt * 4f));
+            }
             if (camMode == 0) {
                 if (!camSnap && H > 0) { camX = player.x; camY = player.y - (H * 0.28f) / zoom; camSnap = true; }
                 float kk = 1 - (float) Math.exp(-dt * 8);
@@ -1415,6 +1444,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         dockSlide += (dockTarget - dockSlide) * (1 - (float) Math.exp(-dt * 10));
         for (Player p : party) p.update(dt);
         if (zoomPunch > 0) zoomPunch = Math.max(0, zoomPunch - dt * 3f);
+        if (scriptZoom) {
+            zoom += (zoomTarget - zoom) * (1 - (float) Math.exp(-dt * 4f));
+        }
 
         if (!panning && !player.isMoving() && camMode == 0 && !swActive && (flingX != 0 || flingY != 0)) {
             camX += flingX * dt;
@@ -2090,6 +2122,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private List<Bitmap> propList(int sheet, boolean flat) {
         if (sheet == 0) return flat ? propsAF : props;
         if (sheet == 1) return flat ? propsBF : props2;
+        if (sheet == 3) return propsGate;
         return flat ? propsCF : propsCity;
     }
 
@@ -2166,6 +2199,24 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private Bitmap safeGet(List<Bitmap> l, int i) {
         return (l == null || l.isEmpty()) ? null : l.get(i % l.size());
+    }
+
+    // Universal story-actor sheet binding: heroes first, then every enemy kind.
+    private Frame[] idlePoolFor(String type) {
+        Frame[] f = heroSheets.get(type);
+        if (f != null) return f;
+        if ("soldier".equals(type)) return arrSoldierIdle;
+        if ("infantry".equals(type)) return arrInfIdle;
+        if ("beast".equals(type)) return arrBeastIdle;
+        if ("enemy".equals(type)) return arrEnIdle;
+        return null;
+    }
+    private Frame[] glidePoolFor(String type) {
+        if ("soldier".equals(type)) return arrSoldierGlide;
+        if ("infantry".equals(type)) return arrInfGlide;
+        if ("beast".equals(type)) return arrBeastGlide;
+        if ("enemy".equals(type)) return arrEnGlide;
+        return null;
     }
 
     // Kills the magenta fringe on keyed props without touching character sheets.
@@ -3087,6 +3138,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
         if (act == MotionEvent.ACTION_MOVE) {
             if (pinching && e.getPointerCount() >= 2) {
+                scriptZoom = false;
                 if (pinchDist0 > 1) {
                     float newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
                             pinchZoom0 * pointerDist(e) / pinchDist0));
@@ -3308,6 +3360,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         panT = 0f; panDur = Math.max(0.05f, ms / 1000f);
     }
     public void scriptCamPush(int ms) { pushT = 0f; pushDur = Math.max(0.05f, ms / 1000f); }
+    public void scriptZoom(float target, int ms) {
+        zoomTarget = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, target));
+        scriptZoom = true;
+    }
     public void scriptCamFollow(String name) { camMode = 1; camFollowName = name; }
     public void scriptCamRelease() {
         camMode = 0; camFollowName = null;
