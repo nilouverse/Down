@@ -14,7 +14,6 @@ public final class StoryWorld {
         return inst;
     }
 
-    // Engine key for the playable hero slot. A stable token, not a display name.
     public static final String PLAYER_KEY = "nilou";
 
     public static class Prop {
@@ -23,7 +22,7 @@ public final class StoryWorld {
         public float x, y;
         public float scale;
         public boolean flip;
-        public boolean flat; // flat = ground scar, drawn under actors
+        public boolean flat;
     }
 
     private static final int MAX_ZONES = 32;
@@ -41,6 +40,7 @@ public final class StoryWorld {
     private boolean evActive = false;
     private float waitT = 0;
     private String waitWalk = null;
+    private int waitTurns = 0;
 
     private final HashMap<String, Boolean> flags = new HashMap<>(24);
 
@@ -51,7 +51,6 @@ public final class StoryWorld {
     private final int[][] waveSpawnHexes = { {64,1},{68,1},{70,4},{68,7},{64,7},{63,4} };
     private final int[][] fodderHexes   = { {61,2},{61,6},{63,1},{63,7},{66,0},{68,8} };
 
-    // KILLNOTE: flash a note once on the n-th kill of an encounter.
     private int killNoteN = -1;
     private String killNoteTxt = null;
     private int storyKills = 0;
@@ -70,7 +69,6 @@ public final class StoryWorld {
     public final float[] pt = new float[2];
     public final ArrayList<Prop> placedProps = new ArrayList<>();
 
-    // Stored render-state. The view layer reads these; missing art = silent.
     public String skyKey = "";
     public boolean moltenOn, towersOn, hordeOn, flyersOn;
     public boolean scatterSet;
@@ -86,7 +84,6 @@ public final class StoryWorld {
         this.map = map; this.actors = actors; this.gv = gv;
     }
 
-    // Fresh act: zones, flags, props, counters. Called on every story entry.
     public void reload() {
         zoneCount = 0;
         flags.clear();
@@ -95,6 +92,7 @@ public final class StoryWorld {
         evActive = false;
         waitT = 0;
         waitWalk = null;
+        waitTurns = 0;
         victory = false;
         encounterLive = false;
         reinforceKills = -1;
@@ -173,11 +171,16 @@ public final class StoryWorld {
         }
     }
 
+    public void onPlayerTurnEnd() {
+        if (waitTurns > 0) waitTurns--;
+    }
+
     public void update() {
         if (victory || !evActive) return;
         if (encounterLive) return;
         if (gv != null && gv.isDialogBlocking()) return;
         if (waitT > 0) { waitT -= 1 / 60f; return; }
+        if (waitTurns > 0) return;
         if (waitWalk != null) {
             boolean w = PLAYER_KEY.equals(waitWalk)
                     ? (gv != null && gv.isScriptWalking())
@@ -240,6 +243,8 @@ public final class StoryWorld {
             if (actors != null) actors.setFacing(p[1], p.length > 2 && "left".equals(p[2]) ? -1f : 1f);
         } else if (cmd.startsWith("WAIT_WALK ")) {
             waitWalk = cmd.split(" ")[1];
+        } else if (cmd.startsWith("WAIT_TURNS ")) {
+            waitTurns = pi(cmd.split(" ")[1]);
         } else if (cmd.startsWith("WAIT ")) {
             waitT = pi(cmd.split(" ")[1]) / 1000f;
         } else if (cmd.startsWith("TITLE ")) {
@@ -301,7 +306,6 @@ public final class StoryWorld {
             killNoteTxt = p.length > 2 ? p[2] : "";
             storyKills = 0;
         } else if (cmd.startsWith("SFX ") || cmd.startsWith("AMBIENT ")) {
-            // Sound law: never break the scene on missing audio.
             try { snd.play(cmd.split(" ")[1]); } catch (Exception e) {}
         } else if (cmd.startsWith("FX ")) {
             String[] p = cmd.split(" ");
@@ -334,7 +338,6 @@ public final class StoryWorld {
         }
     }
 
-    // Generic speaker parse: first token = speaker key, underscores = spaces.
     private void sayLine(String rest) {
         int sp = rest.indexOf(' ');
         String speaker = sp < 0 ? rest : rest.substring(0, sp);
