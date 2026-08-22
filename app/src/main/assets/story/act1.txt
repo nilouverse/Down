@@ -2,7 +2,23 @@
 # Lines above the first ZONE = act-level set dressing (run at start).
 # Zones fire once unless gated. Display text = SAY lines only.
 
-PROP gate 6 11 2 2.6 1
+PROP gate 6 11 2 1.1 1
+
+# (the whole cast exists from load; the fog reveals them by exploration)
+SPAWN sabrina -24 5 npc Sabrina
+SPAWN soldier -24 7 npc s1
+SPAWN soldier -24 3 npc s2
+SPAWN enemy -14 4 e0
+SPAWN enemy -14 8 e1
+SPAWN enemy -16 2 e2
+SPAWN enemy -16 10 e3
+SPAWN infantry 13 2 i0
+SPAWN infantry 14 2 i1
+SPAWN infantry 15 2 i2
+SPAWN infantry 13 1 i3
+SPAWN infantry 13 3 i4
+SPAWN infantry 14 3 i5
+SPAWN beast 16 2 b0
 
 ZONE opening 0 7 2
 ON_ENTER opening
@@ -21,62 +37,43 @@ WAIT 3000
 SFX_LOOP footsteps_walk 2
 WAIT 2000
 
-# (spawn OFF-screen while zoomed; walk in only after we pull back)
-SPAWN vex -20 5 npc
-SPAWN soldier -20 8 npc s1
-SPAWN soldier -20 3 npc s2
+# (the camera pulls back; they are simply there)
 ZOOM 1.25 800
-WALK vex -24 5 2.0
-WALK s1 -24 7 2.0
-WALK s2 -24 3 2.0
-WAIT_WALK vex
 FACE nilou right
-SAY Vex Mistress! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
+SAY Sabrina Lieutenant! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
 SAY NilouZila How many came through the gate?
-SAY Vex Hundreds. Maybe thousands. They're not stopping to fight — they're just pouring in and spreading.
+SAY Sabrina Hundreds. Maybe thousands. They're not stopping to fight — they're just pouring in and spreading.
 SAY NilouZila Where is the goddess?
-SAY Vex The Courtyard of Bones. She's... holding the center alone.
+SAY Sabrina The Courtyard of Bones. She's... holding the center alone.
 WAIT 450
-SAY Vex Mistress, I saw her. She looks wrong. Her form is slipping. I've never seen her like—
+SAY Sabrina Lieutenant, I saw her. She looks wrong. Her form is slipping. I've never seen her like—
 SAY NilouZila Go to the inner sanctum. Barricade yourself. If you have dark nectar, drink it. It'll keep you moving.
-SAY Vex What about you?
+SAY Sabrina What about you?
 SAY NilouZila I'm going to the courtyard.
-SAY Vex That's death.
+SAY Sabrina That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
 
 # (exit: slow, voiced — light + two heavies for the three of them)
 SFX_LOOP footsteps_light 3.5
 SFX_LOOP footsteps_heavy 3.5
 SFX_LOOP footsteps_heavy 3.5
-WALK vex -16 5 3.5
+WALK sabrina -16 5 3.5
 WALK s1 -16 8 3.5
 WALK s2 -16 3 3.5
-WAIT_WALK vex
-DESPAWN vex
+WAIT_WALK sabrina
+DESPAWN sabrina
 DESPAWN s1
 DESPAWN s2
 
 SAY NilouZila Four hundred years I've knelt at her feet.
 SAY NilouZila I didn't claw my way out of the Pit of Screaming Souls, survive the Binding Trials, and bury my rivals one by one just to watch her empire turn to ash from a cliff.
 
-# (two turns later, they walk in from the east)
+# (two turns later, the ambush standing in the east ignites)
 WAIT_TURNS 2
-SPAWN enemy -14 4 e0
-SPAWN enemy -14 8 e1
-SPAWN enemy -16 2 e2
-SPAWN enemy -16 10 e3
 KILLNOTE 4 four taken DOWN.
-FIGHT 4
+FIGHT e0 e1 e2 e3
 
-# (the moment the fight ends: legion + beast take the gate, in full art)
-SPAWN infantry 13 2 i0
-SPAWN infantry 14 2 i1
-SPAWN infantry 15 2 i2
-SPAWN infantry 13 1 i3
-SPAWN infantry 13 3 i4
-SPAWN infantry 14 3 i5
-SPAWN beast 16 2 b0
-
+# (the moment the fight ends: the legion at the gate speaks)
 SAY NilouZila Venom. Naturally.
 SAY NilouZila Paralytic. Slow-acting. I give it an hour before it reaches my spine.
 SAY NilouZila Plenty can happen in an hour.
@@ -108,13 +105,11 @@ FX nilou crackle
 
 SAY NilouZila But first — the beast.
 
-# (the beast charges; the ground shakes)
-SFX beast_attack
+# (the beast leaps the shield wall onto the ashen ground)
+GLIDE b0 9 2 1.1
 ACTION shake 400
 
-SAY NilouZila Same trick twice?
-
-FIGHT 7
+FIGHT i0 i1 i2 i3 i4 i5 b0
 
 SAY NilouZila Eleven.
 SETFLAG gate_open
