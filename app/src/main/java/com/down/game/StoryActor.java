@@ -11,6 +11,7 @@ public class StoryActor {
     public float bobT;
     public float facing = 1f;
     public Frame[] idleFrames;
+    public Frame[] glideFrames;
 
     private static final float HEX = 96f, SQUASH = 0.6f, SQRT3 = 1.7320508f;
 
@@ -25,7 +26,7 @@ public class StoryActor {
         this.walking = false;
     }
 
-    public boolean isEnemy() { return "enemy".equals(kind); }
+    public boolean isEnemy() { return "enemy".equals(kind) || "beast".equals(kind); }
     public boolean isWalking() { return walking; }
 
     public void setHex(int q, int r) {
