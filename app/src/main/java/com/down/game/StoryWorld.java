@@ -77,6 +77,10 @@ public final class StoryWorld {
     public boolean scatterSet;
     public int scatterQ, scatterR, scatterRad, scatterN;
 
+    // exploration fog (C11): permanent reveal radius around every hex stood on
+    public static final int FOG_R = 5;
+    private final boolean[] explored = new boolean[SceneMap.W_Q * SceneMap.W_R];
+
     private StoryWorld(Context ctx, Sound snd) {
         this.ctx = ctx.getApplicationContext();
         this.snd = snd;
@@ -109,6 +113,8 @@ public final class StoryWorld {
         storyKills = 0;
         lastPQ = Integer.MIN_VALUE;
         lastPR = Integer.MIN_VALUE;
+        java.util.Arrays.fill(explored, false);
+        if (actors != null) actors.reset();
         parse("act1.txt");
         runBoot();
     }
@@ -162,7 +168,27 @@ public final class StoryWorld {
     public void onPlayerHexChanged(int q, int r) {
         if (q == lastPQ && r == lastPR) return;
         lastPQ = q; lastPR = r;
+        reveal(q, r);
         rescanCurrentHex();
+    }
+
+    private void reveal(int q, int r) {
+        int R2 = FOG_R * FOG_R;
+        for (int dr = -FOG_R; dr <= FOG_R; dr++) {
+            for (int dq = -FOG_R; dq <= FOG_R; dq++) {
+                if (dq * dq + dq * dr + dr * dr > R2) continue;
+                int qq = q + dq, rr = r + dr;
+                if (qq < SceneMap.MIN_Q || qq > SceneMap.MAX_Q
+                        || rr < SceneMap.MIN_R || rr > SceneMap.MAX_R) continue;
+                explored[(rr - SceneMap.MIN_R) * SceneMap.W_Q + (qq - SceneMap.MIN_Q)] = true;
+            }
+        }
+    }
+
+    public boolean explored(int q, int r) {
+        if (q < SceneMap.MIN_Q || q > SceneMap.MAX_Q
+                || r < SceneMap.MIN_R || r > SceneMap.MAX_R) return false;
+        return explored[(r - SceneMap.MIN_R) * SceneMap.W_Q + (q - SceneMap.MIN_Q)];
     }
 
     private void rescanCurrentHex() {
@@ -198,20 +224,30 @@ public final class StoryWorld {
             if (w) return;
             waitWalk = null;
         }
-        // Never speak over movement: hold the queue while anyone is mid-step.
-        if (gv != null && gv.isScriptWalking()) return;
-        if (actors != null) {
-            for (int i = 0; i < actors.size(); i++) {
-                StoryActor a = actors.get(i);
-                if (!a.hidden && a.walking) return;
-            }
-        }
         if (evQueue.isEmpty()) {
             evActive = false;
             rescanCurrentHex();
             return;
         }
+        // C2: consecutive WALKs fire on consecutive ticks (simultaneous movement);
+        // only a SAY holds until everyone arrives (never speak over movement).
+        String next = evQueue.get(0);
+        if (next.startsWith("SAY ")) {
+            if (gv != null && gv.isScriptWalking()) return;
+            if (actors != null) {
+                for (int i = 0; i < actors.size(); i++) {
+                    StoryActor a = actors.get(i);
+                    if (!a.hidden && a.walking) return;
+                }
+            }
+        }
         exec(evQueue.remove(0));
+    }
+
+    // C3: the auto-scene owns the input while it is actively playing.
+    // WAIT_TURNS and fights deliberately hand control back.
+    public boolean cutsceneHold() {
+        return evActive && !encounterLive && waitTurns <= 0;
     }
 
     private static int pi(String s) {
@@ -222,6 +258,10 @@ public final class StoryWorld {
     }
     private static boolean isInt(String s) {
         try { Integer.parseInt(s); return true; } catch (Exception e) { return false; }
+    }
+    private static int hexDist(int q1, int r1, int q2, int r2) {
+        int dq = q1 - q2, dr = r1 - r2;
+        return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
     }
 
     private void exec(String cmd) {
@@ -251,14 +291,25 @@ public final class StoryWorld {
             }
         } else if (cmd.startsWith("GLIDE ")) {
             String[] p = cmd.split(" ");
-            if (gv != null) gv.scriptGlide(pi(p[1]), pi(p[2]), p.length > 3 ? pf(p[3]) : 1.2f);
-            waitWalk = PLAYER_KEY;
+            float dur = p.length > 3 ? pf(p[3]) : 1.2f;
+            if (PLAYER_KEY.equals(p[1])) {
+                if (gv != null) gv.scriptGlide(pi(p[2]), pi(p[3]), dur);
+                waitWalk = PLAYER_KEY;
+            } else if (actors != null) {
+                actors.glideTo(p[1], pi(p[2]), pi(p[3]), dur);
+                waitWalk = p[1];
+            }
         } else if (cmd.startsWith("EXIT ")) {
             String[] p = cmd.split(" ");
             if (actors != null) actors.exitTo(p[1], pi(p[2]), pi(p[3]));
         } else if (cmd.startsWith("FACE ")) {
             String[] p = cmd.split(" ");
-            if (actors != null) actors.setFacing(p[1], p.length > 2 && "left".equals(p[2]) ? -1f : 1f);
+            int dir = p.length > 2 && "left".equals(p[2]) ? -1 : 1;
+            if (PLAYER_KEY.equals(p[1])) {
+                if (gv != null) gv.scriptFace(dir);
+            } else if (actors != null) {
+                actors.setFacing(p[1], dir);
+            }
         } else if (cmd.startsWith("WAIT_WALK ")) {
             waitWalk = cmd.split(" ")[1];
         } else if (cmd.startsWith("WAIT_TURNS ")) {
@@ -344,9 +395,11 @@ public final class StoryWorld {
                 gv.fxActor(p[1], p[2]);
             }
         } else if (cmd.startsWith("FIGHT ")) {
-            int n = pi(cmd.split(" ")[1]);
-            if (n > 8) pendingWave = n - 6;
-            startEncounter();
+            String[] p = cmd.split(" ");
+            ArrayList<String> names = new ArrayList<>(p.length);
+            for (int i = 1; i < p.length; i++) names.add(p[i]);
+            if (names.size() > 6) pendingWave = names.size() - 6;
+            startEncounter(names);
         } else if (cmd.startsWith("REINFORCE ")) {
             reinforceKills = 0;
             reinforceTarget = Integer.parseInt(cmd.split(" ")[1]);
@@ -379,13 +432,16 @@ public final class StoryWorld {
         else if (name.equals("flash")) gv.fxFlash(ms);
     }
 
-    private void startEncounter() {
+    // C12: named conversion, beasts first so the beast takes the first turn.
+    private void startEncounter(List<String> names) {
         encounterLive = true;
         storyKills = 0;
         if (actors != null && gv != null) {
-            for (int i = 0; i < actors.size(); i++) {
-                StoryActor a = actors.get(i);
-                if (a.isEnemy() && !a.hidden) {
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = 0; i < names.size(); i++) {
+                    StoryActor a = actors.get(names.get(i));
+                    if (a == null || a.hidden || !a.isEnemy()) continue;
+                    if (("beast".equals(a.type)) != (pass == 0)) continue;
                     a.hidden = true;
                     gv.spawnReinforcement(a.type, a.q, a.r);
                 }
@@ -457,16 +513,19 @@ public final class StoryWorld {
         return !inst.propBlockedWorld(x, y);
     }
 
+    // C7: the grown gate seals the whole mouth except its doorway column.
     private boolean propBlockedWorld(float x, float y) {
         SceneMap.worldToHex(x, y, HW2);
         int q = HW2[0], r = HW2[1];
         for (int i = 0; i < placedProps.size(); i++) {
             Prop pr = placedProps.get(i);
             if (pr.sheet != 3) continue;
-            int gq = pr.q, gr = pr.r;
-            if (q == gq && r == gr) continue;
-            if (q == gq && (r == gr - 1 || r == gr + 1)) return true;
-            if (q == gq + 1 && (r == gr - 2 || r == gr + 2)) return true;
+            int dr = r - pr.r;
+            if (q == pr.q) {
+                if (dr != 0 && dr >= -3 && dr <= 3) return true;
+            } else if (q == pr.q + 1) {
+                if (dr != 0 && dr >= -4 && dr <= 4) return true;
+            }
         }
         return false;
     }
