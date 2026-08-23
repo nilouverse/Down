@@ -17,8 +17,8 @@ import java.io.InputStream;
 
 /**
  * Story-map compositor, hex-cut edition. ASHEN first: meadow = ash cells with
- * random 60-degree spins + mirror; a 1-2 hex thick trail of road cells (same
- * hex-cut style, random spins) winds from the spawn cliff to the gate mouth;
+ * random 60-degree spins + mirror; the trail + descent road share ONE
+ * continuous world-locked road texture (hex-cut silhouette, zero seams);
  * north plateau = staged ledge; rims = cliff lips; bodies hang below rim rows.
  * draw() allocates ZERO objects.
  */
@@ -35,6 +35,8 @@ public final class SceneMap {
     private final boolean[] walkable = new boolean[W_Q * W_R];
     private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, gGlow, pA, pB;
     private volatile Shader[] shaders = new Shader[6];
+    private volatile Bitmap roadCell;
+    private volatile Shader roadRep;
     private final int[] cellW = new int[6], cellH = new int[6];
     private volatile boolean ready, disposed;
     private final boolean quality;
@@ -49,6 +51,7 @@ public final class SceneMap {
     private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
     private final Matrix mS = new Matrix();
+    private final Matrix mC = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
             bB = new int[MAXT], fF = new int[MAXT], dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
     private int lr0, lr1, lq0, lq1;
@@ -79,6 +82,14 @@ public final class SceneMap {
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
             shaders = sh;
+            // F1: one repeating road cell = the continuous surface
+            if (ro != null) {
+                int cw2 = ro.getWidth() >> 2, ch2 = ro.getHeight() >> 2;
+                if (cw2 > 0 && ch2 > 0) {
+                    roadCell = Bitmap.createBitmap(ro, 0, 0, cw2, ch2);
+                    roadRep = new BitmapShader(roadCell, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT);
+                }
+            }
             ready = true;
         } }, "map-load");
         loader.setDaemon(true);
@@ -272,9 +283,9 @@ public final class SceneMap {
         return h & 0x7FFFFFFF;
     }
 
-    // gentle S-curve from the spawn cliff (-26,6) to the gate mouth (11,2)
+    // gentle S-curve from the spawn cliff (-28,6) to the gate mouth (11,2)
     private static float trailR(float q) {
-        float t = (q + 26f) / 37f;
+        float t = (q + 28f) / 39f;
         if (t < 0f) t = 0f;
         if (t > 1f) t = 1f;
         float e = t * t * (3f - 2f * t);
@@ -295,15 +306,14 @@ public final class SceneMap {
             else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim
             else if (q < MIN_Q) ts = -1;
             else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; } // cliff-top ledge
-            else if (q >= -27 && Math.abs(r - trailR(q)) <= 0.6f) {
-                // the trail: road cells, hex-cut, random spins + mirror
-                ts = 1; ti = (h >>> 4) & 15;
-                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+            else if (q >= -29 && Math.abs(r - trailR(q)) <= 0.6f) {
+                // the trail: road cells, hex-cut, ONE continuous surface
+                ts = 1; ti = (h >>> 4) & 15; rot = 0;
             } else { ts = 0; ti = (h >>> 4) & 15;                              // ashen meadow
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         } else if (q <= 36) {
             float t = (q - 11) / 25f;
-            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; }     // descent road
+            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; rot = 0; }     // descent road
         }
         tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; fF[i] = front; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
@@ -367,15 +377,30 @@ public final class SceneMap {
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
         }
         float s = HEX * zoom * 1.07f;
-        // PASS 1 — hex-cut terrain (trail included, it IS terrain now)
+        // F1: world-locked matrix for the continuous road surface
+        if (roadRep != null) {
+            float k = cellW[1] / (2f * s);
+            mC.reset();
+            mC.postScale(k, k);
+            mC.postTranslate(-k * ((-camX) * zoom + vw * 0.5f), -k * ((-camY) * zoom + vh * 0.5f));
+        }
+        // PASS 1 — hex-cut terrain
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
             int ts = full ? tS[i] : -1;
-            if (ts < 0 || shaders[ts] == null || (full && fF[i] == 1)) {
+            if (ts < 0 || (shaders[ts] == null && ts != 1) || (full && fF[i] == 1)) {
                 tp.setColor(fallback(HW[0], HW[1]));
                 hexPath(cx, cy, s);
                 c.drawPath(hexP, tp);
+                continue;
+            }
+            if (ts == 1 && roadRep != null) {
+                roadRep.setLocalMatrix(mC);
+                tp.setShader(roadRep);
+                hexPath(cx, cy, s);
+                c.drawPath(hexP, tp);
+                tp.setShader(null);
                 continue;
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
@@ -461,7 +486,9 @@ public final class SceneMap {
         disposed = true;
         recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
         recycle(tBody); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
+        recycle(roadCell);
         tAsh = tRoad = tCity = tCrater = tCliff = tBody = gGlow = pA = pB = craterGlow = null;
+        roadCell = null; roadRep = null;
         shaders = new Shader[6];
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
