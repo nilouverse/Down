@@ -43,6 +43,7 @@ public class StoryActors {
         StoryActor a = new StoryActor(name, kind, type, tag, hexX(q, r), hexY(q, r), false);
         a.alias = alias;
         a.q = q; a.r = r;
+        if (a.isEnemy()) a.facing = -1f;   // F4: story enemies face the player (west)
         actors.add(a);
     }
 
