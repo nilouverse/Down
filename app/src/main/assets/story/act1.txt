@@ -5,9 +5,9 @@
 PROP gate 6 11 2 1.1 1
 
 # (the whole cast exists from load; the fog reveals them by exploration)
-SPAWN sabrina -20 5 npc Sabrina
-SPAWN soldier -20 8 npc s1
-SPAWN soldier -20 3 npc s2
+SPAWN sabrina -17 5 npc Sabrina
+SPAWN soldier -17 8 npc s1
+SPAWN soldier -17 3 npc s2
 SPAWN enemy -14 4 e0
 SPAWN enemy -14 8 e1
 SPAWN enemy -16 2 e2
@@ -24,7 +24,7 @@ ZONE opening 0 7 2
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
-TELEPORT -26 6
+TELEPORT -28 6
 FACE nilou left
 ZOOM 2.0 700
 
@@ -39,9 +39,9 @@ WAIT 2000
 
 # (the camera pulls back; they approach from the east, facing left)
 ZOOM 1.25 800
-WALK sabrina -24 5 2.0
-WALK s1 -24 7 2.0
-WALK s2 -24 3 2.0
+WALK sabrina -24 5 2.4
+WALK s1 -24 7 2.4
+WALK s2 -24 3 2.4
 WAIT_WALK sabrina
 FACE nilou right
 SAY Sabrina Lieutenant! The front line has collapsed! They broke through the gate — the defenses are broken — all of them—
