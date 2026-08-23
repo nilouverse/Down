@@ -17,7 +17,7 @@ public final class StoryWorld {
     public static final String PLAYER_KEY = "nilou";
 
     public static class Prop {
-        public int sheet;   // 0 = props_a, 1 = props_b, 2 = props_city, 3 = gate
+        public int sheet;
         public int idx;
         public int q, r;
         public float x, y;
@@ -45,6 +45,7 @@ public final class StoryWorld {
     private int waitTurns = 0;
 
     private final HashMap<String, Boolean> flags = new HashMap<>(24);
+    private final HashMap<String, Integer> speakerColors = new HashMap<>(16);
 
     private boolean encounterLive = false;
     private int reinforceKills = -1;
@@ -76,7 +77,6 @@ public final class StoryWorld {
     public boolean scatterSet;
     public int scatterQ, scatterR, scatterRad, scatterN;
 
-    // exploration fog: permanent reveal radius around every hex stood on
     public static final int FOG_R = 5;
     private final boolean[] explored = new boolean[SceneMap.W_Q * SceneMap.W_R];
 
@@ -97,6 +97,7 @@ public final class StoryWorld {
     public void reload() {
         zoneCount = 0;
         flags.clear();
+        speakerColors.clear();
         placedProps.clear();
         bootScript.clear();
         evQueue.clear();
@@ -230,8 +231,6 @@ public final class StoryWorld {
             rescanCurrentHex();
             return;
         }
-        // consecutive WALKs fire on consecutive ticks (simultaneous movement);
-        // only a SAY holds until everyone arrives (never speak over movement).
         String next = evQueue.get(0);
         if (next.startsWith("SAY ")) {
             if (gv != null && gv.isScriptWalking()) return;
@@ -245,8 +244,6 @@ public final class StoryWorld {
         exec(evQueue.remove(0));
     }
 
-    // the auto-scene owns the input while it is actively playing.
-    // WAIT_TURNS and fights deliberately hand control back.
     public boolean cutsceneHold() {
         return evActive && !encounterLive && waitTurns <= 0;
     }
@@ -260,8 +257,13 @@ public final class StoryWorld {
     private static boolean isInt(String s) {
         try { Integer.parseInt(s); return true; } catch (Exception e) { return false; }
     }
+    private static int parseHex(String s) {
+        try {
+            if (s.startsWith("#")) s = s.substring(1);
+            return (int) Long.parseLong(s, 16) | 0xFF000000;
+        } catch (Exception e) { return 0xFFFFFFFF; }
+    }
 
-    // G3: no character may be sent onto an occupied hex.
     private boolean hexTaken(int q, int r, String selfKey) {
         if (lastPQ != Integer.MIN_VALUE && q == lastPQ && r == lastPR) return true;
         if (actors != null) {
@@ -286,9 +288,17 @@ public final class StoryWorld {
         return tgtTmp;
     }
 
+    public int speakerColor(String speaker) {
+        Integer c = speakerColors.get(speaker);
+        return c != null ? c : 0;
+    }
+
     private void exec(String cmd) {
         if (cmd.startsWith("SAY ")) {
             sayLine(cmd.substring(4));
+        } else if (cmd.startsWith("SAYCOLOR ")) {
+            String[] p = cmd.split(" ", 3);
+            if (p.length >= 3) speakerColors.put(p[1], parseHex(p[2]));
         } else if (cmd.startsWith("SPAWN ")) {
             String[] p = cmd.split(" ");
             if (actors != null && p.length > 3) {
@@ -374,6 +384,10 @@ public final class StoryWorld {
             String[] p = cmd.split(" ");
             if (gv != null) gv.scriptCamLook(pi(p[1]), pi(p[2]),
                     p.length > 3 ? Integer.parseInt(p[3]) : 3000);
+        } else if (cmd.startsWith("FADE ")) {
+            String[] p = cmd.split(" ");
+            int ms = p.length > 1 ? pi(p[1]) : 1000;
+            if (gv != null) gv.startFade(ms);
         } else if (cmd.startsWith("SKY ")) {
             skyKey = cmd.split(" ")[1];
         } else if (cmd.startsWith("LAYER ")) {
@@ -460,7 +474,6 @@ public final class StoryWorld {
         else if (name.equals("flash")) gv.fxFlash(ms);
     }
 
-    // named conversion, beasts first so the beast takes the first turn.
     private void startEncounter(List<String> names) {
         encounterLive = true;
         storyKills = 0;
@@ -530,7 +543,6 @@ public final class StoryWorld {
         return !inst.propBlockedWorld(x, y);
     }
 
-    // the gate seals its two columns except the open doorway rows (r-1..r+2).
     private boolean propBlockedWorld(float x, float y) {
         SceneMap.worldToHex(x, y, HW2);
         int q = HW2[0], r = HW2[1];
