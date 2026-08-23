@@ -16,11 +16,10 @@ import android.os.SystemClock;
 import java.io.InputStream;
 
 /**
- * Story-map compositor, hex-cut edition. ASHEN first: meadow = ash cells with
- * random 60-degree spins + mirror; the trail + descent road share ONE
- * continuous world-locked road texture (hex-cut silhouette, zero seams);
- * north plateau = staged ledge; rims = cliff lips; bodies hang below rim rows.
- * draw() allocates ZERO objects.
+ * Story-map compositor, hex-cut edition. ASHEN meadow = ash cells with random
+ * 60-degree spins + mirror; the road (trail + descent) is ONE smooth ribbon
+ * with a world-locked repeating texture — no hex steps, no seams; rims = cliff
+ * lips; bodies hang below rim rows. draw() allocates ZERO objects.
  */
 public final class SceneMap {
     public static final float HEX = 96f, SQUASH = 0.6f, BAKE = 2f;
@@ -50,6 +49,7 @@ public final class SceneMap {
     private final float[] HW = new float[2];
     private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
+    private final Path roadP = new Path();
     private final Matrix mS = new Matrix();
     private final Matrix mC = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
@@ -82,7 +82,7 @@ public final class SceneMap {
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
             shaders = sh;
-            // F1: one repeating road cell = the continuous surface
+            // one repeating road cell = the continuous surface
             if (ro != null) {
                 int cw2 = ro.getWidth() >> 2, ch2 = ro.getHeight() >> 2;
                 if (cw2 > 0 && ch2 > 0) {
@@ -293,6 +293,58 @@ public final class SceneMap {
         return 6f - 4f * e + wob * (e * (1f - e));
     }
 
+    // ================= ROAD RIBBON =================
+    private static float centerR(float q) {
+        if (q <= 11f) return trailR(q);
+        float t = (q - 11f) / 25f;
+        return 2f - 7f * t;
+    }
+    private static float bandHalf(float q) {
+        float t = (q - 11f) / 25f;
+        return 2.6f - 0.8f * t;
+    }
+    private static float halfWR(float q) {
+        if (q <= 8f) return 0.55f;
+        if (q >= 14f) return bandHalf(q);
+        float u = (q - 8f) / 6f;
+        float e = u * u * (3f - 2f * u);
+        return 0.55f + (bandHalf(14f) - 0.55f) * e;
+    }
+
+    private void drawRoad(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        if (roadRep == null) return;
+        int cw = cellW[1], ch = cellH[1];
+        if (cw <= 0 || ch <= 0) return;
+        float s = HEX * zoom * 1.07f;
+        // world-locked texture: scale ops first, translate last (shaderHex order)
+        mC.reset();
+        mC.postScale(2f / cw, 2f / ch);
+        mC.postScale(s, s);
+        mC.postTranslate((-camX) * zoom + vw * 0.5f, (-camY) * zoom + vh * 0.5f);
+        roadRep.setLocalMatrix(mC);
+        tp.setShader(roadRep);
+        roadP.reset();
+        float q0 = -29f, q1 = 36.5f, step = 0.5f;
+        boolean first = true;
+        for (float q = q0; q <= q1; q += step) {
+            float cr = centerR(q);
+            float x = SQ3 * HEX * (q + cr * 0.5f);
+            float y = ROWY * (cr - halfWR(q));
+            float px = (x - camX) * zoom + vw * 0.5f;
+            float py = (y - camY) * zoom + vh * 0.5f;
+            if (first) { roadP.moveTo(px, py); first = false; } else roadP.lineTo(px, py);
+        }
+        for (float q = q1; q >= q0; q -= step) {
+            float cr = centerR(q);
+            float x = SQ3 * HEX * (q + cr * 0.5f);
+            float y = ROWY * (cr + halfWR(q));
+            roadP.lineTo((x - camX) * zoom + vw * 0.5f, (y - camY) * zoom + vh * 0.5f);
+        }
+        roadP.close();
+        c.drawPath(roadP, tp);
+        tp.setShader(null);
+    }
+
     // ================= HEX COMPOSER (ASHEN) =================
     private void computeHex(int i, int q, int r) {
         int h = h2(q, r, 7);
@@ -306,14 +358,15 @@ public final class SceneMap {
             else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim
             else if (q < MIN_Q) ts = -1;
             else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; } // cliff-top ledge
-            else if (q >= -29 && Math.abs(r - trailR(q)) <= 0.6f) {
-                // the trail: road cells, hex-cut, ONE continuous surface
-                ts = 1; ti = (h >>> 4) & 15; rot = 0;
-            } else { ts = 0; ti = (h >>> 4) & 15;                              // ashen meadow
+            else { ts = 0; ti = (h >>> 4) & 15;                              // ashen meadow
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         } else if (q <= 36) {
             float t = (q - 11) / 25f;
-            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) { ts = 1; ti = (h >>> 4) & 15; rot = 0; }     // descent road
+            if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) {
+                // under the ribbon: plain meadow, the road is drawn as one surface
+                ts = 0; ti = (h >>> 4) & 15;
+                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+            }
         }
         tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; fF[i] = front; dI[i] = -1; pI[i] = -1; gI[i] = -1;
     }
@@ -377,34 +430,20 @@ public final class SceneMap {
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
         }
         float s = HEX * zoom * 1.07f;
-        // F1: world-locked matrix for the continuous road surface
-        if (roadRep != null) {
-            float k = cellW[1] / (2f * s);
-            mC.reset();
-            mC.postScale(k, k);
-            mC.postTranslate(-k * ((-camX) * zoom + vw * 0.5f), -k * ((-camY) * zoom + vh * 0.5f));
-        }
         // PASS 1 — hex-cut terrain
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
             int ts = full ? tS[i] : -1;
-            if (ts < 0 || (shaders[ts] == null && ts != 1) || (full && fF[i] == 1)) {
+            if (ts < 0 || shaders[ts] == null || (full && fF[i] == 1)) {
                 tp.setColor(fallback(HW[0], HW[1]));
                 hexPath(cx, cy, s);
                 c.drawPath(hexP, tp);
                 continue;
             }
-            if (ts == 1 && roadRep != null) {
-                roadRep.setLocalMatrix(mC);
-                tp.setShader(roadRep);
-                hexPath(cx, cy, s);
-                c.drawPath(hexP, tp);
-                tp.setShader(null);
-                continue;
-            }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
+        drawRoad(c, camX, camY, zoom, vw, vh);
         // PASS 1b — cliff bodies
         if (tBody != null) {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
