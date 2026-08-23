@@ -1278,6 +1278,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             hexToWorld(IH_A[0], IH_A[1], FW_A);
             Enemy e = new Enemy();
             e.x = FW_A[0]; e.y = FW_A[1];
+            e.facing = -1;
             enemies.add(e);
             return;
         }
@@ -2409,10 +2410,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         worldToHex(en.x, en.y, IH_B);
         worldToHex(tgt.x, tgt.y, IH_A);
         int dq = IH_B[0] - IH_A[0], dr = IH_B[1] - IH_A[1];
-        int rq = IH_B[0] + (dq > 0 ? 1 : (dq < 0 ? -1 : 0));
-        int rr = IH_B[1] + (dr > 0 ? 1 : (dr < 0 ? -1 : 0));
+        // F3: hop back ONE hex from the TARGET, away toward the beast's side
+        int rq = IH_A[0] + (dq > 0 ? 1 : (dq < 0 ? -1 : 0));
+        int rr = IH_A[1] + (dr > 0 ? 1 : (dr < 0 ? -1 : 0));
         if (hexFree(rq, rr, en)) { hexToWorld(rq, rr, FW_A); d[4] = FW_A[0]; d[5] = FW_A[1]; }
-        else { d[4] = en.x; d[5] = en.y; }
+        else { d[4] = tgt.x; d[5] = tgt.y; }
         leapOff.put(en, d);
     }
 
@@ -2426,7 +2428,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             dx = (d[2] - d[0]) * e; dy = (d[3] - d[1]) * e;
             lift = (float) Math.sin(k * 3.14159f) * 120f;
         } else if (t < 0.85f) {
-            dx = d[2] - en.x; dy = d[3] - en.y;
+            if (en.x != d[2] || en.y != d[3]) { en.x = d[2]; en.y = d[3]; }
+            dx = 0; dy = 0;
         } else {
             if (en.x != d[4] || en.y != d[5]) {
                 en.x = d[4]; en.y = d[5];
@@ -2819,17 +2822,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (en.beast && !eBeastGlideFr.isEmpty()) {
             Floater f = en.floater;
             int bn = eBeastGlideFr.size();
-            if (f.state == 1) {
-                if (f.t < 0.10f) return eBeastGlideFr.get(0 % bn);
-                if (f.t < 0.20f) return eBeastGlideFr.get(4 % bn);
-                if (f.t < 0.30f) return eBeastGlideFr.get(7 % bn);
-                return eBeastGlideFr.get(2 % bn);
-            }
             if (f.state == 2) {
-                return eBeastGlideFr.get((((int) (en.animT * 6f)) % 2 == 0) ? 1 % bn : 5 % bn);
+                // F2: full 6-frame run cycle (frames 2..7), Floater's intended mapping
+                return eBeastGlideFr.get((2 + ((int) (en.animT * 8f)) % 6) % bn);
             }
-            if (f.t < 0.10f) return eBeastGlideFr.get(6 % bn);
-            if (f.t < 0.20f) return eBeastGlideFr.get(3 % bn);
+            if (f.state == 1 || f.state == 3) return eBeastGlideFr.get(1 % bn);
             return eBeastGlideFr.get(0);
         }
         java.util.List<Frame> gPool = en.heavy ? eHeavyGlideFr : eGlideFr;
@@ -3729,6 +3726,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         SceneMap.hexToWorld(q, r, hw);
         Enemy e = new Enemy();
         e.x = hw[0]; e.y = hw[1];
+        e.facing = -1;   // F4: story enemies face the player (west)
         if ("infantry".equals(type)) {
             e.heavy = true;
             e.hp = 60; e.maxHp = 60;
@@ -3738,7 +3736,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         } else if ("beast".equals(type)) {
             e.beast = true;
             e.hp = 120; e.maxHp = 120;
-            e.speed = 110f;
+            e.speed = 900f;   // F5: glide at lunge pace
         }
         enemies.add(e);
     }
