@@ -2,9 +2,8 @@
 # Lines above the first ZONE = act-level set dressing (run at start).
 # Zones fire once unless gated. Display text = SAY lines only.
 
-PROP gate 6 11 2 1.1 1
+PROP gate 6 12 2 1.1 1
 
-# (the whole cast exists from load; the fog reveals them by exploration)
 SPAWN sabrina -17 5 npc Sabrina
 SPAWN soldier -17 8 npc s1
 SPAWN soldier -17 3 npc s2
@@ -37,7 +36,6 @@ WAIT 3000
 SFX_LOOP footsteps_walk 2
 WAIT 2000
 
-# (the camera pulls back; they approach from the east, facing left)
 ZOOM 1.25 800
 WALK sabrina -24 5 2.4
 WALK s1 -24 7 2.4
@@ -57,7 +55,6 @@ SAY NilouZila I'm going to the courtyard.
 SAY Sabrina That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
 
-# (exit: slow, voiced — light + two heavies for the three of them)
 SFX_LOOP footsteps_light 3.5
 SFX_LOOP footsteps_heavy 3.5
 SFX_LOOP footsteps_heavy 3.5
@@ -72,18 +69,15 @@ DESPAWN s2
 SAY NilouZila Four hundred years I've knelt at her feet.
 SAY NilouZila I didn't claw my way out of the Pit of Screaming Souls, survive the Binding Trials, and bury my rivals one by one just to watch her empire turn to ash from a cliff.
 
-# (two turns later, the ambush standing in the east ignites)
 WAIT_TURNS 2
 KILLNOTE 4 four taken DOWN.
 FIGHT e0 e1 e2 e3
 
-# (the moment the fight ends: the legion at the gate speaks)
 SAY NilouZila Venom. Naturally.
 SAY NilouZila Paralytic. Slow-acting. I give it an hour before it reaches my spine.
 SAY NilouZila Plenty can happen in an hour.
 SETFLAG ashen_cleared
 
-# ---- the ashen exit: the gate --------------------------------------
 ZONE gate_mouth 8 2 3
 GATE gate_mouth ashen_cleared
 ON_ENTER gate_mouth
@@ -91,7 +85,6 @@ ON_ENTER gate_mouth
 SAY Carrion_Infantry_Leader A lieutenant! She wears the marks! Take her alive — Mordethail wants the officers breathing!
 SAY NilouZila Come and try.
 
-# (the shield wall steps out through 12 1 & 12 2, forms at 10 1..10 4)
 WALK i0 10 2 2.2
 WALK i1 10 1 2.2 via 12 1
 WALK i2 10 3 2.2 via 12 2
@@ -99,17 +92,14 @@ WALK i3 10 4 2.2 via 12 1
 WALK i4 11 1 2.2 via 12 2
 WALK i5 11 2 2.2 via 12 2
 
-# (the war-beast snorts and paws the ground)
 SFX beast_move
 
 SAY NilouZila Shield wall. Tight. Slow. Predictable.
 
-# (dark energy into the blade — black flame)
 FX nilou crackle
 
 SAY NilouZila But first — the beast.
 
-# (the beast leaps the shield wall onto the ashen ground)
 GLIDE b0 9 2 1.1
 ACTION shake 400
 
@@ -117,3 +107,20 @@ FIGHT i0 i1 i2 i3 i4 i5 b0
 
 SAY NilouZila Eleven.
 SETFLAG gate_open
+
+# J1: the aftermath of the gate fight
+ZONE gate_after 12 2 3
+GATE gate_after gate_open
+ON_ENTER gate_after
+
+SAYCOLOR Mortanna #3dff6e
+
+SAY NilouZila The undead has stopped moving. Mortanna has lost control of her servants. I can feel it... our connection is fraying. She is dying.
+
+ACTION shake 600
+ACTION flash 200
+SAY Mortanna I will never die!
+
+SAY NilouZila She'll destroy this entire dimension if she goes down! If I stay, I die with her. Forgive me, Goddess, but I must survive.
+
+FADE 1500
