@@ -49,8 +49,6 @@ public final class StoryWorld {
     private boolean encounterLive = false;
     private int reinforceKills = -1;
     private int reinforceTarget = 0;
-    private int pendingWave = 0;
-    private final int[][] waveSpawnHexes = { {64,1},{68,1},{70,4},{68,7},{64,7},{63,4} };
     private final int[][] fodderHexes   = { {61,2},{61,6},{63,1},{63,7},{66,0},{68,8} };
 
     private int killNoteN = -1;
@@ -106,7 +104,6 @@ public final class StoryWorld {
         encounterLive = false;
         reinforceKills = -1;
         reinforceTarget = 0;
-        pendingWave = 0;
         scatterSet = false;
         killNoteN = -1;
         killNoteTxt = null;
@@ -398,7 +395,6 @@ public final class StoryWorld {
             String[] p = cmd.split(" ");
             ArrayList<String> names = new ArrayList<>(p.length);
             for (int i = 1; i < p.length; i++) names.add(p[i]);
-            if (names.size() > 6) pendingWave = names.size() - 6;
             startEncounter(names);
         } else if (cmd.startsWith("REINFORCE ")) {
             reinforceKills = 0;
@@ -468,18 +464,7 @@ public final class StoryWorld {
         }
     }
 
-    public void onEnemyCountLow(int alive) {
-        if (pendingWave > 0 && alive <= 2) {
-            pendingWave = 0;
-            if (gv != null) {
-                gv.noteWave();
-                for (int i = 0; i < 6; i++) {
-                    int[] h = waveSpawnHexes[i];
-                    gv.spawnReinforcement("skirmisher", h[0], h[1]);
-                }
-            }
-        }
-    }
+    public void onEnemyCountLow(int alive) {}
 
     public void endEncounter() {
         encounterLive = false;
