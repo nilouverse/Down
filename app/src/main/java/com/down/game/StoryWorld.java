@@ -68,6 +68,7 @@ public final class StoryWorld {
 
     public final float[] pt = new float[2];
     private final int[] HW2 = new int[2];
+    private final int[] tgtTmp = new int[2];
     public final ArrayList<Prop> placedProps = new ArrayList<>();
 
     public String skyKey = "";
@@ -78,6 +79,9 @@ public final class StoryWorld {
     // exploration fog: permanent reveal radius around every hex stood on
     public static final int FOG_R = 5;
     private final boolean[] explored = new boolean[SceneMap.W_Q * SceneMap.W_R];
+
+    private static final int[][] NEIGH6 = {
+            { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, -1 }, { -1, 1 } };
 
     private StoryWorld(Context ctx, Sound snd) {
         this.ctx = ctx.getApplicationContext();
@@ -257,6 +261,31 @@ public final class StoryWorld {
         try { Integer.parseInt(s); return true; } catch (Exception e) { return false; }
     }
 
+    // G3: no character may be sent onto an occupied hex.
+    private boolean hexTaken(int q, int r, String selfKey) {
+        if (lastPQ != Integer.MIN_VALUE && q == lastPQ && r == lastPR) return true;
+        if (actors != null) {
+            for (int i = 0; i < actors.size(); i++) {
+                StoryActor a = actors.get(i);
+                if (!a.hidden && a.q == q && a.r == r && !a.name.equals(selfKey)) return true;
+            }
+        }
+        return false;
+    }
+
+    private int[] freeTarget(int q, int r, String selfKey) {
+        tgtTmp[0] = q; tgtTmp[1] = r;
+        if (!hexTaken(q, r, selfKey)) return tgtTmp;
+        for (int i = 0; i < 6; i++) {
+            int qq = q + NEIGH6[i][0], rr = r + NEIGH6[i][1];
+            if (!hexTaken(qq, rr, selfKey) && (map == null || map.walk(qq, rr))) {
+                tgtTmp[0] = qq; tgtTmp[1] = rr;
+                return tgtTmp;
+            }
+        }
+        return tgtTmp;
+    }
+
     private void exec(String cmd) {
         if (cmd.startsWith("SAY ")) {
             sayLine(cmd.substring(4));
@@ -281,9 +310,11 @@ public final class StoryWorld {
                 waitWalk = PLAYER_KEY;
             } else if (actors != null) {
                 if (p.length > 7 && "via".equals(p[5])) {
-                    actors.walkVia(p[1], pi(p[2]), pi(p[3]), pi(p[6]), pi(p[7]), dur);
+                    int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
+                    actors.walkVia(p[1], ft[0], ft[1], pi(p[6]), pi(p[7]), dur);
                 } else {
-                    actors.walkTo(p[1], pi(p[2]), pi(p[3]), dur);
+                    int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
+                    actors.walkTo(p[1], ft[0], ft[1], dur);
                 }
             }
         } else if (cmd.startsWith("GLIDE ")) {
@@ -293,7 +324,8 @@ public final class StoryWorld {
                 if (gv != null) gv.scriptGlide(pi(p[2]), pi(p[3]), dur);
                 waitWalk = PLAYER_KEY;
             } else if (actors != null) {
-                actors.glideTo(p[1], pi(p[2]), pi(p[3]), dur);
+                int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
+                actors.glideTo(p[1], ft[0], ft[1], dur);
                 waitWalk = p[1];
             }
         } else if (cmd.startsWith("EXIT ")) {
