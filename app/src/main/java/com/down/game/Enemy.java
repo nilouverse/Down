@@ -134,21 +134,6 @@ public class Enemy {
                             attackDuration = ATK_DUR;
                         }
                         facing = px >= x ? 1 : -1;
-                    } else if (attacksPlanned > 0) {
-                        // can't strike from here: step closer, never overlap the target
-                        float dx = px - x, dy = py - y;
-                        float d2 = dx * dx + dy * dy;
-                        if (d2 > 5600f) {
-                            floater.moving = true;
-                            float d = (float) Math.sqrt(d2);
-                            float step = Math.min(d, speed * dt);
-                            x += dx / d * step;
-                            y += dy / d * step;
-                            if (dx < -0.05f) facing = -1;
-                            if (dx >  0.05f) facing =  1;
-                        } else {
-                            act = 3;
-                        }
                     } else {
                         act = 3;
                     }
@@ -176,12 +161,12 @@ public class Enemy {
                         atkPos = 0;
                         boolean nextAdjacent = (Math.abs(px - x) + Math.abs(py - y)) < 200f;
                         boolean nextInRange2 = (Math.abs(px - x) + Math.abs(py - y)) < 400f;
-                        boolean canAgain;
-                        if (beast) canAgain = false; // one committed attack per turn
-                        else canAgain = (heavy && atkForm == 2) ? nextInRange2 : nextAdjacent;
+                        boolean canAgain = (heavy && atkForm == 2) ? nextInRange2 : nextAdjacent;
                         if (attacksDone < attacksPlanned && canAgain) {
                             attackT = 0;
-                            if (heavy) {
+                            if (beast) {
+                                attackDuration = BEAST_ATK_DUR[beastForm - 1];
+                            } else if (heavy) {
                                 attackDuration = HEAVY_ATK_DUR[atkForm - 1];
                             } else {
                                 attackDuration = ATK_DUR;
