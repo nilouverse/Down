@@ -47,7 +47,7 @@ public class Enemy {
     };
     public static final int[] BEAST_ATK_STRIKE = { 3, 3, 2 };
     public static final int[] BEAST_ATK_DMG = { 18, 18, 15 };
-    public static final float[] BEAST_ATK_DUR = { 0.9f, 1.1f, 0.85f };
+    public static final float[] BEAST_ATK_DUR = { 1.6f, 1.1f, 0.85f };
 
     public static final float MANA_REGEN = 30f;
 
