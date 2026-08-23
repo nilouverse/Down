@@ -67,13 +67,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     // cached move-fan / attack-range hex lists (B3)
     private int fanQ, fanR;
-    private int[] fanQs = new int[64];
-    private int[] fanRs = new int[64];
+    private int[] fanQs = new int[160];
+    private int[] fanRs = new int[160];
     private int fanN = 0;
     private int fanMoveMax = -1;
     private boolean fanDirty = true;
-    private int[] fan2Qs = new int[64];
-    private int[] fan2Rs = new int[64];
+    private int[] fan2Qs = new int[160];
+    private int[] fan2Rs = new int[160];
     private int fan2N = 0;
     private final HashMap<Long, Integer> reachDist = new HashMap<>();
     private final HashMap<Long, Long> reachParent = new HashMap<>();
@@ -93,6 +93,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private String lastSceneName = "";
     private final char[] posBuf = new char[16];
+    private int fadeState = 0;   // 0 none, 1 out, 2 black-hold
+    private float fadeT = 0f;
+    private int fadeDur = 1000;
+    private static final float[] HEXU = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f,
+            0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
     public SceneMap map;
     public StoryActors actors;
     private float camLookX, camLookY, camLookT;
@@ -1522,6 +1527,10 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             camY += (ty - camY) * k;
         }
         runeT += dt;
+        if (fadeState == 1) {
+            fadeT += dt / (fadeDur / 1000f);
+            if (fadeT >= 1f) { fadeT = 1f; fadeState = 2; }
+        }
 
         for (int i = enemies.size() - 1; i >= 0; i--) {
             Enemy en = enemies.get(i);
@@ -2469,16 +2478,22 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private void drawHexRing(Canvas cv, float cx, float cy, int strokeCol, int fillCol) {
         float hr = HEX * 1.05f * zoom;
-        rf.set(cx - hr, cy - hr * SQUASH, cx + hr, cy + hr * SQUASH);
+        hexPath.reset();
+        for (int k = 0; k < 6; k++) {
+            float x = cx + HEXU[k * 2] * hr;
+            float y = cy + HEXU[k * 2 + 1] * hr;
+            if (k == 0) hexPath.moveTo(x, y); else hexPath.lineTo(x, y);
+        }
+        hexPath.close();
         if (fillCol != 0) {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(fillCol);
-            cv.drawOval(rf, paint);
+            cv.drawPath(hexPath, paint);
         }
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(2 * zoom);
         paint.setColor(strokeCol);
-        cv.drawOval(rf, paint);
+        cv.drawPath(hexPath, paint);
         paint.setStyle(Paint.Style.FILL);
         paint.setStrokeWidth(0);
     }
@@ -3095,6 +3110,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             story.drawHud(cv, W, H, paint, fBody, fLogo);
         }
         if (storyMode && storyTest) drawPosCard(cv);
+        if (fadeState != 0) {
+            paint.setColor(0xFF000000);
+            paint.setAlpha((int) (fadeT * 255f));
+            cv.drawRect(0, 0, W, H, paint);
+            paint.setAlpha(255);
+        }
 
         if (hurtT > 0) {
             paint.setColor(C_BRIGHT);
@@ -3552,6 +3573,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     }
     public boolean isScriptWalking() { return swActive; }
     public void scriptFace(int dir) { player.facing = dir; }
+    public void startFade(int ms) {
+        fadeDur = ms > 0 ? ms : 1000;
+        fadeState = 1;
+        fadeT = 0f;
+    }
     public void scriptWalk(int q, int r, float dur) {
         SceneMap.hexToWorld(q, r, FW_A);
         swFromX = player.x; swFromY = player.y;
