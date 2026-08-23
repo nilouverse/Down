@@ -2216,11 +2216,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             d.ax = pr.x; d.ay = pr.y;
             float hh = TH * 1.9f * pr.scale;
             if (pr.sheet == 3) {
-                // C6: the gate spans the path section top-to-bottom; scale = nudge knob.
-                float t = (pr.q - 11f) / 25f;
-                if (t < 0f) t = 0f;
-                if (t > 1f) t = 1f;
-                hh = (2f * (2.6f - 0.8f * t) * (HEX * 1.5f * SQUASH)) * pr.scale;
+                // gate spans rows -1..4 of its column; scale = nudge knob.
+                hh = 6f * (HEX * 1.5f * SQUASH) * pr.scale;
                 // E2: base sits two rows south so the arch straddles the path line.
                 d.ay = pr.y + 2f * (HEX * 1.5f * SQUASH);
             }
