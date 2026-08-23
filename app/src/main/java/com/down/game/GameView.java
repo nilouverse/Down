@@ -2221,9 +2221,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 if (t < 0f) t = 0f;
                 if (t > 1f) t = 1f;
                 hh = (2f * (2.6f - 0.8f * t) * (HEX * 1.5f * SQUASH)) * pr.scale;
+                // E2: base sits two rows south so the arch straddles the path line.
+                d.ay = pr.y + 2f * (HEX * 1.5f * SQUASH);
             }
             d.s = hh / b.getHeight();
-            d.y = pr.y;
+            d.y = d.ay;
             d.obj = pr.flip ? Boolean.TRUE : null;
             drawList.add(d);
         }
