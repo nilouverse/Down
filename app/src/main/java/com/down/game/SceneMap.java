@@ -15,12 +15,6 @@ import android.graphics.Shader;
 import android.os.SystemClock;
 import java.io.InputStream;
 
-/**
- * Story-map compositor, hex-cut edition. ASHEN meadow = ash cells with random
- * 60-degree spins + mirror; the road (trail + descent) is ONE smooth ribbon
- * with a world-locked repeating texture — no hex steps, no seams; rims = cliff
- * lips; bodies hang below rim rows. draw() allocates ZERO objects.
- */
 public final class SceneMap {
     public static final float HEX = 96f, SQUASH = 0.6f, BAKE = 2f;
     public static final int CHUNK_PX = 1024, SRC = 512;
@@ -30,6 +24,7 @@ public final class SceneMap {
     private static final float TS = 128f, SQ3 = 1.7320508f, ROWY = 1.5f * HEX * SQUASH;
     private static final int MAXT = 8192;
     private static final float[] UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f, 0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
+    private static final int MAX_ROAD_PTS = 256;
 
     private final boolean[] walkable = new boolean[W_Q * W_R];
     private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, gGlow, pA, pB;
@@ -50,11 +45,21 @@ public final class SceneMap {
     private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
     private final Path roadP = new Path();
+    private final Path northEdgeP = new Path();
+    private final Path southEdgeP = new Path();
+    private final Path farThirdP = new Path();
     private final Matrix mS = new Matrix();
     private final Matrix mC = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
             bB = new int[MAXT], fF = new int[MAXT], dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
     private int lr0, lr1, lq0, lq1;
+
+    private final float[] roadNX = new float[MAX_ROAD_PTS];
+    private final float[] roadNY = new float[MAX_ROAD_PTS];
+    private final float[] roadSX = new float[MAX_ROAD_PTS];
+    private final float[] roadSY = new float[MAX_ROAD_PTS];
+    private final float[] roadQ = new float[MAX_ROAD_PTS];
+    private int roadCount = 0;
 
     public SceneMap(Context ctx, boolean quality) {
         this.quality = quality;
@@ -82,7 +87,6 @@ public final class SceneMap {
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
             shaders = sh;
-            // one repeating road cell = the continuous surface
             if (ro != null) {
                 int cw2 = ro.getWidth() >> 2, ch2 = ro.getHeight() >> 2;
                 if (cw2 > 0 && ch2 > 0) {
@@ -113,7 +117,6 @@ public final class SceneMap {
         return null;
     }
 
-    // Subtractive magenta key: alpha FROM magenta strength, magenta SUBTRACTED from R/B.
     private static Bitmap key(Bitmap b) {
         if (b == null) return null;
         if (!b.isMutable()) { Bitmap m = b.copy(Bitmap.Config.ARGB_8888, true); if (m == null) return b; b = m; }
@@ -136,7 +139,6 @@ public final class SceneMap {
         return b;
     }
 
-    // Flatten per-cell baked lighting so cells meet at equal tone.
     private static Bitmap flatten(Bitmap b) {
         if (b == null) return null;
         if (!b.isMutable()) { Bitmap m = b.copy(b.getConfig(), true); if (m == null) return b; b = m; }
@@ -180,7 +182,6 @@ public final class SceneMap {
         return b;
     }
 
-    // Soften each cell's edge band so neighbors melt together.
     private static Bitmap soften(Bitmap b) {
         if (b == null) return null;
         if (!b.isMutable()) { Bitmap m = b.copy(b.getConfig(), true); if (m == null) return b; b = m; }
@@ -253,7 +254,6 @@ public final class SceneMap {
     private void buildWalkability() {
         for (int r = MIN_R; r <= MAX_R; r++) for (int q = MIN_Q; q <= MAX_Q; q++) {
             boolean w;
-            // cliff-top plateau (r <= -8) is staged: drawn, never player-walkable.
             if (q <= 10) w = r >= -2 && r <= 12;
             else if (q <= 36) { float t = (q - 11) / 25f; w = Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t; }
             else if (q <= 60) w = (q <= 41 && r >= -7 && r <= -3)
@@ -283,7 +283,6 @@ public final class SceneMap {
         return h & 0x7FFFFFFF;
     }
 
-    // gentle S-curve from the spawn cliff (-28,6) to the gate mouth (11,2)
     private static float trailR(float q) {
         float t = (q + 28f) / 39f;
         if (t < 0f) t = 0f;
@@ -293,7 +292,6 @@ public final class SceneMap {
         return 6f - 4f * e + wob * (e * (1f - e));
     }
 
-    // ================= ROAD RIBBON =================
     private static float centerR(float q) {
         if (q <= 11f) return trailR(q);
         float t = (q - 11f) / 25f;
@@ -303,12 +301,13 @@ public final class SceneMap {
         float t = (q - 11f) / 25f;
         return 2.6f - 0.8f * t;
     }
+    // H3: thin section widened from 0.55 to 0.80
     private static float halfWR(float q) {
-        if (q <= 8f) return 0.55f;
+        if (q <= 8f) return 0.80f;
         if (q >= 14f) return bandHalf(q);
         float u = (q - 8f) / 6f;
         float e = u * u * (3f - 2f * u);
-        return 0.55f + (bandHalf(14f) - 0.55f) * e;
+        return 0.80f + (bandHalf(14f) - 0.80f) * e;
     }
 
     private void drawRoad(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
@@ -316,54 +315,151 @@ public final class SceneMap {
         int cw = cellW[1], ch = cellH[1];
         if (cw <= 0 || ch <= 0) return;
         float s = HEX * zoom * 1.07f;
-        // world-locked texture: scale ops first, translate last (shaderHex order)
+        
         mC.reset();
         mC.postScale(2f / cw, 2f / ch);
         mC.postScale(s, s);
         mC.postTranslate((-camX) * zoom + vw * 0.5f, (-camY) * zoom + vh * 0.5f);
         roadRep.setLocalMatrix(mC);
         tp.setShader(roadRep);
+        
         roadP.reset();
+        northEdgeP.reset();
+        southEdgeP.reset();
+        farThirdP.reset();
+        
         float q0 = -29f, q1 = 36.5f, step = 0.5f;
         boolean first = true;
+        roadCount = 0;
         for (float q = q0; q <= q1; q += step) {
             float cr = centerR(q);
-            float x = SQ3 * HEX * (q + cr * 0.5f);
-            float y = ROWY * (cr - halfWR(q));
-            float px = (x - camX) * zoom + vw * 0.5f;
-            float py = (y - camY) * zoom + vh * 0.5f;
-            if (first) { roadP.moveTo(px, py); first = false; } else roadP.lineTo(px, py);
+            float xBase = SQ3 * HEX * (q + cr * 0.5f);
+            float hw = halfWR(q);
+            float yN = ROWY * (cr - hw);
+            float yS = ROWY * (cr + hw);
+            float pxN = (xBase - camX) * zoom + vw * 0.5f;
+            float pyN = (yN - camY) * zoom + vh * 0.5f;
+            float pxS = (xBase - camX) * zoom + vw * 0.5f;
+            float pyS = (yS - camY) * zoom + vh * 0.5f;
+            
+            if (roadCount < MAX_ROAD_PTS) {
+                roadNX[roadCount] = pxN;
+                roadNY[roadCount] = pyN;
+                roadSX[roadCount] = pxS;
+                roadSY[roadCount] = pyS;
+                roadQ[roadCount] = q;
+                roadCount++;
+            }
+            
+            if (first) { 
+                roadP.moveTo(pxN, pyN); 
+                northEdgeP.moveTo(pxN, pyN);
+                farThirdP.moveTo(pxN, pyN);
+                first = false; 
+            } else {
+                roadP.lineTo(pxN, pyN);
+                northEdgeP.lineTo(pxN, pyN);
+                if (q <= q0 + (q1 - q0) * 0.33f) {
+                    farThirdP.lineTo(pxN, pyN);
+                }
+            }
         }
-        for (float q = q1; q >= q0; q -= step) {
-            float cr = centerR(q);
-            float x = SQ3 * HEX * (q + cr * 0.5f);
-            float y = ROWY * (cr + halfWR(q));
-            roadP.lineTo((x - camX) * zoom + vw * 0.5f, (y - camY) * zoom + vh * 0.5f);
+        for (int i = roadCount - 1; i >= 0; i--) {
+            roadP.lineTo(roadSX[i], roadSY[i]);
         }
         roadP.close();
         c.drawPath(roadP, tp);
         tp.setShader(null);
+        
+        // H1: depth — south edge lit stroke
+        southEdgeP.reset();
+        for (int i = 0; i < roadCount; i++) {
+            if (i == 0) southEdgeP.moveTo(roadSX[i], roadSY[i]);
+            else southEdgeP.lineTo(roadSX[i], roadSY[i]);
+        }
+        tp.setColor(0x50efe6dd);
+        tp.setStrokeWidth(2f * zoom);
+        tp.setStyle(Paint.Style.STROKE);
+        c.drawPath(southEdgeP, tp);
+        
+        // H1: depth — north edge dark stroke
+        tp.setColor(0xCC0a0608);
+        tp.setStrokeWidth(3f * zoom);
+        c.drawPath(northEdgeP, tp);
+        
+        // H1: depth — flat darkening over far third
+        int farEnd = (int)(roadCount * 0.33f);
+        if (farEnd > 0) {
+            farThirdP.reset();
+            farThirdP.moveTo(roadNX[0], roadNY[0]);
+            for (int i = 1; i < farEnd; i++) farThirdP.lineTo(roadNX[i], roadNY[i]);
+            for (int i = farEnd - 1; i >= 0; i--) farThirdP.lineTo(roadSX[i], roadSY[i]);
+            farThirdP.close();
+            tp.setColor(0x30000000);
+            tp.setStyle(Paint.Style.FILL);
+            c.drawPath(farThirdP, tp);
+        }
+        tp.setStyle(Paint.Style.FILL);
     }
 
-    // ================= HEX COMPOSER (ASHEN) =================
+    // H4: south cliff body — wall halves hanging below the ribbon's south edge
+    private void drawSouthCliffBody(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        if (tBody == null) return;
+        int cw = cellW[5], ch = cellH[5];
+        if (cw <= 0 || ch <= 0) return;
+        float s = HEX * zoom * 1.07f;
+        
+        for (float q = -29f; q <= 36f; q += 1f) {
+            float cr = centerR(q);
+            float hw = halfWR(q);
+            int rSouth = (int) Math.floor(cr + hw + 0.5f);
+            float wx = SQ3 * HEX * (q + rSouth * 0.5f);
+            float wy = ROWY * rSouth;
+            float cx = (wx - camX) * zoom + vw * 0.5f;
+            float cy = (wy - camY) * zoom + vh * 0.5f;
+            int ti = h2((int)q, rSouth, 7) & 15;
+            int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
+            int half = ch >> 1;
+            
+            // top half (face extends upward from this hex's top)
+            wallSrc.set(x0, y0, x0 + cw, y0 + half);
+            c.save();
+            hexPath(cx, cy - ROWY * zoom * 0.5f, s * 1.02f);
+            c.clipPath(hexP);
+            dstR.set((int)(cx - s), (int)(cy - s * 0.62f - ROWY * zoom * 0.5f), 
+                     (int)(cx + s), (int)(cy + s * 0.62f - ROWY * zoom * 0.5f));
+            c.drawBitmap(tBody, wallSrc, dstR, tp);
+            c.restore();
+            
+            // bottom half (face extends downward)
+            wallSrc.set(x0, y0 + half, x0 + cw, y0 + ch);
+            c.save();
+            hexPath(cx, cy + ROWY * zoom * 0.5f, s * 1.02f);
+            c.clipPath(hexP);
+            dstR.set((int)(cx - s), (int)(cy - s * 0.62f + ROWY * zoom * 0.5f), 
+                     (int)(cx + s), (int)(cy + s * 0.62f + ROWY * zoom * 0.5f));
+            c.drawBitmap(tBody, wallSrc, dstR, tp);
+            c.restore();
+        }
+    }
+
     private void computeHex(int i, int q, int r) {
         int h = h2(q, r, 7);
         int ts = -1, ti = 0, rot = 0, body = 0, front = 0;
         if (q <= 10) {
-            int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);   // 0/180 + mirror
+            int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);
             boolean westLip = q == MIN_Q - 1 && r >= -7 && r <= 15;
-            if (q < MIN_Q - 1 || r <= -13 || r >= 16) ts = -1;                // void
+            if (q < MIN_Q - 1 || r <= -13 || r >= 16) ts = -1;
             else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
-            else if (r <= -5 && r >= -7) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }   // north rim lip
-            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }   // south rim
+            else if (r <= -5 && r >= -7) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
+            else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }
             else if (q < MIN_Q) ts = -1;
-            else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; } // cliff-top ledge
-            else { ts = 0; ti = (h >>> 4) & 15;                              // ashen meadow
+            else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; }
+            else { ts = 0; ti = (h >>> 4) & 15;
                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
         } else if (q <= 36) {
             float t = (q - 11) / 25f;
             if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) {
-                // under the ribbon: plain meadow, the road is drawn as one surface
                 ts = 0; ti = (h >>> 4) & 15;
                 rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
             }
@@ -415,7 +511,6 @@ public final class SceneMap {
         c.restore();
     }
 
-    // ================= DRAW (zero allocation) =================
     public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         float halfW = vw / (2f * zoom), halfH = vh / (2f * zoom);
         int r0 = (int) Math.floor((camY - halfH) / ROWY) - 1, r1 = (int) Math.floor((camY + halfH) / ROWY) + 1;
@@ -430,7 +525,6 @@ public final class SceneMap {
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
         }
         float s = HEX * zoom * 1.07f;
-        // PASS 1 — hex-cut terrain
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
@@ -444,7 +538,7 @@ public final class SceneMap {
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
         drawRoad(c, camX, camY, zoom, vw, vh);
-        // PASS 1b — cliff bodies
+        drawSouthCliffBody(c, camX, camY, zoom, vw, vh);
         if (tBody != null) {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
                 if (!full || bB[i] != 1 || fF[i] == 1) continue;
@@ -459,7 +553,6 @@ public final class SceneMap {
         if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
     }
 
-    // South rim (lip + body) rendered AFTER actors so the near edge occludes them.
     public void drawFront(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         if (!ready) return;
         float s = HEX * zoom * 1.07f;
