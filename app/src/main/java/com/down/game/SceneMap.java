@@ -61,6 +61,10 @@ public final class SceneMap {
     private final float[] roadQ = new float[MAX_ROAD_PTS];
     private int roadCount = 0;
 
+    // Stubs for room system (disabled in this version)
+    public void setPlayerHex(int q, int r) { }
+    public boolean roomOn() { return false; }
+
     public SceneMap(Context ctx, boolean quality) {
         this.quality = quality;
         buildWalkability();
@@ -301,7 +305,6 @@ public final class SceneMap {
         float t = (q - 11f) / 25f;
         return 2.6f - 0.8f * t;
     }
-    // H3: thin section widened from 0.55 to 0.80
     private static float halfWR(float q) {
         if (q <= 8f) return 0.80f;
         if (q >= 14f) return bandHalf(q);
@@ -371,7 +374,6 @@ public final class SceneMap {
         c.drawPath(roadP, tp);
         tp.setShader(null);
         
-        // H1: depth — south edge lit stroke
         southEdgeP.reset();
         for (int i = 0; i < roadCount; i++) {
             if (i == 0) southEdgeP.moveTo(roadSX[i], roadSY[i]);
@@ -382,12 +384,10 @@ public final class SceneMap {
         tp.setStyle(Paint.Style.STROKE);
         c.drawPath(southEdgeP, tp);
         
-        // H1: depth — north edge dark stroke
         tp.setColor(0xCC0a0608);
         tp.setStrokeWidth(3f * zoom);
         c.drawPath(northEdgeP, tp);
         
-        // H1: depth — flat darkening over far third
         int farEnd = (int)(roadCount * 0.33f);
         if (farEnd > 0) {
             farThirdP.reset();
@@ -402,7 +402,6 @@ public final class SceneMap {
         tp.setStyle(Paint.Style.FILL);
     }
 
-    // H4: south cliff body — wall halves hanging below the ribbon's south edge
     private void drawSouthCliffBody(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         if (tBody == null) return;
         int cw = cellW[5], ch = cellH[5];
@@ -421,7 +420,6 @@ public final class SceneMap {
             int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
             int half = ch >> 1;
             
-            // top half (face extends upward from this hex's top)
             wallSrc.set(x0, y0, x0 + cw, y0 + half);
             c.save();
             hexPath(cx, cy - ROWY * zoom * 0.5f, s * 1.02f);
@@ -431,7 +429,6 @@ public final class SceneMap {
             c.drawBitmap(tBody, wallSrc, dstR, tp);
             c.restore();
             
-            // bottom half (face extends downward)
             wallSrc.set(x0, y0 + half, x0 + cw, y0 + ch);
             c.save();
             hexPath(cx, cy + ROWY * zoom * 0.5f, s * 1.02f);
