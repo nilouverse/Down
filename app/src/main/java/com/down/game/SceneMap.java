@@ -26,25 +26,16 @@ public final class SceneMap {
     private static final float[] UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f, 0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
     private static final int MAX_ROAD_PTS = 256;
 
-    // Room pocket bounds (above the plateau, in the void)
-    public static final int PQ0 = 2, PQ1 = 10, PR0 = -20, PR1 = -14;
-
     private final boolean[] walkable = new boolean[W_Q * W_R];
     private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, gGlow, pA, pB;
-    private volatile Bitmap tRoom, tWall;
     private volatile Shader[] shaders = new Shader[6];
-    private volatile Shader roomFloorSh;
     private volatile Bitmap roadCell;
     private volatile Shader roadRep;
     private final int[] cellW = new int[6], cellH = new int[6];
-    private int roomCW, roomCH, wallCW, wallCH;
     private volatile boolean ready, disposed;
     private final boolean quality;
     private boolean craterVisible;
     private Bitmap craterGlow;
-    private boolean roomOn;
-    private final int[] wq = new int[64], wa = new int[64];
-    private int wallN = 0;
 
     private final Paint tp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
     private final Paint gp = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -73,7 +64,6 @@ public final class SceneMap {
     public SceneMap(Context ctx, boolean quality) {
         this.quality = quality;
         buildWalkability();
-        buildRoomWalls();
         gp.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SCREEN));
         bakeCraterGlow();
         final Context app = ctx.getApplicationContext();
@@ -87,12 +77,9 @@ public final class SceneMap {
                     bd = flatten(dec(app, "map/cliffbody", true)),
                     gl = dec(app, "map/glow", false),
                     pa = key(dec(app, "map/props_a", false)),
-                    pb = key(dec(app, "map/props_b", false)),
-                    rm = flatten(dec(app, "map/room", true)),
-                    wl = flatten(dec(app, "map/wall", true));
-            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(bd); recycle(gl); recycle(pa); recycle(pb); recycle(rm); recycle(wl); return; }
+                    pb = key(dec(app, "map/props_b", false));
+            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(bd); recycle(gl); recycle(pa); recycle(pb); return; }
             tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; tBody = bd; gGlow = gl; pA = pa; pB = pb;
-            tRoom = rm; tWall = wl;
             Bitmap[] all = { a, ro, ci, cr, cl, bd };
             Shader[] sh = new Shader[6];
             for (int i = 0; i < 6; i++) if (all[i] != null) {
@@ -107,11 +94,6 @@ public final class SceneMap {
                     roadRep = new BitmapShader(roadCell, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT);
                 }
             }
-            if (rm != null) {
-                roomFloorSh = new BitmapShader(rm, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-                roomCW = rm.getWidth() >> 2; roomCH = rm.getHeight() >> 2;
-            }
-            if (wl != null) { wallCW = wl.getWidth() >> 2; wallCH = wl.getHeight() >> 2; }
             ready = true;
         } }, "map-load");
         loader.setDaemon(true);
@@ -272,8 +254,7 @@ public final class SceneMap {
     private void buildWalkability() {
         for (int r = MIN_R; r <= MAX_R; r++) for (int q = MIN_Q; q <= MAX_Q; q++) {
             boolean w;
-            if (q >= PQ0 && q <= PQ1 && r >= PR0 && r <= PR1) w = true; // Room pocket
-            else if (q <= 10) w = r >= -2 && r <= 12;
+            if (q <= 10) w = r >= -2 && r <= 12;
             else if (q <= 36) { float t = (q - 11) / 25f; w = Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t; }
             else if (q <= 60) w = (q <= 41 && r >= -7 && r <= -3)
                     || (r >= -6 && r <= 12 && (r % 5 == 0 || q % 6 == 0 || insidePlaza(q, r)) && !insideRubble(q, r));
@@ -302,84 +283,6 @@ public final class SceneMap {
         return h & 0x7FFFFFFF;
     }
 
-    // ================= ROOM =================
-    public void setPlayerHex(int q, int r) {
-        roomOn = q >= PQ0 && q <= PQ1 && r >= PR0 && r <= PR1;
-    }
-    public boolean roomOn() { return roomOn; }
-
-    private void buildRoomWalls() {
-        int n = 0;
-        for (int q = PQ0 - 1; q <= PQ1 + 1; q++) {
-            wq[n] = q; wa[n] = PR0 - 3; n++;
-            wq[n] = q; wa[n] = PR1; n++;
-        }
-        for (int r = PR0; r <= PR1; r++) {
-            wq[n] = PQ0 - 1; wa[n] = r - 2; n++;
-            wq[n] = PQ1 + 1; wa[n] = r - 2; n++;
-        }
-        wallN = n;
-    }
-
-    private void roomFloorHex(Canvas c, int q, int r, float cx, float cy, float s) {
-        int h = h2(q, r, 7);
-        int patch = h & 15;
-        int rot = ((h >>> 6) & 3) * 60;
-        int cw = roomCW, ch = roomCH;
-        float ox = ((patch & 3) + 0.5f) * cw, oy = ((patch >> 2) + 0.5f) * ch;
-        mS.reset();
-        mS.postTranslate(-ox, -oy);
-        mS.postScale(2f / cw, 2f / ch);
-        if (((h >>> 8) & 1) == 1) mS.postScale(-1f, 1f);
-        if (rot != 0) mS.postRotate(-rot);
-        mS.postScale(s, s);
-        mS.postTranslate(cx, cy);
-        roomFloorSh.setLocalMatrix(mS);
-        tp.setShader(roomFloorSh);
-        hexPath(cx, cy, s);
-        c.drawPath(hexP, tp);
-        tp.setShader(null);
-    }
-
-    private void drawRoomFloor(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
-        if (!roomOn || roomFloorSh == null) return;
-        float s = HEX * zoom * 1.07f;
-        for (int r = PR0; r <= PR1; r++) for (int q = PQ0; q <= PQ1; q++) {
-            hexToWorld(q, r, HW);
-            roomFloorHex(c, q, r, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
-        }
-    }
-
-    private void drawRoomWalls(Canvas c, float camX, float camY, float zoom, int vw, int vh, boolean south) {
-        if (!roomOn || tWall == null) return;
-        int cw = wallCW, ch = wallCH;
-        if (cw <= 0 || ch <= 0) return;
-        float s = HEX * zoom * 1.07f;
-        tp.setShader(null);
-        for (int i = 0; i < wallN; i++) {
-            boolean isS = (wa[i] == PR1);
-            if (south != isS) continue;
-            int q = wq[i], a = wa[i];
-            int ti = h2(q, a, 7) & 15;
-            int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
-            int half = ch >> 1;
-            hexToWorld(q, a + 1, HW);
-            float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
-            wallSrc.set(x0, y0, x0 + cw, y0 + half);
-            c.save(); hexPath(cx, cy, s * 1.02f); c.clipPath(hexP);
-            dstR.set((int) (cx - s), (int) (cy - s * 0.62f), (int) (cx + s), (int) (cy + s * 0.62f));
-            c.drawBitmap(tWall, wallSrc, dstR, tp);
-            c.restore();
-            hexToWorld(q, a + 2, HW);
-            cx = (HW[0] - camX) * zoom + vw * 0.5f; cy = (HW[1] - camY) * zoom + vh * 0.5f;
-            wallSrc.set(x0, y0 + half, x0 + cw, y0 + ch);
-            c.save(); hexPath(cx, cy, s * 1.02f); c.clipPath(hexP);
-            dstR.set((int) (cx - s), (int) (cy - s * 0.62f), (int) (cx + s), (int) (cy + s * 0.62f));
-            c.drawBitmap(tWall, wallSrc, dstR, tp);
-            c.restore();
-        }
-    }
-
     private static float trailR(float q) {
         float t = (q + 28f) / 39f;
         if (t < 0f) t = 0f;
@@ -398,6 +301,7 @@ public final class SceneMap {
         float t = (q - 11f) / 25f;
         return 2.6f - 0.8f * t;
     }
+    // H3: thin section widened from 0.55 to 0.80
     private static float halfWR(float q) {
         if (q <= 8f) return 0.80f;
         if (q >= 14f) return bandHalf(q);
@@ -467,6 +371,7 @@ public final class SceneMap {
         c.drawPath(roadP, tp);
         tp.setShader(null);
         
+        // H1: depth — south edge lit stroke
         southEdgeP.reset();
         for (int i = 0; i < roadCount; i++) {
             if (i == 0) southEdgeP.moveTo(roadSX[i], roadSY[i]);
@@ -477,10 +382,12 @@ public final class SceneMap {
         tp.setStyle(Paint.Style.STROKE);
         c.drawPath(southEdgeP, tp);
         
+        // H1: depth — north edge dark stroke
         tp.setColor(0xCC0a0608);
         tp.setStrokeWidth(3f * zoom);
         c.drawPath(northEdgeP, tp);
         
+        // H1: depth — flat darkening over far third
         int farEnd = (int)(roadCount * 0.33f);
         if (farEnd > 0) {
             farThirdP.reset();
@@ -495,6 +402,7 @@ public final class SceneMap {
         tp.setStyle(Paint.Style.FILL);
     }
 
+    // H4: south cliff body — wall halves hanging below the ribbon's south edge
     private void drawSouthCliffBody(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         if (tBody == null) return;
         int cw = cellW[5], ch = cellH[5];
@@ -513,6 +421,7 @@ public final class SceneMap {
             int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
             int half = ch >> 1;
             
+            // top half (face extends upward from this hex's top)
             wallSrc.set(x0, y0, x0 + cw, y0 + half);
             c.save();
             hexPath(cx, cy - ROWY * zoom * 0.5f, s * 1.02f);
@@ -522,6 +431,7 @@ public final class SceneMap {
             c.drawBitmap(tBody, wallSrc, dstR, tp);
             c.restore();
             
+            // bottom half (face extends downward)
             wallSrc.set(x0, y0 + half, x0 + cw, y0 + ch);
             c.save();
             hexPath(cx, cy + ROWY * zoom * 0.5f, s * 1.02f);
@@ -627,8 +537,6 @@ public final class SceneMap {
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
-        drawRoomFloor(c, camX, camY, zoom, vw, vh);
-        drawRoomWalls(c, camX, camY, zoom, vw, vh, false);
         drawRoad(c, camX, camY, zoom, vw, vh);
         drawSouthCliffBody(c, camX, camY, zoom, vw, vh);
         if (tBody != null) {
@@ -661,7 +569,6 @@ public final class SceneMap {
             hexToWorld(q + dq, r + 2, HW);
             wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false);
         }
-        drawRoomWalls(c, camX, camY, zoom, vw, vh, true);
     }
 
     private int fallback(float wx, float wy) {
@@ -711,9 +618,9 @@ public final class SceneMap {
         disposed = true;
         recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
         recycle(tBody); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
-        recycle(roadCell); recycle(tRoom); recycle(tWall);
+        recycle(roadCell);
         tAsh = tRoad = tCity = tCrater = tCliff = tBody = gGlow = pA = pB = craterGlow = null;
-        roadCell = null; roadRep = null; tRoom = null; tWall = null; roomFloorSh = null;
+        roadCell = null; roadRep = null;
         shaders = new Shader[6];
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
