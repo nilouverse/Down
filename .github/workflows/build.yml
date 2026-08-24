@@ -1,19 +1,53 @@
-The Abandoned Fortress
-*(Visual: NilouZila materializes in her lavish, stone-walled bedchamber inside the Abyss. The floor is unnervingly still.)*
-*(Visual: She rushes to a dark armoire, throwing it open, then checks under the bed. She slams her fist against the wall.)*
+name: Build
 
-NilouZila: "My dark nectar... it's gone! Thieves! Who would dare steal from NilouZila, Binder of Souls?! My rank, my power... it means nothing to them now."
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "true = keep everything in the APK"
+        type: boolean
+        default: false
 
-*(Visual: She leaps to the fireplace, prying a loose stone from the hearth. She pulls out a small, glowing vial.)*
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-NilouZila: *(Sighing in relief)* "Simple is best. The more magical wards you place on something, the more obvious it becomes. At least I have this."
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
-*(Visual: Heavy, violent banging echoes against her chamber door.)*
+      - name: Gradle 8.7
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
 
-Vyrxa: *(Muffled, raspy voice outside)* "NilouZila! Open this door at once! I must speak with you!"
+      - name: Unpack launcher icon
+        run: |
+          unzip -o res.zip -d app/src/main
+          rm res.zip
 
-NilouZila: *(Scowling)* "Vyrxa. That half-rotten hag. We've despised each other for centuries. She's here to kill me, no doubt thinking I'm weakened."
+      - name: Strip for test build
+        if: ${{ github.event.inputs.full != 'true' }}
+        run: |
+          rm -rf app/src/main/assets/art app/src/main/assets/sounds
+          cd app/src/main/assets/sprites
+          find . -name '*.png' \
+            ! -name 'idle.png' ! -name 'glide.png' \
+            ! -name 'attack_a.png' ! -name 'attack_b.png' \
+            ! -name 'enemy_beast_idle_a.png' ! -name 'enemy_beast_idle_b.png' \
+            ! -name 'enemy_beast_glide_a.png' ! -name 'enemy_beast_glide_b.png' \
+            ! -name 'enemy_beast_attack.png' -delete
 
-*(Visual: NilouZila uncorks the vial, drinking half of it. She shudders as power floods back into her veins. She then grabs a sleek, black whip and a vial of shimmering red acid.)*
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
 
-NilouZila: *(To herself)* "I don't have time for her games. I need to leave before the whole fortress falls."
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Down-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
