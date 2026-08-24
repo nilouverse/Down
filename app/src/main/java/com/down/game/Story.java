@@ -139,6 +139,15 @@ public class Story {
     }
     
     private int colorFor(String who) {
+        // SAYCOLOR consult: script-defined accents override prefixes
+        try {
+            StoryWorld sw = StoryWorld.get(host.shGetContext(), null);
+            int scriptCol = sw.speakerColor(who);
+            if (scriptCol != 0) return scriptCol;
+        } catch (Exception e) {
+            // fallback if context/sound isn't fully initialized yet
+        }
+        
         String p = prefixFor(who);
         if ("nilou".equals(p)) return C_MAGENTA;
         if ("vex".equals(p)) return C_CYAN;
