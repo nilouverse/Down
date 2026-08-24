@@ -2,10 +2,10 @@
 
 PROP gate 6 12 2 1.1 1
 
-PROP room 0 26 -19 1
-PROP room 1 29 -17 1
-PROP room 2 25 -16 1
-PROP room 3 22 -17 1
+PROP room 0 6 -20 1
+PROP room 1 9 -17 1
+PROP room 2 5 -16 1
+PROP room 3 2 -17 1
 
 SPAWN sabrina -17 5 npc Sabrina
 SPAWN soldier -17 8 npc s1
@@ -127,26 +127,26 @@ SAY Mortanna I will never die!
 SAY NilouZila She'll destroy this entire dimension if she goes down! If I stay, I die with her. Forgive me, Goddess, but I must survive.
 
 FADE 1500
-TELEPORT 26 -17
+TELEPORT 6 -17
 FADEIN 1200
 TITLE The Abandoned Fortress
 
 SAY NilouZila My dark nectar... it's gone! Thieves! Who would dare steal from NilouZila, Binder of Souls?! My rank, my power... it means nothing to them now.
 
-WALK nilou 29 -17 0.8
+WALK nilou 9 -17 0.8
 WAIT 400
-WALK nilou 25 -16 0.8
+WALK nilou 5 -16 0.8
 WAIT 400
 ACTION shake 150
 SAY NilouZila Simple is best. The more magical wards you place on something, the more obvious it becomes. At least I have this.
 
-WALK nilou 22 -17 0.8
+WALK nilou 2 -17 0.8
 ACTION shake 200
 SFX door_bang
 SAY Vyrxa NilouZila! Open this door at once! I must speak with you!
 
 SAY NilouZila Vyrxa. That half-rotten hag. We've despised each other for centuries. She's here to kill me, no doubt thinking I'm weakened.
 
-WALK nilou 26 -17 0.8
+WALK nilou 6 -17 0.8
 WAIT 500
 SAY NilouZila I don't have time for her games. I need to leave before the whole fortress falls.
