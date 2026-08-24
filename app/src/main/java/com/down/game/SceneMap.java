@@ -24,7 +24,6 @@ public final class SceneMap {
     private static final float TS = 128f, SQ3 = 1.7320508f, ROWY = 1.5f * HEX * SQUASH;
     private static final int MAXT = 8192;
     private static final float[] UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f, 0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
-    private static final int MAX_ROAD_PTS = 256;
 
     private final boolean[] walkable = new boolean[W_Q * W_R];
     private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, gGlow, pA, pB;
@@ -45,23 +44,13 @@ public final class SceneMap {
     private final Bitmap[] sheets = new Bitmap[6];
     private final Path hexP = new Path();
     private final Path roadP = new Path();
-    private final Path northEdgeP = new Path();
-    private final Path southEdgeP = new Path();
-    private final Path farThirdP = new Path();
     private final Matrix mS = new Matrix();
     private final Matrix mC = new Matrix();
     private final int[] tS = new int[MAXT], tI = new int[MAXT], tR = new int[MAXT],
             bB = new int[MAXT], fF = new int[MAXT], dI = new int[MAXT], pI = new int[MAXT], gI = new int[MAXT];
     private int lr0, lr1, lq0, lq1;
 
-    private final float[] roadNX = new float[MAX_ROAD_PTS];
-    private final float[] roadNY = new float[MAX_ROAD_PTS];
-    private final float[] roadSX = new float[MAX_ROAD_PTS];
-    private final float[] roadSY = new float[MAX_ROAD_PTS];
-    private final float[] roadQ = new float[MAX_ROAD_PTS];
-    private int roadCount = 0;
-
-    // Stubs for room system (disabled in this version)
+    // Room system stubs (disabled)
     public void setPlayerHex(int q, int r) { }
     public boolean roomOn() { return false; }
 
@@ -306,11 +295,11 @@ public final class SceneMap {
         return 2.6f - 0.8f * t;
     }
     private static float halfWR(float q) {
-        if (q <= 8f) return 0.80f;
+        if (q <= 8f) return 0.55f;
         if (q >= 14f) return bandHalf(q);
         float u = (q - 8f) / 6f;
         float e = u * u * (3f - 2f * u);
-        return 0.80f + (bandHalf(14f) - 0.80f) * e;
+        return 0.55f + (bandHalf(14f) - 0.55f) * e;
     }
 
     private void drawRoad(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
@@ -318,126 +307,32 @@ public final class SceneMap {
         int cw = cellW[1], ch = cellH[1];
         if (cw <= 0 || ch <= 0) return;
         float s = HEX * zoom * 1.07f;
-        
         mC.reset();
         mC.postScale(2f / cw, 2f / ch);
         mC.postScale(s, s);
         mC.postTranslate((-camX) * zoom + vw * 0.5f, (-camY) * zoom + vh * 0.5f);
         roadRep.setLocalMatrix(mC);
         tp.setShader(roadRep);
-        
         roadP.reset();
-        northEdgeP.reset();
-        southEdgeP.reset();
-        farThirdP.reset();
-        
         float q0 = -29f, q1 = 36.5f, step = 0.5f;
         boolean first = true;
-        roadCount = 0;
         for (float q = q0; q <= q1; q += step) {
             float cr = centerR(q);
-            float xBase = SQ3 * HEX * (q + cr * 0.5f);
-            float hw = halfWR(q);
-            float yN = ROWY * (cr - hw);
-            float yS = ROWY * (cr + hw);
-            float pxN = (xBase - camX) * zoom + vw * 0.5f;
-            float pyN = (yN - camY) * zoom + vh * 0.5f;
-            float pxS = (xBase - camX) * zoom + vw * 0.5f;
-            float pyS = (yS - camY) * zoom + vh * 0.5f;
-            
-            if (roadCount < MAX_ROAD_PTS) {
-                roadNX[roadCount] = pxN;
-                roadNY[roadCount] = pyN;
-                roadSX[roadCount] = pxS;
-                roadSY[roadCount] = pyS;
-                roadQ[roadCount] = q;
-                roadCount++;
-            }
-            
-            if (first) { 
-                roadP.moveTo(pxN, pyN); 
-                northEdgeP.moveTo(pxN, pyN);
-                farThirdP.moveTo(pxN, pyN);
-                first = false; 
-            } else {
-                roadP.lineTo(pxN, pyN);
-                northEdgeP.lineTo(pxN, pyN);
-                if (q <= q0 + (q1 - q0) * 0.33f) {
-                    farThirdP.lineTo(pxN, pyN);
-                }
-            }
+            float x = SQ3 * HEX * (q + cr * 0.5f);
+            float y = ROWY * (cr - halfWR(q));
+            float px = (x - camX) * zoom + vw * 0.5f;
+            float py = (y - camY) * zoom + vh * 0.5f;
+            if (first) { roadP.moveTo(px, py); first = false; } else roadP.lineTo(px, py);
         }
-        for (int i = roadCount - 1; i >= 0; i--) {
-            roadP.lineTo(roadSX[i], roadSY[i]);
+        for (float q = q1; q >= q0; q -= step) {
+            float cr = centerR(q);
+            float x = SQ3 * HEX * (q + cr * 0.5f);
+            float y = ROWY * (cr + halfWR(q));
+            roadP.lineTo((x - camX) * zoom + vw * 0.5f, (y - camY) * zoom + vh * 0.5f);
         }
         roadP.close();
         c.drawPath(roadP, tp);
         tp.setShader(null);
-        
-        southEdgeP.reset();
-        for (int i = 0; i < roadCount; i++) {
-            if (i == 0) southEdgeP.moveTo(roadSX[i], roadSY[i]);
-            else southEdgeP.lineTo(roadSX[i], roadSY[i]);
-        }
-        tp.setColor(0x50efe6dd);
-        tp.setStrokeWidth(2f * zoom);
-        tp.setStyle(Paint.Style.STROKE);
-        c.drawPath(southEdgeP, tp);
-        
-        tp.setColor(0xCC0a0608);
-        tp.setStrokeWidth(3f * zoom);
-        c.drawPath(northEdgeP, tp);
-        
-        int farEnd = (int)(roadCount * 0.33f);
-        if (farEnd > 0) {
-            farThirdP.reset();
-            farThirdP.moveTo(roadNX[0], roadNY[0]);
-            for (int i = 1; i < farEnd; i++) farThirdP.lineTo(roadNX[i], roadNY[i]);
-            for (int i = farEnd - 1; i >= 0; i--) farThirdP.lineTo(roadSX[i], roadSY[i]);
-            farThirdP.close();
-            tp.setColor(0x30000000);
-            tp.setStyle(Paint.Style.FILL);
-            c.drawPath(farThirdP, tp);
-        }
-        tp.setStyle(Paint.Style.FILL);
-    }
-
-    private void drawSouthCliffBody(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
-        if (tBody == null) return;
-        int cw = cellW[5], ch = cellH[5];
-        if (cw <= 0 || ch <= 0) return;
-        float s = HEX * zoom * 1.07f;
-        
-        for (float q = -29f; q <= 36f; q += 1f) {
-            float cr = centerR(q);
-            float hw = halfWR(q);
-            int rSouth = (int) Math.floor(cr + hw + 0.5f);
-            float wx = SQ3 * HEX * (q + rSouth * 0.5f);
-            float wy = ROWY * rSouth;
-            float cx = (wx - camX) * zoom + vw * 0.5f;
-            float cy = (wy - camY) * zoom + vh * 0.5f;
-            int ti = h2((int)q, rSouth, 7) & 15;
-            int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
-            int half = ch >> 1;
-            
-            wallSrc.set(x0, y0, x0 + cw, y0 + half);
-            c.save();
-            hexPath(cx, cy - ROWY * zoom * 0.5f, s * 1.02f);
-            c.clipPath(hexP);
-            dstR.set((int)(cx - s), (int)(cy - s * 0.62f - ROWY * zoom * 0.5f), 
-                     (int)(cx + s), (int)(cy + s * 0.62f - ROWY * zoom * 0.5f));
-            c.drawBitmap(tBody, wallSrc, dstR, tp);
-            c.restore();
-            
-            wallSrc.set(x0, y0 + half, x0 + cw, y0 + ch);
-            c.save();
-            hexPath(cx, cy + ROWY * zoom * 0.5f, s * 1.02f);
-            c.clipPath(hexP);
-            dstR.set((int)(cx - s), (int)(cy - s * 0.62f + ROWY * zoom * 0.5f), 
-                     (int)(cx + s), (int)(cy + s * 0.62f + ROWY * zoom * 0.5f));
-            c.drawBitmap(tBody, wallSrc, dstR, tp);
-            c.restore();
-        }
     }
 
     private void computeHex(int i, int q, int r) {
@@ -535,7 +430,6 @@ public final class SceneMap {
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
         drawRoad(c, camX, camY, zoom, vw, vh);
-        drawSouthCliffBody(c, camX, camY, zoom, vw, vh);
         if (tBody != null) {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
                 if (!full || bB[i] != 1 || fF[i] == 1) continue;
