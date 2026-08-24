@@ -174,6 +174,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private final ArrayList<Frame> eSoldierGlideFr = new ArrayList<>();
     private final ArrayList<Frame> eSabrinaIdleFr = new ArrayList<>();
     private final ArrayList<Frame> eSabrinaGlideFr = new ArrayList<>();
+    private final ArrayList<Frame> eRoomPropsFr = new ArrayList<>();
     private List<Bitmap> propsGate;
     private final HashSet<Enemy> biteFired = new HashSet<>();
     private final float[] biteX = new float[4], biteY = new float[4], biteT0 = new float[4];
@@ -181,7 +182,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private int biteSlot = 0;
     private Frame[] arrEnIdle, arrEnGlide, arrInfIdle, arrInfGlide,
             arrBeastIdle, arrBeastGlide, arrSoldierIdle, arrSoldierGlide,
-            arrSabrinaIdle, arrSabrinaGlide;
+            arrSabrinaIdle, arrSabrinaGlide, arrRoomProps;
     private final HashMap<Enemy, float[]> leapOff = new HashMap<>();
     private final HashMap<String, Frame[]> heroSheets = new HashMap<>();
     private final HashMap<String, Frame[]> heroGlide = new HashMap<>();
@@ -294,6 +295,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         ArrayList<Frame> eBeastIdle, eBeastGlide, eBeastAtk;
         ArrayList<Frame> eSoldierIdle, eSoldierGlide;
         ArrayList<Frame> eSabrinaIdle, eSabrinaGlide;
+        ArrayList<Frame> eRoomProps;
         List<Bitmap> gate;
         List<Bitmap> props, props2, propsCity;
         List<Bitmap> propsAF, propsBF, propsCF;
@@ -352,6 +354,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/enemy_beast_glide_b.png", 2, 2, 2), true, false));
             b.eBeastAtk = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/enemy_beast_attack.png", 2, 3, 2), false, false));
+            for (Frame f : b.eBeastAtk) f.ref /= 1.2f;   // K1: attack art reads small — draw bigger
             b.eSoldierIdle = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/soldier_idle.png", 2, 2, 4), false, true));
             b.eSoldierGlide = new ArrayList<>(Sprites.buildFrames(
@@ -360,6 +363,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     Sprites.cutSheet(c, "sprites/sabrina_idle.png", 2, 2, 4), false, true));
             b.eSabrinaGlide = new ArrayList<>(Sprites.buildFrames(
                     Sprites.cutSheet(c, "sprites/sabrina_glide.png", 2, 2, 2), true, false));
+            b.eRoomProps = new ArrayList<>(Sprites.buildFrames(
+                    Sprites.cutSheet(c, "map/props_room.png", 2, 2, 2), false, false));
             b.props  = Sprites.trimBottom(
                     Sprites.cutSheet(c, "map/props_a.png", 4, 4, 4), 0.9f);
             b.props2 = Sprites.trimBottom(
@@ -492,6 +497,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         eSoldierGlideFr.addAll(b.eSoldierGlide);
         eSabrinaIdleFr.addAll(b.eSabrinaIdle);
         eSabrinaGlideFr.addAll(b.eSabrinaGlide);
+        eRoomPropsFr.addAll(b.eRoomProps);
         props = b.props; props2 = b.props2; propsCity = b.propsCity;
         propsAF = b.propsAF; propsBF = b.propsBF; propsCF = b.propsCF;
         propsGate = b.gate;
@@ -505,6 +511,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         arrSoldierGlide = eSoldierGlideFr.toArray(new Frame[0]);
         arrSabrinaIdle = eSabrinaIdleFr.toArray(new Frame[0]);
         arrSabrinaGlide = eSabrinaGlideFr.toArray(new Frame[0]);
+        arrRoomProps = eRoomPropsFr.toArray(new Frame[0]);
         menuBg = b.menuBg; keyBmp = b.keyBmp; coinBmp = b.coinBmp;
 
         for (int i = 0; i < 3; i++) spawnEnemy();
@@ -1530,6 +1537,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (fadeState == 1) {
             fadeT += dt / (fadeDur / 1000f);
             if (fadeT >= 1f) { fadeT = 1f; fadeState = 2; }
+        } else if (fadeState == 3) {
+            fadeT -= dt / (fadeDur / 1000f);
+            if (fadeT <= 0f) { fadeT = 0f; fadeState = 0; }
+        }
+        if (storyMode && map != null) {
+            worldToHex(player.x, player.y, IH_A);
+            map.setPlayerHex(IH_A[0], IH_A[1]);
         }
 
         for (int i = enemies.size() - 1; i >= 0; i--) {
@@ -3069,6 +3083,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         drawSorted(cv);
         if (storyMode && actors != null)
             actors.draw(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, loadT);
+        drawRoomProps(cv);
         drawBites(cv);
         if (storyMode && map != null)
             map.drawFront(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H);
@@ -3208,6 +3223,25 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             char t = buf[i]; buf[i] = buf[j]; buf[j] = t;
         }
         return off;
+    }
+
+    private void drawRoomProps(Canvas cv) {
+        StoryWorld sw = sw();
+        if (sw.map == null || !sw.map.roomOn()) return;
+        for (int i = 0; i < sw.placedProps.size(); i++) {
+            StoryWorld.Prop pr = sw.placedProps.get(i);
+            if (pr.sheet != 4) continue;
+            if (arrRoomProps == null || pr.idx < 0 || pr.idx >= arrRoomProps.length) continue;
+            Frame f = arrRoomProps[pr.idx];
+            if (f == null || f.bmp == null || f.bmp.isRecycled()) continue;
+            float px = sx(pr.x), py = sy(pr.y);
+            if (px < -300 || px > W + 300 || py < -300 || py > H + 300) continue;
+            float h = TH * 1.9f * pr.scale;
+            float s = h / f.ref;
+            rf.set(px - f.bmp.getWidth() * s / 2f, py - f.bmp.getHeight() * s,
+                   px + f.bmp.getWidth() * s / 2f, py);
+            cv.drawBitmap(f.bmp, null, rf, paint);
+        }
     }
 
     private void drawPosCard(Canvas cv) {
@@ -3578,6 +3612,12 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         fadeState = 1;
         fadeT = 0f;
     }
+    public void startFadeIn(int ms) {
+        fadeDur = ms > 0 ? ms : 1000;
+        fadeState = 3;
+        fadeT = 1f;
+    }
+    public boolean isFadeBlack() { return fadeState == 2; }
     public void scriptWalk(int q, int r, float dur) {
         SceneMap.hexToWorld(q, r, FW_A);
         swFromX = player.x; swFromY = player.y;
