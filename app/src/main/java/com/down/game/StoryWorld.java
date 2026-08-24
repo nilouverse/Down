@@ -42,6 +42,7 @@ public final class StoryWorld {
     private boolean evActive = false;
     private float waitT = 0;
     private String waitWalk = null;
+    private boolean waitFade = false;
     private int waitTurns = 0;
 
     private final HashMap<String, Boolean> flags = new HashMap<>(24);
@@ -104,6 +105,7 @@ public final class StoryWorld {
         evActive = false;
         waitT = 0;
         waitWalk = null;
+        waitFade = false;
         waitTurns = 0;
         victory = false;
         encounterLive = false;
@@ -217,6 +219,10 @@ public final class StoryWorld {
         if (victory || !evActive) return;
         if (encounterLive) return;
         if (gv != null && gv.isDialogBlocking()) return;
+        if (waitFade) {
+            if (gv != null && !gv.isFadeBlack()) return;
+            waitFade = false;
+        }
         if (waitT > 0) { waitT -= 1 / 60f; return; }
         if (waitTurns > 0) return;
         if (waitWalk != null) {
@@ -388,6 +394,11 @@ public final class StoryWorld {
             String[] p = cmd.split(" ");
             int ms = p.length > 1 ? pi(p[1]) : 1000;
             if (gv != null) gv.startFade(ms);
+            waitFade = true;
+        } else if (cmd.startsWith("FADEIN ")) {
+            String[] p = cmd.split(" ");
+            int ms = p.length > 1 ? pi(p[1]) : 1000;
+            if (gv != null) gv.startFadeIn(ms);
         } else if (cmd.startsWith("SKY ")) {
             skyKey = cmd.split(" ")[1];
         } else if (cmd.startsWith("LAYER ")) {
@@ -411,7 +422,7 @@ public final class StoryWorld {
             String[] p = cmd.split(" ");
             if (p.length > 4) {
                 Prop pr = new Prop();
-                pr.sheet = "a".equals(p[1]) ? 0 : ("b".equals(p[1]) ? 1 : ("gate".equals(p[1]) ? 3 : 2));
+                pr.sheet = "a".equals(p[1]) ? 0 : ("b".equals(p[1]) ? 1 : ("gate".equals(p[1]) ? 3 : ("room".equals(p[1]) ? 4 : 2)));
                 pr.idx = pi(p[2]);
                 pr.q = pi(p[3]); pr.r = pi(p[4]);
                 SceneMap.hexToWorld(pr.q, pr.r, pt);
