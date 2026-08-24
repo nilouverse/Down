@@ -10,7 +10,7 @@ public class NilouZila extends Hero {
         hoverLift = -15f;
         atkSfx = new String[] { "swing", "bolt", "nova" };
         sheets = new SheetSpec[] {
-            new SheetSpec("idle",  "sprites/idle.png",     2, 2, 4, false, true),
+            new SheetSpec("idle",  "sprites/nilou_idle.png", 2, 4, 4, false, true),
             new SheetSpec("glide", "sprites/glide.png",    2, 2, 2, true,  false),
             new SheetSpec("atk",   "sprites/attack_a.png", 2, 3, 2, true,  false),
             new SheetSpec("atk",   "sprites/attack_b.png", 2, 3, 2, true,  false),
