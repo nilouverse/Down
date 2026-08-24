@@ -2230,6 +2230,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             int idx = pr.idx;
             if (pr.sheet == 3 && (list == null || list.isEmpty())) { list = propsCity; idx = 0; }
             if (list == null || list.isEmpty()) continue;
+            if (pr.sheet == 4) continue;   // room props are drawn by drawRoomProps only
             Bitmap b = list.get(idx % list.size());
             if (b == null || b.isRecycled()) continue;
             float px = sx(pr.x), py = sy(pr.y);
