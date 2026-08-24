@@ -133,20 +133,24 @@ TITLE The Abandoned Fortress
 
 SAY NilouZila My dark nectar... it's gone! Thieves! Who would dare steal from NilouZila, Binder of Souls?! My rank, my power... it means nothing to them now.
 
-WALK nilou 9 -17 0.8
+SFX footsteps_light
+GLIDE nilou 9 -17 0.8
 WAIT 400
-WALK nilou 5 -16 0.8
+SFX footsteps_light
+GLIDE nilou 5 -16 0.8
 WAIT 400
 ACTION shake 150
 SAY NilouZila Simple is best. The more magical wards you place on something, the more obvious it becomes. At least I have this.
 
-WALK nilou 2 -17 0.8
+SFX footsteps_light
+GLIDE nilou 2 -17 0.8
 ACTION shake 200
 SFX door_bang
 SAY Vyrxa NilouZila! Open this door at once! I must speak with you!
 
 SAY NilouZila Vyrxa. That half-rotten hag. We've despised each other for centuries. She's here to kill me, no doubt thinking I'm weakened.
 
-WALK nilou 6 -17 0.8
+SFX footsteps_light
+GLIDE nilou 6 -17 0.8
 WAIT 500
 SAY NilouZila I don't have time for her games. I need to leave before the whole fortress falls.
