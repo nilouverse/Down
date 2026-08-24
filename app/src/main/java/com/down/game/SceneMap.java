@@ -31,6 +31,14 @@ public final class SceneMap {
     private volatile Shader[] shaders = new Shader[6];
     private volatile Bitmap roadCell;
     private volatile Shader roadRep;
+    private volatile Bitmap tRoom, tWall;
+    private volatile Shader roomFloorSh;
+    private int roomCW, roomCH, wallCW, wallCH;
+    private boolean roomOn;
+    private int pQ = Integer.MIN_VALUE, pR = Integer.MIN_VALUE;
+    public static final int PQ0 = 22, PQ1 = 30, PR0 = -19, PR1 = -15;
+    private final int[] wq = new int[64], wa = new int[64];
+    private int wallN = 0;
     private final int[] cellW = new int[6], cellH = new int[6];
     private volatile boolean ready, disposed;
     private final boolean quality;
@@ -64,6 +72,7 @@ public final class SceneMap {
     public SceneMap(Context ctx, boolean quality) {
         this.quality = quality;
         buildWalkability();
+        buildRoomWalls();
         gp.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SCREEN));
         bakeCraterGlow();
         final Context app = ctx.getApplicationContext();
@@ -94,6 +103,15 @@ public final class SceneMap {
                     roadRep = new BitmapShader(roadCell, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT);
                 }
             }
+            Bitmap rm = flatten(dec(app, "map/room", true));
+            Bitmap wl = flatten(dec(app, "map/wall", true));
+            if (disposed) { recycle(rm); recycle(wl); return; }
+            tRoom = rm; tWall = wl;
+            if (rm != null) {
+                roomFloorSh = new BitmapShader(rm, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                roomCW = rm.getWidth() >> 2; roomCH = rm.getHeight() >> 2;
+            }
+            if (wl != null) { wallCW = wl.getWidth() >> 2; wallCH = wl.getHeight() >> 2; }
             ready = true;
         } }, "map-load");
         loader.setDaemon(true);
@@ -275,6 +293,82 @@ public final class SceneMap {
     public boolean walkWorld(float wx, float wy) {
         worldToHex(wx, wy, HW);
         return walk((int) HW[0], (int) HW[1]);
+    }
+
+    public void setPlayerHex(int q, int r) {
+        pQ = q; pR = r;
+        roomOn = q >= PQ0 && q <= PQ1 && r >= PR0 && r <= PR1;
+    }
+    public boolean roomOn() { return roomOn; }
+
+    private void buildRoomWalls() {
+        int n = 0;
+        for (int q = PQ0 - 1; q <= PQ1 + 1; q++) {
+            wq[n] = q; wa[n] = PR0 - 3; n++;
+            wq[n] = q; wa[n] = PR1; n++;
+        }
+        for (int r = PR0; r <= PR1; r++) {
+            wq[n] = PQ0 - 1; wa[n] = r - 2; n++;
+            wq[n] = PQ1 + 1; wa[n] = r - 2; n++;
+        }
+        wallN = n;
+    }
+
+    private void roomFloorHex(Canvas c, int q, int r, float cx, float cy, float s) {
+        if (roomFloorSh == null) return;
+        int h = h2(q, r, 7);
+        int patch = h & 15;
+        int rot = ((h >>> 6) & 3) * 60;
+        int cw = roomCW, ch = roomCH;
+        float ox = ((patch & 3) + 0.5f) * cw, oy = ((patch >> 2) + 0.5f) * ch;
+        mS.reset();
+        mS.postTranslate(-ox, -oy);
+        mS.postScale(2f / cw, 2f / ch);
+        if (((h >>> 8) & 1) == 1) mS.postScale(-1f, 1f);
+        if (rot != 0) mS.postRotate(-rot);
+        mS.postScale(s, s);
+        mS.postTranslate(cx, cy);
+        roomFloorSh.setLocalMatrix(mS);
+        tp.setShader(roomFloorSh);
+        hexPath(cx, cy, s);
+        c.drawPath(hexP, tp);
+        tp.setShader(null);
+    }
+
+    private void drawRoomFloor(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
+        if (roomFloorSh == null || !roomOn) return;
+        float s = HEX * zoom * 1.07f;
+        for (int r = PR0; r <= PR1; r++) for (int q = PQ0; q <= PQ1; q++) {
+            hexToWorld(q, r, HW);
+            roomFloorHex(c, q, r, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+        }
+    }
+
+    private void drawRoomWalls(Canvas c, float camX, float camY, float zoom, int vw, int vh, boolean south) {
+        if (tWall == null || !roomOn) return;
+        float s = HEX * zoom * 1.07f;
+        int cw = wallCW, ch = wallCH;
+        if (cw <= 0 || ch <= 0) return;
+        for (int i = 0; i < wallN; i++) {
+            boolean isS = (wa[i] == PR1);
+            if (south != isS) continue;
+            int q = wq[i], a = wa[i];
+            int ti = h2(q, a, 7) & 15;
+            int x0 = (ti & 3) * cw, y0 = (ti >> 2) * ch;
+            int half = ch >> 1;
+            hexToWorld(q, a + 1, HW);
+            float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
+            wallSrc.set(x0, y0, x0 + cw, y0 + half);
+            c.save(); hexPath(cx, cy, s * 1.02f); c.clipPath(hexP);
+            dstR.set((int)(cx - s), (int)(cy - s * 0.62f), (int)(cx + s), (int)(cy + s * 0.62f));
+            c.drawBitmap(tWall, wallSrc, dstR, tp); c.restore();
+            hexToWorld(q, a + 2, HW);
+            cx = (HW[0] - camX) * zoom + vw * 0.5f; cy = (HW[1] - camY) * zoom + vh * 0.5f;
+            wallSrc.set(x0, y0 + half, x0 + cw, y0 + ch);
+            c.save(); hexPath(cx, cy, s * 1.02f); c.clipPath(hexP);
+            dstR.set((int)(cx - s), (int)(cy - s * 0.62f), (int)(cx + s), (int)(cy + s * 0.62f));
+            c.drawBitmap(tWall, wallSrc, dstR, tp); c.restore();
+        }
     }
 
     private static int h2(int x, int y, int s) {
@@ -539,6 +633,8 @@ public final class SceneMap {
         }
         drawRoad(c, camX, camY, zoom, vw, vh);
         drawSouthCliffBody(c, camX, camY, zoom, vw, vh);
+        drawRoomFloor(c, camX, camY, zoom, vw, vh);
+        drawRoomWalls(c, camX, camY, zoom, vw, vh, false);
         if (tBody != null) {
             for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
                 if (!full || bB[i] != 1 || fF[i] == 1) continue;
@@ -569,6 +665,7 @@ public final class SceneMap {
             hexToWorld(q + dq, r + 2, HW);
             wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false);
         }
+        drawRoomWalls(c, camX, camY, zoom, vw, vh, true);
     }
 
     private int fallback(float wx, float wy) {
