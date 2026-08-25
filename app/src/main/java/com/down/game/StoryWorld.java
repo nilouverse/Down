@@ -299,6 +299,35 @@ public final class StoryWorld {
         return c != null ? c : 0;
     }
 
+    // Movement token parser shared by WALK/GLIDE:
+    //   [dur | @speed] [via q r]... [after delaySec]
+    //   dur    — seconds (legacy fixed-duration)
+    //   @speed — hexes per second (march mode); actors only
+    //   via    — intermediate waypoints (repeatable, up to 8)
+    //   after  — start delay in seconds (stagger)
+    private static float[] parseMove(String[] p) {
+        float[] out = new float[3];   // { dur, speed, delay } — dur/speed 0 = unset
+        int start = 4;
+        if (p.length > 4) {
+            String t0 = p[4];
+            if (t0.startsWith("@")) {
+                try { out[1] = Float.parseFloat(t0.substring(1)); } catch (Exception e) { out[1] = 0f; }
+                start = 5;
+            } else {
+                try { out[0] = Float.parseFloat(t0); start = 5; } catch (Exception e) { out[0] = 0f; }
+            }
+        }
+        for (int k = start; k < p.length; k++) {
+            if ("after".equals(p[k]) && k + 1 < p.length) {
+                try { out[2] = Float.parseFloat(p[k + 1]); } catch (Exception e) { out[2] = 0f; }
+                k++;
+            }
+        }
+        return out;
+    }
+
+    private static int[] moveVqs = new int[8], moveVrs = new int[8];
+
     private void exec(String cmd) {
         if (cmd.startsWith("SAY ")) {
             sayLine(cmd.substring(4));
@@ -320,29 +349,66 @@ public final class StoryWorld {
             if (actors != null) actors.despawn(cmd.split(" ")[1]);
         } else if (cmd.startsWith("WALK ")) {
             String[] p = cmd.split(" ");
-            float dur = p.length > 4 ? pf(p[4]) : 0.8f;
+            float dur = 0f, speed = 0f, delay = 0f;
+            int start = 4;
+            if (p.length > 4) {
+                String t0 = p[4];
+                if (t0.startsWith("@")) {
+                    try { speed = Float.parseFloat(t0.substring(1)); } catch (Exception e) { speed = 0f; }
+                    start = 5;
+                } else {
+                    try { dur = Float.parseFloat(t0); start = 5; } catch (Exception e) { dur = 0f; }
+                }
+            }
+            int nv = 0;
+            for (int k = start; k < p.length; k++) {
+                if ("via".equals(p[k]) && k + 2 < p.length && nv < 8) {
+                    moveVqs[nv] = pi(p[k + 1]); moveVrs[nv] = pi(p[k + 2]); nv++;
+                    k += 2;
+                } else if ("after".equals(p[k]) && k + 1 < p.length) {
+                    try { delay = Float.parseFloat(p[k + 1]); } catch (Exception e) { delay = 0f; }
+                    k++;
+                }
+            }
             if (PLAYER_KEY.equals(p[1])) {
-                if (gv != null) gv.scriptWalk(pi(p[2]), pi(p[3]), dur);
+                if (gv != null) gv.scriptWalk(pi(p[2]), pi(p[3]), dur > 0f ? dur : 0.8f);
                 waitWalk = PLAYER_KEY;
             } else if (actors != null) {
-                if (p.length > 7 && "via".equals(p[5])) {
-                    int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
-                    actors.walkVia(p[1], ft[0], ft[1], pi(p[6]), pi(p[7]), dur);
+                int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
+                if (nv > 0) {
+                    int[] vqs = new int[nv], vrs = new int[nv];
+                    System.arraycopy(moveVqs, 0, vqs, 0, nv);
+                    System.arraycopy(moveVrs, 0, vrs, 0, nv);
+                    actors.walkPath(p[1], ft[0], ft[1], vqs, vrs, nv, dur, speed, delay, false);
                 } else {
-                    int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
-                    actors.walkTo(p[1], ft[0], ft[1], dur);
+                    actors.walkPath(p[1], ft[0], ft[1], null, null, 0, dur, speed, delay, false);
                 }
             }
         } else if (cmd.startsWith("GLIDE ")) {
             String[] p = cmd.split(" ");
-            float dur = p.length > 3 ? pf(p[3]) : 1.2f;
+            float dur = 0f, speed = 0f, delay = 0f;
+            int start = 4;
+            if (p.length > 4) {
+                String t0 = p[4];
+                if (t0.startsWith("@")) {
+                    try { speed = Float.parseFloat(t0.substring(1)); } catch (Exception e) { speed = 0f; }
+                    start = 5;
+                } else {
+                    try { dur = Float.parseFloat(t0); start = 5; } catch (Exception e) { dur = 0f; }
+                }
+            }
+            for (int k = start; k < p.length; k++) {
+                if ("after".equals(p[k]) && k + 1 < p.length) {
+                    try { delay = Float.parseFloat(p[k + 1]); } catch (Exception e) { delay = 0f; }
+                    k++;
+                }
+            }
             if (PLAYER_KEY.equals(p[1])) {
-                if (gv != null) gv.scriptGlide(pi(p[2]), pi(p[3]), dur);
+                if (gv != null) gv.scriptGlide(pi(p[2]), pi(p[3]), dur > 0f ? dur : 1.2f);
                 waitWalk = PLAYER_KEY;
             } else if (actors != null) {
                 int[] ft = freeTarget(pi(p[2]), pi(p[3]), p[1]);
-                actors.glideTo(p[1], ft[0], ft[1], dur);
-                waitWalk = p[1];
+                actors.walkPath(p[1], ft[0], ft[1], null, null, 0, dur, speed, delay, true);
             }
         } else if (cmd.startsWith("EXIT ")) {
             String[] p = cmd.split(" ");
@@ -530,7 +596,7 @@ public final class StoryWorld {
     public boolean encounterLive() { return encounterLive; }
     public boolean isVictory() { return victory; }
     public boolean flag(String f) {
-        Boolean b = flags.get(f); return b != null && b;
+        Boolean b = flags.get(f); return b != null && b != null && b.booleanValue();
     }
     public void setFlag(String f) {
         flags.put(f, Boolean.TRUE);
