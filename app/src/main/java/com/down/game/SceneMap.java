@@ -353,18 +353,23 @@ public final class SceneMap {
         int grot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
         int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);
 
-        // ---- fortress room: upright wall-block ring around a floor slab ----
-        // Same structure renders inside (floor + walls) and outside (roof slab + facade).
-        if (q >= ROOM_Q0 - 1 && q <= ROOM_Q1 + 1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 2) {
-            if (r == ROOM_R0 - 1 || r == ROOM_R1 + 2) {
-                body = 2;                                  // north wall row / south wall row (upright blocks)
-                if (r == ROOM_R1 + 2) front = 1;           // south wall draws over actors
-            } else if ((q == ROOM_Q0 - 1 || q == ROOM_Q1 + 1) && r >= ROOM_R0 && r <= ROOM_R1) {
-                body = 2;                                  // east/west wall columns
-            } else if (q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 && r <= ROOM_R1) {
-                ts = 6; rot = grot;                        // floor slab (interior floor / exterior roof)
+        // ---- fortress room: hex-cut walls (never rotated) over a floor slab ----
+        if (q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 1) {
+            if (roomOn) {
+                if (r >= ROOM_R0 && r <= ROOM_R1) {
+                    // room floor
+                    ts = 6; rot = grot;
+                } else if (r == ROOM_R0 - 3) {
+                    // far (north) wall anchor - face drawn south of it, behind actors
+                    body = 2;
+                } else if (r == ROOM_R1 + 1) {
+                    // near (south) wall anchor - face drawn over actors (frames the room)
+                    ts = 6; rot = grot;
+                    body = 2; front = 1;
+                }
             } else {
-                ts = 4; rot = grot;                        // rocky backdrop rows + south foundation strip
+                // sealed from outside: the whole room reads as wall (hex cut, no rotate)
+                ts = 7;
             }
         }
 
@@ -386,9 +391,10 @@ public final class SceneMap {
                     ts = 0; rot = grot;                     // trail floor
                 } else {
                     int eN = (int) Math.floor(cc - hw), eS = (int) Math.ceil(cc + hw);
-                    if (r >= eN - 2 && r <= eN) { ts = 4; rot = rimRot; body = 1; }
-                    else if (r >= eN - 7 && r < eN - 2) { ts = 4; rot = rimRot; }
-                    else if (r == eS) { ts = 4; rot = rimRot; body = 1; front = 1; }
+                    if (r >= eN - 4 && r <= eN - 2) { ts = 4; rot = rimRot; body = 1; }   // north rim, 2 hex higher
+                    else if (r >= eN - 9 && r < eN - 4) { ts = 4; rot = rimRot; }          // north shoulder, 2 hex higher
+                    else if (r >= eN - 1 && r <= eN) { ts = 0; rot = grot; }               // open ground below the rim
+                    else if (r == eS) { ts = 4; rot = rimRot; body = 1; front = 1; }       // south crest
                 }
             } else if (q <= 60) {
                 // fallen city: cobble streets and avenues, masonry blocks, plaza, rubble scars
@@ -411,7 +417,7 @@ public final class SceneMap {
                 float d2 = dx * dx + dy * dy;
                 boolean cause = r >= 2 && r <= 6;
                 if (d2 <= 1f || cause) {
-                    ts = (cause && d2 > 1f) ? 2 : 5; rot = grot;
+                    ts = 2; rot = grot;                     // walkable platform + causeway: cobble
                 } else if (d2 <= 1.5f) {
                     ts = 4; rot = rimRot; body = 1;         // ring wall
                     if (dy > 0.2f) front = 1;
@@ -477,20 +483,6 @@ public final class SceneMap {
         c.restore();
     }
 
-    // Upright wall block: full art cell, axis-aligned, anchored at the hex ground point.
-    // No rotate, no mirror, no squash - wall art is blocks, not ground.
-    private void wallBlock(Canvas c, int ti, float cx, float cy, float zoom) {
-        Bitmap b = tWall;
-        if (b == null || b.isRecycled()) return;
-        int cw = cellW[7], ch = cellH[7];
-        if (cw <= 0 || ch <= 0) return;
-        float w = SQ3 * HEX * zoom * 1.02f;
-        float h = w * (ch / (float) cw);
-        wallSrc.set((ti & 3) * cw, (ti >> 2) * ch, (ti & 3) * cw + cw, (ti >> 2) * ch + ch);
-        dstR.set((int) (cx - w * 0.5f), (int) (cy - h), (int) (cx + w * 0.5f), (int) (cy));
-        c.drawBitmap(b, wallSrc, dstR, tp);
-    }
-
     public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         float halfW = vw / (2f * zoom), halfH = vh / (2f * zoom);
         int r0 = (int) Math.floor((camY - halfH) / ROWY) - 1, r1 = (int) Math.floor((camY + halfH) / ROWY) + 1;
@@ -513,7 +505,7 @@ public final class SceneMap {
         }
         float s = HEX * zoom * 1.07f;
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
-            if (roomOn && !(q >= ROOM_Q0 - 1 && q <= ROOM_Q1 + 1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 2)) continue;
+            if (roomOn && !(q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 1)) continue;
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
             int ts = full ? tS[i] : -1;
@@ -530,16 +522,12 @@ public final class SceneMap {
             if (!full || (bB[i] != 1 && bB[i] != 2) || fF[i] == 1) continue;
             if (roomOn && bB[i] != 2) continue;
             int ti = (h2(q, r, 7) >>> 4) & 15;
-            if (bB[i] == 2) {
-                hexToWorld(q, r, HW);
-                wallBlock(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, zoom);
-                continue;
-            }
             int dq = q < MIN_Q ? -1 : 0;
+            int bodySheet = bB[i] == 2 ? 7 : 5;
             hexToWorld(q + dq, r + 1, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, 5);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, bodySheet);
             hexToWorld(q + dq, r + 2, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, 5);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, bodySheet);
         }
         if (craterVisible && !roomOn) drawCrater(c, camX, camY, zoom, vw, vh);
     }
@@ -551,18 +539,16 @@ public final class SceneMap {
         for (int r = lr0; r <= lr1; r++) for (int q = lq0; q <= lq1; q++) {
             int i = (r - lr0) * w + (q - lq0);
             if (fF[i] != 1) continue;
-            if (roomOn && !(q >= ROOM_Q0 - 1 && q <= ROOM_Q1 + 1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 2)) continue;
             hexToWorld(q, r, HW);
-            float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
-            if (bB[i] == 2) { wallBlock(c, tI[i], cx, cy, zoom); continue; }
             int sheet = tS[i] >= 0 ? tS[i] : 4;
-            shaderHex(c, sheet, tI[i], tR[i], cx, cy, s);
+            shaderHex(c, sheet, tI[i], tR[i], (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
             int ti = (h2(q, r, 7) >>> 4) & 15;
             int dq = q < MIN_Q ? -1 : 0;
+            int bodySheet = bB[i] == 2 ? 7 : 5;
             hexToWorld(q + dq, r + 1, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, 5);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, bodySheet);
             hexToWorld(q + dq, r + 2, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, 5);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, bodySheet);
         }
     }
 
