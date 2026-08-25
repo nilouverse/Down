@@ -1,6 +1,6 @@
 # ACT ONE — continuous-map trigger script.
 
-PROP gate 6 12 2 1.1 1
+PROP gate 6 9 -3 1.1 1
 
 PROP room 0 6 -20 1
 PROP room 1 9 -17 1
@@ -40,6 +40,9 @@ SFX_LOOP footsteps_walk 2
 WAIT 2000
 
 ZOOM 1.25 800
+SFX_LOOP footsteps_light 2.6
+SFX_LOOP footsteps_heavy 2.6
+SFX_LOOP footsteps_heavy 2.6
 WALK sabrina -24 5 2.4
 WALK s1 -24 7 2.4
 WALK s2 -24 3 2.4
@@ -58,9 +61,9 @@ SAY NilouZila I'm going to the courtyard.
 SAY Sabrina That's death.
 SAY NilouZila Everything is death today. At least this way I choose where.
 
-SFX_LOOP footsteps_light 3.5
-SFX_LOOP footsteps_heavy 3.5
-SFX_LOOP footsteps_heavy 3.5
+SFX_LOOP footsteps_light 3.7
+SFX_LOOP footsteps_heavy 3.7
+SFX_LOOP footsteps_heavy 3.7
 WALK sabrina -16 5 3.5
 WALK s1 -16 8 3.5
 WALK s2 -16 3 3.5
@@ -134,16 +137,16 @@ TITLE The Abandoned Fortress
 SAY NilouZila My dark nectar... it's gone! Thieves! Who would dare steal from NilouZila, Binder of Souls?! My rank, my power... it means nothing to them now.
 
 SFX footsteps_light
-GLIDE nilou 9 -17 0.8
+GLIDE nilou 9 -17 1.8
 WAIT 400
 SFX footsteps_light
-GLIDE nilou 5 -16 0.8
+GLIDE nilou 5 -16 1.8
 WAIT 400
 ACTION shake 150
 SAY NilouZila Simple is best. The more magical wards you place on something, the more obvious it becomes. At least I have this.
 
 SFX footsteps_light
-GLIDE nilou 2 -17 0.8
+GLIDE nilou 2 -17 1.8
 ACTION shake 200
 SFX door_bang
 SAY Vyrxa NilouZila! Open this door at once! I must speak with you!
@@ -151,6 +154,6 @@ SAY Vyrxa NilouZila! Open this door at once! I must speak with you!
 SAY NilouZila Vyrxa. That half-rotten hag. We've despised each other for centuries. She's here to kill me, no doubt thinking I'm weakened.
 
 SFX footsteps_light
-GLIDE nilou 6 -17 0.8
+GLIDE nilou 6 -17 1.8
 WAIT 500
 SAY NilouZila I don't have time for her games. I need to leave before the whole fortress falls.
