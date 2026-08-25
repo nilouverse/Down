@@ -1,6 +1,6 @@
 # ACT ONE — continuous-map trigger script.
 
-PROP gate 6 9 -3 1.1 1
+PROP gate 6 14 -2 1.1 1
 
 PROP room 0 6 -20 1
 PROP room 1 9 -17 1
@@ -23,6 +23,7 @@ SPAWN infantry 14 3 i5
 SPAWN beast 16 2 b0
 
 ZONE opening 0 7 2
+GATE opening
 ON_ENTER opening
 TITLE Abyss - Day 3 of the final battle
 
