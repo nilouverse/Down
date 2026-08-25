@@ -27,6 +27,12 @@ public class MainActivity extends Activity {
         if (hasFocus) applyImmersive();
     }
 
+    @Override
+    public void onBackPressed() {
+        if (view != null && view.onBack()) return;
+        super.onBackPressed();
+    }
+
     @Override protected void onResume() {
         super.onResume();
         view.start();
