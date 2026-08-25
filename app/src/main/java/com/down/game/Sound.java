@@ -20,6 +20,9 @@ public class Sound {
     private static final int MAX_STREAMS = 16;
     private static final String[] HERO_FOLDERS = { "nilou", "vex" };
 
+    // Master switch, driven by the Settings screen.
+    public volatile boolean enabled = true;
+
     private final Object lock = new Object();
     private final Random rnd = new Random();
 
@@ -133,7 +136,7 @@ public class Sound {
                         }
                     }
                 }
-                if (shouldPlay && status == 0) {
+                if (shouldPlay && status == 0 && enabled) {
                     SoundPool p = pool;
                     if (p != null) {
                         p.play(sampleId, 1f, 1f, 0, 0, 0.95f + rnd.nextFloat() * 0.1f);
@@ -185,7 +188,7 @@ public class Sound {
     }
 
     public void play(String name) {
-        if (name == null || context == null) return;
+        if (name == null || context == null || !enabled) return;
         String key = baseKey(name.toLowerCase(Locale.US));
         if (ambientPaths.containsKey(key)) { setAmbient(key); return; }
         if (voicePaths.containsKey(key)) { playVoice(key); return; }
@@ -200,7 +203,7 @@ public class Sound {
         SoundPool p = pool;
         if (p == null) return;
         int stream = light ? footLight : footHeavy;
-        if (on && stream == 0) {
+        if (on && enabled && stream == 0) {
             int id = 0;
             synchronized (lock) {
                 ArrayList<Integer> l = sfxLoaded.get(light ? "footsteps_light" : "footsteps_heavy");
@@ -210,7 +213,7 @@ public class Sound {
                 int s = p.play(id, 0.8f, 0.8f, 0, -1, 1f);
                 if (light) footLight = s; else footHeavy = s;
             }
-        } else if (!on && stream != 0) {
+        } else if ((!on || !enabled) && stream != 0) {
             try { p.stop(stream); } catch (Exception e) {}
             if (light) footLight = 0; else footHeavy = 0;
         }
@@ -219,7 +222,7 @@ public class Sound {
     // Timed loop: starts now, stops itself after `seconds`. Concurrent instances
     // of the same key are allowed (footsteps doubled for the soldiers).
     public void playLoopTimed(final String name, float seconds) {
-        if (name == null || seconds <= 0) return;
+        if (name == null || seconds <= 0 || !enabled) return;
         final SoundPool p = pool;
         if (p == null) return;
         final String key = baseKey(name.toLowerCase(Locale.US));
@@ -297,7 +300,7 @@ public class Sound {
             afd.close();
             voicePlayer.setOnPreparedListener(mp -> {
                 synchronized (lock) { voicePreparing = false; }
-                mp.start();
+                if (enabled) mp.start(); else voiceDone();
             });
             voicePlayer.prepareAsync();
         } catch (Exception e) {
@@ -315,6 +318,7 @@ public class Sound {
 
     public void setAmbient(String key) {
         if (context == null) return;
+        if (!enabled) { stopAmbient(); return; }
         if (key == null || key.isEmpty()) { stopAmbient(); return; }
         if (key.equals(ambientKey) && ambientPlayer != null) return;
 
