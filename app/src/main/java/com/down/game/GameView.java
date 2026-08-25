@@ -32,7 +32,7 @@ import java.util.List;
 public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Callback, Story.Host {
 
     private static final int STATE_MENU = 0, STATE_GAME = 1, STATE_STORY = 2,
-            STATE_SELECT = 3, STATE_CHAPTER = 4;
+            STATE_SELECT = 3, STATE_CHAPTER = 4, STATE_SETTINGS = 5;
     private static final int PH_PLAYER = 0, PH_ENEMY = 1;
 
     private static final float SQUASH = 0.6f;
@@ -135,10 +135,24 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     private boolean storyMode;
     private boolean storyTest;
     private final RectF chapterBtn = new RectF();
+    private final RectF chapterBtn2 = new RectF();
     private boolean camSnap;
     private int menuPress;
     private final RectF menuBtnTest = new RectF();
     private final RectF menuBtnStory = new RectF();
+    private final RectF menuBtnSet = new RectF();
+
+    // pause + settings
+    private boolean paused = false;
+    private boolean pauseFromSettings = false;
+    private boolean sndOn = true, vibOn = true;
+    private android.content.SharedPreferences prefs;
+    private final RectF setBtnSnd = new RectF();
+    private final RectF setBtnVib = new RectF();
+    private final RectF setBtnBack = new RectF();
+    private final RectF pauseBtnResume = new RectF();
+    private final RectF pauseBtnSet = new RectF();
+    private final RectF pauseBtnQuit = new RectF();
 
     private final ArrayList<Player> party = new ArrayList<>();
     private Player player = new Player();
@@ -236,15 +250,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
     };
 
     private static final float[] FW_A = new float[2];
-    private static final int[] IH_A = new int[2];
-    private static final int[] IH_B = new int[2];
-    private static final int[] IH_C = new int[2];
-    private static final float[] TW_F = new float[2];
-    private static final int[] TW_A = new int[2];
-    private static final int[] TW_B = new int[2];
-    private static final int[] TW_C = new int[2];
-    private static final float[] HO_F = new float[2];
-    private static final int[] HO_A = new int[2];
+    private final int[] IH_A = new int[2];
+    private final int[] IH_B = new int[2];
+    private final int[] IH_C = new int[2];
+    private final float[] TW_F = new float[2];
+    private final int[] TW_A = new int[2];
+    private final int[] TW_B = new int[2];
+    private final int[] TW_C = new int[2];
+    private final float[] HO_F = new float[2];
+    private final int[] HO_A = new int[2];
 
     private final Paint paint = new Paint();
     private final Paint tintPaint = new Paint();
@@ -310,6 +324,11 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         getHolder().addCallback(this);
         sound.init(ctx);
         // A3: fonts + splatter load off UI thread
+
+        prefs = ctx.getSharedPreferences("down_settings", 0);
+        sndOn = prefs.getBoolean("snd", true);
+        vibOn = prefs.getBoolean("vib", true);
+        sound.enabled = sndOn;
 
         Thread loader = new Thread(new Runnable() { public void run() {
             android.os.Process.setThreadPriority(
@@ -634,6 +653,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             tpPath.close();
             tc.drawPath(tpPath, tp);
         }
+        seamSh = null;   // rebuild seam gradient for new width
     }
 
     @Override
@@ -653,7 +673,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             frameCostEma += (cost - frameCostEma) * 0.05f;
             if (frameCostEma > 12000000L && quality > 0) quality--;
             else if (frameCostEma < 7000000L && quality < 1) quality = 1;
-            long period = (state == STATE_MENU || state == STATE_SELECT || state == STATE_CHAPTER)
+            long period = (state == STATE_MENU || state == STATE_SELECT || state == STATE_CHAPTER
+                    || state == STATE_SETTINGS)
                     ? FRAME_NS_MENU : FRAME_NS;
             long rem = period - (System.nanoTime() - now);
             if (rem > 0) {
@@ -1214,6 +1235,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         for (Slash s : slashPool) s.active = false;
         for (Decal dcl : decalPool) dcl.active = false;
         camSnap = false;
+        paused = false;
         state = STATE_GAME;
         startPlayerTurn();
         story.start();
@@ -1233,8 +1255,15 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setTextSize(64);
         paint.setColor(C_BONE);
         cv.drawText("STORY", W / 2f, H * 0.3f, paint);
+        drawSeam(cv, H * 0.34f, 0.5f);
         chapterBtn.set(W / 2f - 160, H * 0.45f, W / 2f + 160, H * 0.45f + 90);
         drawMenuButton(cv, chapterBtn, "ACT 1", C_MAGENTA, menuPress == 7, true);
+        chapterBtn2.set(W / 2f - 160, H * 0.45f + 110, W / 2f + 160, H * 0.45f + 200);
+        drawMenuButton(cv, chapterBtn2, "ACT 2", 0xFF55506e, false, false);
+        paint.setTypeface(fBody);
+        paint.setTextSize(18);
+        paint.setColor(0x88b7a6ab);
+        cv.drawText("LOCKED", W / 2f, H * 0.45f + 226, paint);
         if (overlay != null) { rf.set(0, 0, W, H); cv.drawBitmap(overlay, null, rf, paint); }
         paint.setTextAlign(Paint.Align.LEFT);
     }
@@ -1342,7 +1371,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         loadT += dt;
         if (assetsReady && pending != null) applyAssets();
         updateEmbers(dt);
-        if (state == STATE_MENU || state == STATE_SELECT || state == STATE_CHAPTER) return;
+        if (state == STATE_MENU || state == STATE_SELECT || state == STATE_CHAPTER
+                || state == STATE_SETTINGS) return;
+        if (paused) return;
 
         // hard guard: a non-finite camera/zoom/player makes every world draw a no-op.
         if (!Float.isFinite(player.x) || !Float.isFinite(player.y)) {
@@ -1675,7 +1706,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 active.turnUpdate(dt, tgt.x, tgt.y, adj, inR2, inLunge);
                 if (active.beast && active.floater.moving && !wasMoving) sound.play("beast_move");
                 if ((!wasAttacking && active.attacking())) {
-                    sound.play(active.weapon == 1 ? "claw" : "swing");
+                    // Bug fix: beasts have their own attack voices — no weapon swing sound.
+                    if (!active.beast) sound.play(active.weapon == 1 ? "claw" : "swing");
                     if (active.beast) {
                         active.attackDuration = active.beastForm == 1 ? Enemy.BEAST_ATK_DUR[0] : (active.beastForm == 2 ? Enemy.BEAST_ATK_DUR[1] : Enemy.BEAST_ATK_DUR[2]);
                         sound.play("beast_attack");
@@ -1705,7 +1737,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                     active.struck = true;
                     if (active.beast && active.beastForm == 1) {
                         // Lunge
-                        sound.play("swing");
                         shakeT = Math.max(shakeT, 0.15f);
                         spawnSlash(tgt.x, tgt.y);
                         for (int i = 0; i < 4; i++)
@@ -1749,7 +1780,6 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                         if (allDeadB2) { deadT = 2f; sound.play(tgt.hero.voice + "_death"); }
                     } else if (active.beast && active.beastForm == 3) {
                         // Bite
-                        sound.play("swing");
                         shakeT = Math.max(shakeT, 0.1f);
                         spawnSlash(tgt.x, tgt.y);
                         int dmg = Enemy.BEAST_ATK_DMG[2];
@@ -1871,6 +1901,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (state == STATE_MENU) drawMenu(cv);
         else if (state == STATE_SELECT) drawSelect(cv);
         else if (state == STATE_CHAPTER) drawChapter(cv);
+        else if (state == STATE_SETTINGS) drawSettings(cv);
         else drawGame(cv);
         h.unlockCanvasAndPost(cv);
     }
@@ -1880,6 +1911,45 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     private Shader titleShader;
     private int titleShaderW = -1, titleShaderH = -1;
+    private Shader seamSh;
+    private int seamW = -1;
+
+    private void drawSeam(Canvas cv, float cy, float wf) {
+        if (seamSh == null || seamW != W) {
+            seamW = W;
+            seamSh = new LinearGradient(0, 0, W, 0,
+                    new int[] { 0x00ff2747, 0x59ff2747, 0xCCff2747, 0x59ff2747, 0x00ff2747 },
+                    new float[] { 0f, 0.32f, 0.5f, 0.68f, 1f }, Shader.TileMode.CLAMP);
+        }
+        paint.setShader(seamSh);
+        float w = W * wf;
+        rf.set(W / 2f - w / 2f, cy - 1f, W / 2f + w / 2f, cy + 1f);
+        cv.drawRect(rf, paint);
+        paint.setShader(null);
+    }
+
+    private void drawGem(Canvas cv, float cx, float cy, float r, boolean on) {
+        cv.save();
+        cv.translate(cx, cy);
+        cv.rotate(45f);
+        if (on) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(C_BRIGHT);
+            paint.setAlpha(230);
+            cv.drawRect(-r, -r, r, r, paint);
+            paint.setAlpha(55);
+            cv.drawRect(-r * 1.9f, -r * 1.9f, r * 1.9f, r * 1.9f, paint);
+        } else {
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2f);
+            paint.setColor(0x66b7a6ab);
+            cv.drawRect(-r, -r, r, r, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(0);
+        }
+        paint.setAlpha(255);
+        cv.restore();
+    }
 
     private void drawMenu(Canvas cv) {
         if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
@@ -1925,15 +1995,19 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         paint.setColor(0x88b7a6ab);
         cv.drawText("a hex descent", W / 2f, H * 0.30f + ts * 0.42f, paint);
 
-        float bw = Math.min(W * 0.55f, 540), bh = Math.min(H * 0.13f, 92);
-        float gap = Math.max(24, H * 0.045f);
-        menuBtnTest.set(W / 2f - bw / 2, H * 0.52f, W / 2f + bw / 2, H * 0.52f + bh);
-        menuBtnStory.set(W / 2f - bw / 2, H * 0.52f + bh + gap,
-                W / 2f + bw / 2, H * 0.52f + bh * 2 + gap);
+        float bw = Math.min(W * 0.55f, 540), bh = Math.min(H * 0.12f, 88);
+        float gap = Math.max(22, H * 0.04f);
+        float y0 = H * 0.46f;
+        drawSeam(cv, y0 - gap * 0.8f, 0.42f);
+        menuBtnTest.set(W / 2f - bw / 2, y0, W / 2f + bw / 2, y0 + bh);
+        menuBtnStory.set(W / 2f - bw / 2, y0 + bh + gap, W / 2f + bw / 2, y0 + bh * 2 + gap);
+        menuBtnSet.set(W / 2f - bw / 2, y0 + bh * 2 + gap * 2, W / 2f + bw / 2, y0 + bh * 3 + gap * 2);
         drawMenuButton(cv, menuBtnTest, "STORY - TEST", C_MAGENTA,
                 menuPress == 1, assetsReady);
         drawMenuButton(cv, menuBtnStory, "STORY - PLAY", 0xFF7d78a0,
                 menuPress == 2, assetsReady);
+        drawMenuButton(cv, menuBtnSet, "SETTINGS", C_BONE_DIM,
+                menuPress == 8, assetsReady);
 
         if (!assetsReady) drawLoader(cv);
 
@@ -2012,6 +2086,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             menuPress = 0;
             if (menuBtnTest.contains(e.getX(), e.getY())) menuPress = 1;
             else if (menuBtnStory.contains(e.getX(), e.getY())) menuPress = 2;
+            else if (menuBtnSet.contains(e.getX(), e.getY())) menuPress = 8;
             return true;
         }
         if (act == MotionEvent.ACTION_UP) {
@@ -2025,10 +2100,148 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
                 storyTest = false;
                 startStory();
             }
+            if (menuPress == 8 && menuBtnSet.contains(e.getX(), e.getY())) {
+                sound.play("ui");
+                pauseFromSettings = false;
+                state = STATE_SETTINGS;
+            }
             menuPress = 0;
             return true;
         }
         return true;
+    }
+
+    private void drawSettings(Canvas cv) {
+        if (menuBmp != null) { rf.set(0, 0, W, H); cv.drawBitmap(menuBmp, null, rf, paint); }
+        if (menuBg != null) {
+            paint.setAlpha(110);
+            rf.set(0, 0, W, H); cv.drawBitmap(menuBg, null, rf, paint);
+            paint.setAlpha(255);
+        }
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(fLogo);
+        paint.setTextSize(56);
+        paint.setColor(C_BONE);
+        cv.drawText("SETTINGS", W / 2f, H * 0.2f, paint);
+        drawSeam(cv, H * 0.26f, 0.5f);
+
+        float bw = Math.min(W * 0.6f, 560), bh = Math.min(H * 0.11f, 84);
+        float gap = Math.max(20, H * 0.035f);
+        float y0 = H * 0.36f;
+        setBtnSnd.set(W / 2f - bw / 2, y0, W / 2f + bw / 2, y0 + bh);
+        setBtnVib.set(W / 2f - bw / 2, y0 + bh + gap, W / 2f + bw / 2, y0 + bh * 2 + gap);
+        setBtnBack.set(W / 2f - bw / 2, y0 + bh * 2 + gap * 2, W / 2f + bw / 2, y0 + bh * 3 + gap * 2);
+        drawToggle(cv, setBtnSnd, "SOUND", sndOn, menuPress == 10);
+        drawToggle(cv, setBtnVib, "VIBRATION", vibOn, menuPress == 11);
+        drawMenuButton(cv, setBtnBack, "BACK", C_BONE_DIM, menuPress == 9, true);
+
+        if (overlay != null) { rf.set(0, 0, W, H); cv.drawBitmap(overlay, null, rf, paint); }
+        paint.setTextAlign(Paint.Align.LEFT);
+    }
+
+    private void drawToggle(Canvas cv, RectF r, String label, boolean on, boolean pressed) {
+        drawMenuButton(cv, r, label, on ? C_CYAN : 0xFF55506e, pressed, true);
+        drawGem(cv, r.right - 44f, r.centerY(), Math.min(9f, r.height() * 0.14f), on);
+    }
+
+    private boolean onSettingsTouch(MotionEvent e) {
+        int act = e.getActionMasked();
+        if (act == MotionEvent.ACTION_DOWN) {
+            menuPress = 0;
+            if (setBtnSnd.contains(e.getX(), e.getY())) menuPress = 10;
+            else if (setBtnVib.contains(e.getX(), e.getY())) menuPress = 11;
+            else if (setBtnBack.contains(e.getX(), e.getY())) menuPress = 9;
+            return true;
+        }
+        if (act == MotionEvent.ACTION_UP) {
+            if (menuPress == 10 && setBtnSnd.contains(e.getX(), e.getY())) {
+                sndOn = !sndOn;
+                prefs.edit().putBoolean("snd", sndOn).apply();
+                sound.enabled = sndOn;
+                if (!sndOn) { sound.setFootsteps(false); sound.stopAmbient(); }
+                if (sndOn) sound.play("ui");
+            }
+            if (menuPress == 11 && setBtnVib.contains(e.getX(), e.getY())) {
+                vibOn = !vibOn;
+                prefs.edit().putBoolean("vib", vibOn).apply();
+                if (vibOn) hapticTiered(1);
+            }
+            if (menuPress == 9 && setBtnBack.contains(e.getX(), e.getY())) {
+                sound.play("ui");
+                state = pauseFromSettings ? STATE_GAME : STATE_MENU;
+                pauseFromSettings = false;
+            }
+            menuPress = 0;
+            return true;
+        }
+        return true;
+    }
+
+    private void drawPauseOverlay(Canvas cv) {
+        paint.setColor(0xB80a0608);
+        cv.drawRect(0, 0, W, H, paint);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(fLogo);
+        paint.setTextSize(64);
+        paint.setColor(C_BONE);
+        cv.drawText("PAUSED", W / 2f, H * 0.28f, paint);
+        drawSeam(cv, H * 0.34f, 0.5f);
+
+        float bw = Math.min(W * 0.5f, 460), bh = Math.min(H * 0.1f, 78);
+        float gap = Math.max(18, H * 0.03f);
+        float y0 = H * 0.42f;
+        pauseBtnResume.set(W / 2f - bw / 2, y0, W / 2f + bw / 2, y0 + bh);
+        pauseBtnSet.set(W / 2f - bw / 2, y0 + bh + gap, W / 2f + bw / 2, y0 + bh * 2 + gap);
+        pauseBtnQuit.set(W / 2f - bw / 2, y0 + bh * 2 + gap * 2, W / 2f + bw / 2, y0 + bh * 3 + gap * 2);
+        drawMenuButton(cv, pauseBtnResume, "RESUME", C_CYAN, menuPress == 12, true);
+        drawMenuButton(cv, pauseBtnSet, "SETTINGS", C_BONE_DIM, menuPress == 13, true);
+        drawMenuButton(cv, pauseBtnQuit, "QUIT", C_EMBER, menuPress == 14, true);
+        paint.setTextAlign(Paint.Align.LEFT);
+    }
+
+    private boolean onPauseTouch(MotionEvent e) {
+        int act = e.getActionMasked();
+        if (act == MotionEvent.ACTION_DOWN) {
+            menuPress = 0;
+            if (pauseBtnResume.contains(e.getX(), e.getY())) menuPress = 12;
+            else if (pauseBtnSet.contains(e.getX(), e.getY())) menuPress = 13;
+            else if (pauseBtnQuit.contains(e.getX(), e.getY())) menuPress = 14;
+            return true;
+        }
+        if (act == MotionEvent.ACTION_UP) {
+            if (menuPress == 12 && pauseBtnResume.contains(e.getX(), e.getY())) {
+                paused = false;
+                sound.resumeAll();
+            }
+            if (menuPress == 13 && pauseBtnSet.contains(e.getX(), e.getY())) {
+                sound.play("ui");
+                pauseFromSettings = true;
+                state = STATE_SETTINGS;
+            }
+            if (menuPress == 14 && pauseBtnQuit.contains(e.getX(), e.getY())) {
+                paused = false;
+                pauseFromSettings = false;
+                story = null; storyMode = false; storyFight = false;
+                sound.stopAmbient();
+                sound.setFootsteps(false);
+                state = STATE_MENU;
+            }
+            menuPress = 0;
+            return true;
+        }
+        return true;
+    }
+
+    // Android back-button routing. Returns true if consumed.
+    public boolean onBack() {
+        if (state == STATE_SETTINGS) {
+            state = pauseFromSettings ? STATE_GAME : STATE_MENU;
+            pauseFromSettings = false;
+            return true;
+        }
+        if (paused) { paused = false; sound.resumeAll(); return true; }
+        if (state == STATE_GAME) { paused = true; sound.stopAll(); return true; }
+        return false;
     }
 
     private boolean onSelectTouch(MotionEvent e) {
@@ -2774,7 +2987,13 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         cv.translate(sx(pl.x + lx), by);
         if (pl.facing < 0) cv.scale(-1, 1);
         if (br != 0f) cv.scale(1f - 0.018f * br, 1f + 0.03f * br);
-        if (!h.hidden) {
+        // Script glide: use the glide sheet while the director moves her.
+        Frame[] glFrames = (pl == player && swActive && swGlide) ? heroGlide.get(voice) : null;
+        if (glFrames != null && glFrames.length > 0) {
+            int gi = (int) (loadT * 8f) % glFrames.length;
+            if (gi < 0) gi += glFrames.length;
+            drawFrame(cv, glFrames[gi], 255);
+        } else if (!h.hidden) {
             if (h.frameA != null) drawFrame(cv, h.frameA, 255);
             if (h.frameB != null && h.frameK > 0.02f)
                 drawFrame(cv, h.frameB, (int) (h.frameK * 255));
@@ -3186,6 +3405,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         }
 
         if (storyMode) sw().drawOver(cv, camX - shakeX, camY - shakeY, zoom + zoomPunch, W, H, quality, loadT);
+
+        if (paused) drawPauseOverlay(cv);
     }
 
     private void drawFog(Canvas cv) {
@@ -3237,8 +3458,8 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
             if (f == null || f.bmp == null || f.bmp.isRecycled()) continue;
             float px = sx(pr.x), py = sy(pr.y);
             if (px < -300 || px > W + 300 || py < -300 || py > H + 300) continue;
-            float h = TH * 1.9f * pr.scale;
-            float s = h / f.ref;
+            // Fixed world size: scale with zoom exactly like the gate prop.
+            float s = TH * 1.9f * pr.scale * zoom / f.ref;
             rf.set(px - f.bmp.getWidth() * s / 2f, py - f.bmp.getHeight() * s,
                    px + f.bmp.getWidth() * s / 2f, py);
             cv.drawBitmap(f.bmp, null, rf, paint);
@@ -3375,7 +3596,9 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
         if (state == STATE_MENU) return onMenuTouch(e);
         if (state == STATE_SELECT) return onSelectTouch(e);
         if (state == STATE_CHAPTER) return onChapterTouch(e);
+        if (state == STATE_SETTINGS) return onSettingsTouch(e);
         if (deadT > 0) return true;
+        if (paused) return onPauseTouch(e);
         // C5: input blocked during enemy phase, but panning allowed via the path below
         boolean enemyPhase = (phase != PH_PLAYER);
         if (storyMode && story != null && story.dialogUp) {
@@ -3816,6 +4039,7 @@ public class GameView extends SurfaceView implements Runnable, SurfaceHolder.Cal
 
     // E3: tiered haptics — 0 light, 1 medium, 2 heavy
     private void hapticTiered(int tier) {
+        if (!vibOn) return;
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 android.os.Vibrator v = (android.os.Vibrator)
