@@ -21,7 +21,7 @@ public final class SceneMap {
     public static final int MIN_Q = -32, MAX_Q = 96, MIN_R = -24, MAX_R = 24;
     public static final int W_Q = MAX_Q - MIN_Q + 1, W_R = MAX_R - MIN_R + 1;
 
-    // Room interior region (designer-tunable): floor box + north/south wall bands.
+    // Room interior region (designer-tunable): floor box the player walks on.
     public static final int ROOM_Q0 = 0, ROOM_Q1 = 10;
     public static final int ROOM_R0 = -20, ROOM_R1 = -14;
 
@@ -30,11 +30,11 @@ public final class SceneMap {
     private static final float[] UH = { 0, -0.6f, 0.866f, -0.3f, 0.866f, 0.3f, 0, 0.6f, -0.866f, 0.3f, -0.866f, -0.3f };
 
     private final boolean[] walkable = new boolean[W_Q * W_R];
-    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, tRoom, tWall, gGlow, pA, pB;
-    private volatile Shader[] shaders = new Shader[8];
+    private volatile Bitmap tAsh, tRoad, tCity, tCrater, tCliff, tBody, tRoom, tWall, tPlaza, gGlow, pA, pB;
+    private volatile Shader[] shaders = new Shader[9];
     private volatile Bitmap roadCell;
     private volatile Shader roadRep;
-    private final int[] cellW = new int[8], cellH = new int[8];
+    private final int[] cellW = new int[9], cellH = new int[9];
     private volatile boolean ready, disposed;
     private final boolean quality;
     private boolean craterVisible;
@@ -46,7 +46,7 @@ public final class SceneMap {
     private final Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Rect srcR = new Rect(), dstR = new Rect(), wallSrc = new Rect();
     private final float[] HW = new float[2];
-    private final Bitmap[] sheets = new Bitmap[8];
+    private final Bitmap[] sheets = new Bitmap[9];
     private final Path hexP = new Path();
     private final Path roadP = new Path();
     private final Matrix mS = new Matrix();
@@ -76,14 +76,15 @@ public final class SceneMap {
                     bd = flatten(dec(app, "map/cliffbody", true)),
                     rm = soften(flatten(dec(app, "map/room", true))),
                     wl = flatten(dec(app, "map/wall", true)),
+                    pl = soften(flatten(dec(app, "map/plaza", true))),
                     gl = dec(app, "map/glow", false),
                     pa = key(dec(app, "map/props_a", false)),
                     pb = key(dec(app, "map/props_b", false));
-            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(bd); recycle(rm); recycle(wl); recycle(gl); recycle(pa); recycle(pb); return; }
-            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; tBody = bd; tRoom = rm; tWall = wl; gGlow = gl; pA = pa; pB = pb;
-            Bitmap[] all = { a, ro, ci, cr, cl, bd, rm, wl };
-            Shader[] sh = new Shader[8];
-            for (int i = 0; i < 8; i++) if (all[i] != null) {
+            if (disposed) { recycle(a); recycle(ro); recycle(ci); recycle(cr); recycle(cl); recycle(bd); recycle(rm); recycle(wl); recycle(pl); recycle(gl); recycle(pa); recycle(pb); return; }
+            tAsh = a; tRoad = ro; tCity = ci; tCrater = cr; tCliff = cl; tBody = bd; tRoom = rm; tWall = wl; tPlaza = pl; gGlow = gl; pA = pa; pB = pb;
+            Bitmap[] all = { a, ro, ci, cr, cl, bd, rm, wl, pl };
+            Shader[] sh = new Shader[9];
+            for (int i = 0; i < 9; i++) if (all[i] != null) {
                 sh[i] = new BitmapShader(all[i], Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                 cellW[i] = all[i].getWidth() >> 2; cellH[i] = all[i].getHeight() >> 2;
             }
@@ -348,46 +349,85 @@ public final class SceneMap {
 
     private void computeHex(int i, int q, int r) {
         int h = h2(q, r, 7);
-        int ts = -1, ti = 0, rot = 0, body = 0, front = 0;
-        if (q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 1) {
-            if (roomOn) {
-                if (r >= ROOM_R0 && r <= ROOM_R1) {
-                    // room floor
-                    ts = 6; ti = (h >>> 4) & 15;
-                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
-                } else if (r == ROOM_R0 - 3) {
-                    // far (north) wall anchor — face drawn south of it, behind actors
-                    body = 2;
-                } else if (r == ROOM_R1 + 1) {
-                    // near (south) wall anchor — face drawn over actors (frames the room)
-                    ts = 6; ti = (h >>> 4) & 15;
-                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
-                    body = 2; front = 1;
-                }
+        int ts = -1, ti = (h >>> 4) & 15, rot = 0, body = 0, front = 0;
+        int grot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+        int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);
+
+        // ---- fortress room: upright wall-block ring around a floor slab ----
+        // Same structure renders inside (floor + walls) and outside (roof slab + facade).
+        if (q >= ROOM_Q0 - 1 && q <= ROOM_Q1 + 1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 2) {
+            if (r == ROOM_R0 - 1 || r == ROOM_R1 + 2) {
+                body = 2;                                  // north wall row / south wall row (upright blocks)
+                if (r == ROOM_R1 + 2) front = 1;           // south wall draws over actors
+            } else if ((q == ROOM_Q0 - 1 || q == ROOM_Q1 + 1) && r >= ROOM_R0 && r <= ROOM_R1) {
+                body = 2;                                  // east/west wall columns
+            } else if (q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 && r <= ROOM_R1) {
+                ts = 6; rot = grot;                        // floor slab (interior floor / exterior roof)
             } else {
-                // sealed from outside: the whole room reads as wall
-                ts = 7; ti = (h >>> 4) & 15;
-                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+                ts = 4; rot = grot;                        // rocky backdrop rows + south foundation strip
             }
         }
+
         if (ts < 0 && body == 0) {
             if (q <= 10) {
-                int rimRot = (((h >>> 12) & 1) * 3) | (((h >>> 14) & 1) << 3);
                 boolean westLip = q == MIN_Q - 1 && r >= -7 && r <= 15;
                 if (q < MIN_Q - 1 || r <= -13 || r >= 16) ts = -1;
-                else if (westLip) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
-                else if (r <= -5 && r >= -7) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; }
-                else if (r >= 13) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; body = 1; front = 1; }
+                else if (westLip) { ts = 4; rot = rimRot; body = 1; }
+                else if (r <= -5 && r >= -7) { ts = 4; rot = rimRot; body = 1; }
+                else if (r >= 13) { ts = 4; rot = rimRot; body = 1; front = 1; }
                 else if (q < MIN_Q) ts = -1;
-                else if (r <= -8) { ts = 4; ti = (h >>> 4) & 15; rot = rimRot; }
-                else { ts = 0; ti = (h >>> 4) & 15;
-                       rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3); }
+                else if (r <= -8) { ts = 4; rot = rimRot; }
+                else { ts = 0; rot = grot; }
             } else if (q <= 36) {
+                // winding canyon: trail floor, cliff walls hugging both flanks
                 float t = (q - 11) / 25f;
-                if (Math.abs(r - (2 - 7f * t)) <= 2.6f - 0.8f * t) {
-                    ts = 0; ti = (h >>> 4) & 15;
-                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+                float cc = 2f - 7f * t, hw = 2.6f - 0.8f * t;
+                if ((float) Math.abs(r - cc) <= hw) {
+                    ts = 0; rot = grot;                     // trail floor
+                } else {
+                    int eN = (int) Math.floor(cc - hw), eS = (int) Math.ceil(cc + hw);
+                    if (r >= eN - 2 && r <= eN) { ts = 4; rot = rimRot; body = 1; }
+                    else if (r >= eN - 7 && r < eN - 2) { ts = 4; rot = rimRot; }
+                    else if (r == eS) { ts = 4; rot = rimRot; body = 1; front = 1; }
                 }
+            } else if (q <= 60) {
+                // fallen city: cobble streets and avenues, masonry blocks, plaza, rubble scars
+                if (q <= 41 && r >= -7 && r <= -3) {
+                    ts = 2; rot = grot;                     // entry corridor - cobbles
+                } else if (r >= -6 && r <= 12) {
+                    if (insideRubble(q, r)) { ts = 3; rot = grot; }
+                    else if (insidePlaza(q, r)) { ts = 8; rot = grot; }
+                    else if (r % 5 == 0 || q % 6 == 0) { ts = 2; rot = grot; }
+                    else { ts = 5; rot = grot; }            // block masses - dark masonry
+                } else if (r >= -11 && r <= -7) {
+                    ts = 4; rot = rimRot;
+                    if (r >= -9 && r <= -8) body = 1;       // district north wall
+                } else if (r == 13) {
+                    ts = 4; rot = rimRot; body = 1; front = 1;   // district south crest
+                }
+            } else if (q <= 78) {
+                // bastion: walled masonry platform on the ring, cobble causeway, scarred wastes
+                float dx = (q - 66) / 10f, dy = (r - 4) / 8f;
+                float d2 = dx * dx + dy * dy;
+                boolean cause = r >= 2 && r <= 6;
+                if (d2 <= 1f || cause) {
+                    ts = (cause && d2 > 1f) ? 2 : 5; rot = grot;
+                } else if (d2 <= 1.5f) {
+                    ts = 4; rot = rimRot; body = 1;         // ring wall
+                    if (dy > 0.2f) front = 1;
+                } else {
+                    ts = ((h >>> 20) % 8 == 0) ? 3 : 0; rot = grot;
+                }
+            } else {
+                // east reach: ash band bookending the west, crater core and scarred approach
+                if (r >= -2 && r <= 10) {
+                    int dq = q - 88, dr = r - 4, dd = dq * dq + dr * dr;
+                    if (dd <= 2) { ts = 3; rot = grot; }
+                    else if (dd <= 12 && ((h >>> 20) % 3) == 0) { ts = 3; rot = grot; }
+                    else { ts = 0; rot = grot; }
+                } else if (r >= -5 && r <= -3) { ts = 4; rot = rimRot; body = 1; }
+                else if (r >= -8 && r <= -6) { ts = 4; rot = rimRot; }
+                else if (r == 11) { ts = 4; rot = rimRot; body = 1; front = 1; }
             }
         }
         tS[i] = ts; tI[i] = ti; tR[i] = rot; bB[i] = body; fF[i] = front; dI[i] = -1; pI[i] = -1; gI[i] = -1;
@@ -437,6 +477,20 @@ public final class SceneMap {
         c.restore();
     }
 
+    // Upright wall block: full art cell, axis-aligned, anchored at the hex ground point.
+    // No rotate, no mirror, no squash - wall art is blocks, not ground.
+    private void wallBlock(Canvas c, int ti, float cx, float cy, float zoom) {
+        Bitmap b = tWall;
+        if (b == null || b.isRecycled()) return;
+        int cw = cellW[7], ch = cellH[7];
+        if (cw <= 0 || ch <= 0) return;
+        float w = SQ3 * HEX * zoom * 1.02f;
+        float h = w * (ch / (float) cw);
+        wallSrc.set((ti & 3) * cw, (ti >> 2) * ch, (ti & 3) * cw + cw, (ti >> 2) * ch + ch);
+        dstR.set((int) (cx - w * 0.5f), (int) (cy - h), (int) (cx + w * 0.5f), (int) (cy));
+        c.drawBitmap(b, wallSrc, dstR, tp);
+    }
+
     public void draw(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
         float halfW = vw / (2f * zoom), halfH = vh / (2f * zoom);
         int r0 = (int) Math.floor((camY - halfH) / ROWY) - 1, r1 = (int) Math.floor((camY + halfH) / ROWY) + 1;
@@ -446,7 +500,7 @@ public final class SceneMap {
         boolean full = ready && n <= MAXT;
         lr0 = r0; lr1 = r1; lq0 = q0; lq1 = q1;
         sheets[0] = tAsh; sheets[1] = tRoad; sheets[2] = tCity; sheets[3] = tCrater;
-        sheets[4] = tCliff; sheets[5] = tBody; sheets[6] = tRoom; sheets[7] = tWall;
+        sheets[4] = tCliff; sheets[5] = tBody; sheets[6] = tRoom; sheets[7] = tWall; sheets[8] = tPlaza;
         if (full) {
             int i = 0;
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
@@ -459,7 +513,7 @@ public final class SceneMap {
         }
         float s = HEX * zoom * 1.07f;
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
-            if (roomOn && !(q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 1)) continue;
+            if (roomOn && !(q >= ROOM_Q0 - 1 && q <= ROOM_Q1 + 1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 2)) continue;
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
             int ts = full ? tS[i] : -1;
@@ -476,12 +530,16 @@ public final class SceneMap {
             if (!full || (bB[i] != 1 && bB[i] != 2) || fF[i] == 1) continue;
             if (roomOn && bB[i] != 2) continue;
             int ti = (h2(q, r, 7) >>> 4) & 15;
+            if (bB[i] == 2) {
+                hexToWorld(q, r, HW);
+                wallBlock(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, zoom);
+                continue;
+            }
             int dq = q < MIN_Q ? -1 : 0;
-            int bodySheet = bB[i] == 2 ? 7 : 5;
             hexToWorld(q + dq, r + 1, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, bodySheet);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, 5);
             hexToWorld(q + dq, r + 2, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, bodySheet);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, 5);
         }
         if (craterVisible && !roomOn) drawCrater(c, camX, camY, zoom, vw, vh);
     }
@@ -493,26 +551,28 @@ public final class SceneMap {
         for (int r = lr0; r <= lr1; r++) for (int q = lq0; q <= lq1; q++) {
             int i = (r - lr0) * w + (q - lq0);
             if (fF[i] != 1) continue;
+            if (roomOn && !(q >= ROOM_Q0 - 1 && q <= ROOM_Q1 + 1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 2)) continue;
             hexToWorld(q, r, HW);
+            float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
+            if (bB[i] == 2) { wallBlock(c, tI[i], cx, cy, zoom); continue; }
             int sheet = tS[i] >= 0 ? tS[i] : 4;
-            shaderHex(c, sheet, tI[i], tR[i], (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s);
+            shaderHex(c, sheet, tI[i], tR[i], cx, cy, s);
             int ti = (h2(q, r, 7) >>> 4) & 15;
             int dq = q < MIN_Q ? -1 : 0;
-            int bodySheet = bB[i] == 2 ? 7 : 5;
             hexToWorld(q + dq, r + 1, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, bodySheet);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, true, 5);
             hexToWorld(q + dq, r + 2, HW);
-            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, bodySheet);
+            wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, 5);
         }
     }
 
     private int fallback(float wx, float wy) {
         float hy = wy * 1.6666667f, qf = wx * 0.0060141f - hy * 0.0057870f, rf = hy * 0.0115741f;
         if (qf < 10.5f) return (rf < -12.5f || rf > 12.5f) ? 0xFF0c0b0e : 0xFF322d2b;
-        if (qf < 36.5f) return 0xFF3a332e;
-        if (qf < 60f) return 0xFF353136;
-        if (qf < 78.5f) return 0xFF7a7264;
-        return 0xFF1a2420;
+        if (qf < 36.5f) return 0xFF1a1715;
+        if (qf < 60f) return 0xFF131215;
+        if (qf < 78.5f) return 0xFF151210;
+        return 0xFF101214;
     }
 
     public void setCraterVisible(boolean v) { craterVisible = v; }
@@ -552,11 +612,11 @@ public final class SceneMap {
         ready = false;
         disposed = true;
         recycle(tAsh); recycle(tRoad); recycle(tCity); recycle(tCrater); recycle(tCliff);
-        recycle(tBody); recycle(tRoom); recycle(tWall); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
+        recycle(tBody); recycle(tRoom); recycle(tWall); recycle(tPlaza); recycle(gGlow); recycle(pA); recycle(pB); recycle(craterGlow);
         recycle(roadCell);
-        tAsh = tRoad = tCity = tCrater = tCliff = tBody = tRoom = tWall = gGlow = pA = pB = craterGlow = null;
+        tAsh = tRoad = tCity = tCrater = tCliff = tBody = tRoom = tWall = tPlaza = gGlow = pA = pB = craterGlow = null;
         roadCell = null; roadRep = null;
-        shaders = new Shader[8];
+        shaders = new Shader[9];
     }
     private static void recycle(Bitmap b) { if (b != null && !b.isRecycled()) b.recycle(); }
 }
