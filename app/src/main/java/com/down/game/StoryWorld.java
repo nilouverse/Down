@@ -299,34 +299,9 @@ public final class StoryWorld {
         return c != null ? c : 0;
     }
 
-    // Movement token parser shared by WALK/GLIDE:
+    // WALK/GLIDE token grammar (actor side):
     //   [dur | @speed] [via q r]... [after delaySec]
-    //   dur    — seconds (legacy fixed-duration)
-    //   @speed — hexes per second (march mode); actors only
-    //   via    — intermediate waypoints (repeatable, up to 8)
-    //   after  — start delay in seconds (stagger)
-    private static float[] parseMove(String[] p) {
-        float[] out = new float[3];   // { dur, speed, delay } — dur/speed 0 = unset
-        int start = 4;
-        if (p.length > 4) {
-            String t0 = p[4];
-            if (t0.startsWith("@")) {
-                try { out[1] = Float.parseFloat(t0.substring(1)); } catch (Exception e) { out[1] = 0f; }
-                start = 5;
-            } else {
-                try { out[0] = Float.parseFloat(t0); start = 5; } catch (Exception e) { out[0] = 0f; }
-            }
-        }
-        for (int k = start; k < p.length; k++) {
-            if ("after".equals(p[k]) && k + 1 < p.length) {
-                try { out[2] = Float.parseFloat(p[k + 1]); } catch (Exception e) { out[2] = 0f; }
-                k++;
-            }
-        }
-        return out;
-    }
-
-    private static int[] moveVqs = new int[8], moveVrs = new int[8];
+    private static final int[] moveVqs = new int[8], moveVrs = new int[8];
 
     private void exec(String cmd) {
         if (cmd.startsWith("SAY ")) {
@@ -437,7 +412,10 @@ public final class StoryWorld {
             if (gv != null) gv.shTeleport(pt[0], pt[1]);
         } else if (cmd.startsWith("ZOOM ")) {
             String[] p = cmd.split(" ");
-            if (gv != null) gv.scriptZoom(pf(p[1]), p.length > 2 ? pi(p[2]) : 600);
+            int ms = p.length > 2 ? pi(p[2]) : 600;
+            if (gv != null) gv.scriptZoom(pf(p[1]), ms);
+            // Hold the script while the zoom settles (ms = its duration).
+            if (ms > 0) waitT = ms / 1000f;
         } else if (cmd.startsWith("SFX_LOOP ")) {
             String[] p = cmd.split(" ");
             try { snd.playLoopTimed(p[1], p.length > 2 ? pf(p[2]) : 3f); } catch (Exception e) {}
@@ -596,7 +574,8 @@ public final class StoryWorld {
     public boolean encounterLive() { return encounterLive; }
     public boolean isVictory() { return victory; }
     public boolean flag(String f) {
-        Boolean b = flags.get(f); return b != null && b != null && b.booleanValue();
+        Boolean b = flags.get(f);
+        return b != null && b;
     }
     public void setFlag(String f) {
         flags.put(f, Boolean.TRUE);
