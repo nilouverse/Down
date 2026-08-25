@@ -349,19 +349,25 @@ public final class SceneMap {
     private void computeHex(int i, int q, int r) {
         int h = h2(q, r, 7);
         int ts = -1, ti = 0, rot = 0, body = 0, front = 0;
-        if (q >= ROOM_Q0 && q <= ROOM_Q1) {
-            if (r >= ROOM_R0 && r <= ROOM_R1) {
-                // room floor
-                ts = 6; ti = (h >>> 4) & 15;
+        if (q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 1) {
+            if (roomOn) {
+                if (r >= ROOM_R0 && r <= ROOM_R1) {
+                    // room floor
+                    ts = 6; ti = (h >>> 4) & 15;
+                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+                } else if (r == ROOM_R0 - 3) {
+                    // far (north) wall anchor — face drawn south of it, behind actors
+                    body = 2;
+                } else if (r == ROOM_R1 + 1) {
+                    // near (south) wall anchor — face drawn over actors (frames the room)
+                    ts = 6; ti = (h >>> 4) & 15;
+                    rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
+                    body = 2; front = 1;
+                }
+            } else {
+                // sealed from outside: the whole room reads as wall
+                ts = 7; ti = (h >>> 4) & 15;
                 rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
-            } else if (r == ROOM_R0 - 3) {
-                // far (north) wall anchor — wall face drawn south of it, behind actors
-                body = 2;
-            } else if (r == ROOM_R1 + 1) {
-                // near (south) wall anchor — wall face drawn over actors (frames the room)
-                ts = 6; ti = (h >>> 4) & 15;
-                rot = (int) ((h >>> 12) % 6) | (((h >>> 14) & 1) << 3);
-                body = 2; front = 1;
             }
         }
         if (ts < 0 && body == 0) {
@@ -445,8 +451,15 @@ public final class SceneMap {
             int i = 0;
             for (int r = r0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) computeHex(i, q, r);
         }
+        // Inside the room the world outside it is black.
+        if (roomOn) {
+            tp.setColor(0xFF000000);
+            tp.setStyle(Paint.Style.FILL);
+            c.drawRect(0, 0, vw, vh, tp);
+        }
         float s = HEX * zoom * 1.07f;
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
+            if (roomOn && !(q >= ROOM_Q0 && q <= ROOM_Q1 && r >= ROOM_R0 - 3 && r <= ROOM_R1 + 1)) continue;
             hexToWorld(q, r, HW);
             float cx = (HW[0] - camX) * zoom + vw * 0.5f, cy = (HW[1] - camY) * zoom + vh * 0.5f;
             int ts = full ? tS[i] : -1;
@@ -458,9 +471,10 @@ public final class SceneMap {
             }
             shaderHex(c, ts, tI[i], tR[i], cx, cy, s);
         }
-        drawRoad(c, camX, camY, zoom, vw, vh);
+        if (!roomOn) drawRoad(c, camX, camY, zoom, vw, vh);
         for (int r = r0, i = 0; r <= r1; r++) for (int q = q0; q <= q1; q++, i++) {
             if (!full || (bB[i] != 1 && bB[i] != 2) || fF[i] == 1) continue;
+            if (roomOn && bB[i] != 2) continue;
             int ti = (h2(q, r, 7) >>> 4) & 15;
             int dq = q < MIN_Q ? -1 : 0;
             int bodySheet = bB[i] == 2 ? 7 : 5;
@@ -469,7 +483,7 @@ public final class SceneMap {
             hexToWorld(q + dq, r + 2, HW);
             wallHex(c, ti, (HW[0] - camX) * zoom + vw * 0.5f, (HW[1] - camY) * zoom + vh * 0.5f, s, false, bodySheet);
         }
-        if (craterVisible) drawCrater(c, camX, camY, zoom, vw, vh);
+        if (craterVisible && !roomOn) drawCrater(c, camX, camY, zoom, vw, vh);
     }
 
     public void drawFront(Canvas c, float camX, float camY, float zoom, int vw, int vh) {
